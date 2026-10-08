@@ -1,0 +1,28 @@
+[workspace]
+resolver = "3"
+members = ["crates/routy-core", "crates/routy-cli", "app/src-tauri"]
+
+[workspace.package]
+# Единый источник версии: CLI, core и desktop-приложение (tauri.conf.json берёт её из Cargo.toml).
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+repository = "https://github.com/1rowvy/routy"
+rust-version = "1.85"
+
+[workspace.dependencies]
+routy-core = { path = "crates/routy-core" }
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+dirs = "6"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "gzip", "brotli"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+toml = "0.9"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true

@@ -1,0 +1,25 @@
+[package]
+name = "routy-core"
+description = "Routy core: .http file format, variables, environments, request execution"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[features]
+default = ["secrets"]
+# Хранение секретов в системном хранилище паролей (Keychain / Credential Manager / Secret Service).
+secrets = ["dep:keyring"]
+
+[dependencies]
+dirs.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+toml.workspace = true
+keyring = { version = "3", optional = true, features = ["apple-native", "windows-native", "sync-secret-service", "crypto-rust"] }
+
+[dev-dependencies]
+tokio.workspace = true

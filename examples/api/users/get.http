@@ -1,0 +1,5 @@
+GET {{base}}/anything/users/42
+Accept: application/json
+
+> assert status == 200
+> assert body.url contains /users/42

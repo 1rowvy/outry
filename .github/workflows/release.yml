@@ -1,0 +1,173 @@
+# Релиз: поднять версию (scripts/release.sh X.Y.Z), закоммитить, запушить тег vX.Y.Z.
+# Workflow соберёт десктоп-приложение под macOS/Linux/Windows и CLI под 5 таргетов,
+# подпишет артефакты обновлений и опубликует релиз вместе с latest.json для автообновления.
+#
+# Секреты репозитория:
+#   TAURI_SIGNING_PRIVATE_KEY            — содержимое ~/.tauri/routy.key
+#   TAURI_SIGNING_PRIVATE_KEY_PASSWORD   — пароль ключа (пустой, если без пароля)
+#   (опционально, macOS) APPLE_CERTIFICATE, APPLE_CERTIFICATE_PASSWORD, APPLE_SIGNING_IDENTITY,
+#                        APPLE_ID, APPLE_PASSWORD, APPLE_TEAM_ID — подпись и нотаризация
+
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Существующий тег, например v0.2.0"
+        required: true
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+  TAG: ${{ inputs.tag || github.ref_name }}
+
+jobs:
+  create-release:
+    runs-on: ubuntu-latest
+    outputs:
+      release_id: ${{ steps.release.outputs.id }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+      - name: Тег совпадает с версией в Cargo.toml и package.json
+        run: |
+          cargo_version=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "routy-app") | .version')
+          npm_version=$(jq -r .version app/package.json)
+          echo "tag=$TAG cargo=$cargo_version npm=$npm_version"
+          [ "$TAG" = "v$cargo_version" ] || { echo "::error::tag $TAG != Cargo.toml v$cargo_version"; exit 1; }
+          [ "$npm_version" = "$cargo_version" ] || { echo "::error::app/package.json $npm_version != $cargo_version"; exit 1; }
+      - name: Черновик релиза
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" --draft --title "Routy ${TAG#v}" --generate-notes --verify-tag
+          fi
+          echo "id=$(gh api repos/${{ github.repository }}/releases --jq ".[] | select(.tag_name == \"$TAG\") | .id")" >> "$GITHUB_OUTPUT"
+
+  app:
+    needs: create-release
+    name: app (${{ matrix.name }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS arm64
+            os: macos-latest
+            target: aarch64-apple-darwin
+          - name: macOS x64
+            os: macos-latest
+            target: x86_64-apple-darwin
+          - name: Linux x64
+            os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+          - name: Windows x64
+            os: windows-latest
+            target: x86_64-pc-windows-msvc
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+      - name: Linux deps
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev libdbus-1-dev patchelf
+      - run: npm ci
+        working-directory: app
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # Раскомментировать, когда появится Apple Developer ID:
+          # APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          # APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          # APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          # APPLE_ID: ${{ secrets.APPLE_ID }}
+          # APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          # APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        with:
+          projectPath: app
+          releaseId: ${{ needs.create-release.outputs.release_id }}
+          args: --target ${{ matrix.target }}
+          # latest.json собирается из всех платформ матрицы — по нему работает автообновление.
+          includeUpdaterJson: true
+          updaterJsonPreferNsis: true
+
+  cli:
+    needs: create-release
+    name: cli (${{ matrix.target }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-22.04, target: x86_64-unknown-linux-gnu }
+          - { os: ubuntu-22.04-arm, target: aarch64-unknown-linux-gnu }
+          - { os: macos-latest, target: aarch64-apple-darwin }
+          - { os: macos-latest, target: x86_64-apple-darwin }
+          - { os: windows-latest, target: x86_64-pc-windows-msvc }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: cli-${{ matrix.target }}
+      - name: Linux deps
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libdbus-1-dev pkg-config
+      - run: cargo build --release --locked -p routy-cli --target ${{ matrix.target }}
+      - name: Упаковать и загрузить
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          name="routy-cli-${TAG}-${{ matrix.target }}"
+          dir="target/${{ matrix.target }}/release"
+          mkdir -p "dist/$name"
+          cp README.md "dist/$name/"
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            cp "$dir/routy.exe" "dist/$name/"
+            (cd dist && 7z a "$name.zip" "$name" >/dev/null)
+            asset="dist/$name.zip"
+          else
+            cp "$dir/routy" "dist/$name/"
+            tar -C dist -czf "dist/$name.tar.gz" "$name"
+            asset="dist/$name.tar.gz"
+          fi
+          gh release upload "$TAG" "$asset" --clobber
+
+  publish:
+    needs: [create-release, app, cli]
+    runs-on: ubuntu-latest
+    steps:
+      # Пока релиз черновик, releases/latest/download/latest.json его не видит —
+      # приложения начинают обновляться только после публикации.
+      - name: Опубликовать релиз
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release edit "$TAG" --draft=false --latest --repo ${{ github.repository }}

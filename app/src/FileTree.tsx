@@ -1,0 +1,68 @@
+import { useMemo } from "react";
+
+interface Node {
+  name: string;
+  path: string;
+  children: Node[];
+  isFile: boolean;
+}
+
+function buildTree(files: string[]): Node[] {
+  const root: Node = { name: "", path: "", children: [], isFile: false };
+  for (const file of files) {
+    let cur = root;
+    const parts = file.split("/");
+    parts.forEach((part, i) => {
+      const isFile = i === parts.length - 1;
+      let next = cur.children.find((c) => c.name === part && c.isFile === isFile);
+      if (!next) {
+        next = { name: part, path: parts.slice(0, i + 1).join("/"), children: [], isFile };
+        cur.children.push(next);
+      }
+      cur = next;
+    });
+  }
+  const sort = (nodes: Node[]) => {
+    nodes.sort((a, b) => Number(a.isFile) - Number(b.isFile) || a.name.localeCompare(b.name));
+    nodes.forEach((n) => sort(n.children));
+  };
+  sort(root.children);
+  return root.children;
+}
+
+export function FileTree(props: { files: string[]; selected: string | null; onSelect: (path: string) => void }) {
+  const tree = useMemo(() => buildTree(props.files), [props.files]);
+  if (props.files.length === 0) {
+    return <p className="muted pad">Нет *.http файлов</p>;
+  }
+  return <ul className="tree">{tree.map((n) => <TreeNode key={n.path} node={n} {...props} />)}</ul>;
+}
+
+function TreeNode(props: { node: Node; selected: string | null; onSelect: (path: string) => void }) {
+  const { node } = props;
+  if (node.isFile) {
+    return (
+      <li>
+        <button
+          className={"tree-file" + (props.selected === node.path ? " active" : "")}
+          onClick={() => props.onSelect(node.path)}
+          title={node.path}
+        >
+          {node.name.replace(/\.http$/, "")}
+        </button>
+      </li>
+    );
+  }
+  return (
+    <li>
+      <details open>
+        <summary>{node.name}</summary>
+        <ul className="tree">
+          {node.children.map((c) => (
+            <TreeNode key={c.path} {...props} node={c} />
+          ))}
+        </ul>
+      </details>
+    </li>
+  );
+}

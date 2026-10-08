@@ -1,0 +1,7 @@
+# Использует token, сохранённый предыдущим запросом.
+GET {{base}}/bearer
+Authorization: Bearer {{token}}
+
+> assert status == 200
+> assert body.authenticated == true
+> assert body.token == demo-token

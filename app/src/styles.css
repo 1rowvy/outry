@@ -1,0 +1,123 @@
+:root {
+  --bg: #f7f7f8;
+  --panel: #ffffff;
+  --border: #e2e3e7;
+  --text: #1c1d21;
+  --muted: #6b6f7b;
+  --accent: #1f9d63;
+  --accent-text: #ffffff;
+  --bad: #d23f3f;
+  --ok: #1f9d63;
+  --hover: #eef0f3;
+  --mono: ui-monospace, "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #16181d;
+    --panel: #1d2026;
+    --border: #2c3038;
+    --text: #e6e7ea;
+    --muted: #8b909c;
+    --accent: #7ee0a8;
+    --accent-text: #10241a;
+    --bad: #ff7b7b;
+    --ok: #7ee0a8;
+    --hover: #262a31;
+    color-scheme: dark;
+  }
+}
+
+* { box-sizing: border-box; }
+html, body, #root { height: 100%; margin: 0; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font: 13px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+code, pre, textarea { font-family: var(--mono); font-size: 12.5px; }
+pre { margin: 0; white-space: pre-wrap; word-break: break-word; }
+
+button, select, input {
+  font: inherit;
+  color: inherit;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 10px;
+}
+button { cursor: pointer; }
+button:hover:not(:disabled) { background: var(--hover); }
+button:disabled { opacity: 0.5; cursor: default; }
+button.primary { background: var(--accent); color: var(--accent-text); border-color: transparent; font-weight: 600; }
+button.small { padding: 1px 8px; font-size: 12px; }
+
+.muted { color: var(--muted); }
+.pad { padding: 16px; }
+.spacer { flex: 1; }
+.ok { color: var(--ok); }
+.bad { color: var(--bad); }
+
+.app { display: flex; flex-direction: column; height: 100%; }
+
+.topbar {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 12px; border-bottom: 1px solid var(--border); background: var(--panel);
+}
+.logo { margin-right: 8px; }
+.inline-form { display: flex; gap: 6px; }
+.inline-form input { width: 140px; }
+
+.update-banner { display: flex; align-items: center; gap: 8px; }
+
+.error-bar, .send-error, .parse-error {
+  color: var(--bad); font-family: var(--mono); font-size: 12px; white-space: pre-wrap;
+}
+.error-bar { padding: 6px 12px; border-bottom: 1px solid var(--border); cursor: pointer; }
+.send-error { padding: 12px; }
+.parse-error { padding: 6px 12px; border-top: 1px solid var(--border); }
+
+.empty { margin: auto; text-align: center; }
+
+.layout {
+  flex: 1; min-height: 0;
+  display: grid; grid-template-columns: 240px minmax(0, 1fr) minmax(0, 1fr);
+}
+.sidebar, .editor { border-right: 1px solid var(--border); }
+.sidebar { overflow: auto; background: var(--panel); }
+.sidebar-head { display: flex; justify-content: space-between; align-items: center; padding: 8px 10px; }
+.new-request { padding: 0 10px 8px; }
+.new-request input { width: 100%; }
+
+.tree { list-style: none; margin: 0; padding-left: 12px; }
+.sidebar > .tree { padding-left: 6px; }
+.tree summary { cursor: pointer; padding: 2px 4px; color: var(--muted); }
+.tree-file {
+  display: block; width: 100%; text-align: left; border: 0; background: none;
+  padding: 2px 6px; border-radius: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.tree-file.active { background: var(--hover); font-weight: 600; }
+
+.editor, .result { display: flex; flex-direction: column; min-height: 0; }
+.editor-head { display: flex; align-items: center; gap: 6px; padding: 6px 10px; border-bottom: 1px solid var(--border); }
+.dirty { color: var(--accent); }
+.editor textarea {
+  flex: 1; resize: none; border: 0; outline: none; padding: 12px;
+  background: var(--bg); color: var(--text); tab-size: 2;
+}
+
+.response { display: flex; flex-direction: column; min-height: 0; flex: 1; }
+.response-meta { display: flex; gap: 12px; align-items: baseline; padding: 8px 12px; border-bottom: 1px solid var(--border); }
+.status { font-weight: 700; }
+.status.ok { color: var(--ok); }
+.status.bad { color: var(--bad); }
+.tabs { display: flex; gap: 2px; padding: 4px 8px; border-bottom: 1px solid var(--border); }
+.tabs button { border: 0; background: none; color: var(--muted); }
+.tabs button.active { color: var(--text); background: var(--hover); }
+.tab-body { flex: 1; overflow: auto; padding: 12px; }
+.tests { list-style: none; margin: 0; padding: 0; font-family: var(--mono); }
+.tests li { padding: 2px 0; }
+.headers { border-collapse: collapse; font-family: var(--mono); font-size: 12px; }
+.headers td { padding: 2px 12px 2px 0; vertical-align: top; }
+.headers td:first-child { color: var(--muted); white-space: nowrap; }

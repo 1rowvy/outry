@@ -1,0 +1,7 @@
+# Логин: httpbin возвращает тело запроса в поле `json`.
+POST {{base}}/anything/login
+
+{"user": "{{user}}", "access_token": "demo-token"}
+
+> save token = body.json.access_token
+> assert status == 200

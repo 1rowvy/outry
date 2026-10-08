@@ -1,0 +1,271 @@
+import { useCallback, useEffect, useRef, useState } from "react";
+import { listen } from "@tauri-apps/api/event";
+import { open } from "@tauri-apps/plugin-dialog";
+import { api, type ParseError, type ProjectInfo, type RunOutcome } from "./api";
+import { FileTree } from "./FileTree";
+import { ResponseView } from "./ResponseView";
+import { UpdateBanner } from "./UpdateBanner";
+
+const LAST_PROJECT_KEY = "routy.lastProject";
+const NEW_REQUEST = "GET {{base}}/\n\n> assert status == 200\n";
+
+function storage(key: string, value?: string | null): string | null {
+  try {
+    if (value === undefined) return localStorage.getItem(key);
+    if (value === null) localStorage.removeItem(key);
+    else localStorage.setItem(key, value);
+  } catch {
+    // localStorage может быть недоступен — это только удобство.
+  }
+  return null;
+}
+
+export default function App() {
+  const [project, setProject] = useState<ProjectInfo | null>(null);
+  const [env, setEnv] = useState<string | null>(null);
+  const [selected, setSelected] = useState<string | null>(null);
+  const [content, setContent] = useState("");
+  const [savedContent, setSavedContent] = useState("");
+  const [parseError, setParseError] = useState<ParseError | null>(null);
+  const [outcome, setOutcome] = useState<RunOutcome | null>(null);
+  const [sendError, setSendError] = useState<string | null>(null);
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [newPath, setNewPath] = useState<string | null>(null);
+  const [secretForm, setSecretForm] = useState<{ name: string; value: string } | null>(null);
+
+  const dirty = content !== savedContent;
+  // Для обработчика событий файловой системы нужны актуальные значения без переподписки.
+  const live = useRef({ selected, dirty });
+  live.current = { selected, dirty };
+
+  const openProject = useCallback(async (dir: string) => {
+    try {
+      const info = await api.openProject(dir);
+      setProject(info);
+      setEnv(info.default_env);
+      setSelected(null);
+      setContent("");
+      setSavedContent("");
+      setOutcome(null);
+      setError(null);
+      storage(LAST_PROJECT_KEY, dir);
+    } catch (e) {
+      setError(String(e));
+    }
+  }, []);
+
+  useEffect(() => {
+    const last = storage(LAST_PROJECT_KEY);
+    if (last) openProject(last);
+  }, [openProject]);
+
+  // Правки в редакторе снаружи (VS Code, git pull) сразу видны в GUI.
+  useEffect(() => {
+    let timer: number | undefined;
+    const changed = new Set<string>();
+    const unlisten = listen<string[]>("project-changed", (ev) => {
+      ev.payload.forEach((p) => changed.add(p));
+      clearTimeout(timer);
+      timer = window.setTimeout(async () => {
+        const paths = [...changed];
+        changed.clear();
+        try {
+          const info = await api.refreshProject();
+          setProject(info);
+          setEnv((cur) => (cur && info.envs.includes(cur) ? cur : info.default_env));
+          const { selected, dirty } = live.current;
+          if (selected && !dirty && paths.includes(selected) && info.files.includes(selected)) {
+            const text = await api.readRequest(selected);
+            setContent(text);
+            setSavedContent(text);
+          }
+        } catch (e) {
+          setError(String(e));
+        }
+      }, 200);
+    });
+    return () => {
+      clearTimeout(timer);
+      unlisten.then((f) => f());
+    };
+  }, []);
+
+  // Проверка синтаксиса на лету.
+  useEffect(() => {
+    if (!selected) return;
+    const t = window.setTimeout(() => api.checkRequest(content).then(setParseError), 150);
+    return () => clearTimeout(t);
+  }, [content, selected]);
+
+  const select = async (path: string) => {
+    if (dirty && !window.confirm("Есть несохранённые изменения. Открыть другой файл?")) return;
+    try {
+      const text = await api.readRequest(path);
+      setSelected(path);
+      setContent(text);
+      setSavedContent(text);
+      setOutcome(null);
+      setSendError(null);
+    } catch (e) {
+      setError(String(e));
+    }
+  };
+
+  const save = useCallback(async () => {
+    if (!selected) return;
+    try {
+      await api.writeRequest(selected, content);
+      setSavedContent(content);
+    } catch (e) {
+      setError(String(e));
+    }
+  }, [selected, content]);
+
+  const send = useCallback(async () => {
+    if (!selected || sending) return;
+    setSending(true);
+    setSendError(null);
+    try {
+      setOutcome(await api.sendRequest(env, content));
+    } catch (e) {
+      setOutcome(null);
+      setSendError(String(e));
+    } finally {
+      setSending(false);
+    }
+  }, [selected, sending, env, content]);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const mod = e.ctrlKey || e.metaKey;
+      if (mod && e.key === "Enter") {
+        e.preventDefault();
+        send();
+      } else if (mod && e.key.toLowerCase() === "s") {
+        e.preventDefault();
+        save();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [send, save]);
+
+  const pickFolder = async () => {
+    const dir = await open({ directory: true, title: "Каталог проекта (с api/env.toml)" });
+    if (typeof dir === "string") openProject(dir);
+  };
+
+  const createRequest = async () => {
+    if (!newPath) return;
+    const path = newPath.trim().replace(/^\/+/, "").replace(/(\.http)?$/, ".http");
+    try {
+      await api.writeRequest(path, NEW_REQUEST);
+      setNewPath(null);
+      setProject(await api.refreshProject());
+      await select(path);
+    } catch (e) {
+      setError(String(e));
+    }
+  };
+
+  const saveSecret = async () => {
+    if (!secretForm?.name || !secretForm.value) return;
+    try {
+      await api.setSecret(env, secretForm.name.trim(), secretForm.value);
+      setSecretForm(null);
+    } catch (e) {
+      setError(String(e));
+    }
+  };
+
+  return (
+    <div className="app">
+      <header className="topbar">
+        <strong className="logo">Routy</strong>
+        <button onClick={pickFolder}>{project ? project.id : "Открыть проект"}</button>
+        {project && project.envs.length > 0 && (
+          <select value={env ?? ""} onChange={(e) => setEnv(e.target.value)} title="Окружение">
+            {project.envs.map((e) => (
+              <option key={e}>{e}</option>
+            ))}
+          </select>
+        )}
+        {project && (
+          <button onClick={() => setSecretForm(secretForm ? null : { name: "", value: "" })} title="Секреты хранятся в системном хранилище паролей">
+            Секрет
+          </button>
+        )}
+        {secretForm && (
+          <form className="inline-form" onSubmit={(e) => (e.preventDefault(), saveSecret())}>
+            <input placeholder="имя" value={secretForm.name} onChange={(e) => setSecretForm({ ...secretForm, name: e.target.value })} autoFocus />
+            <input placeholder="значение" type="password" value={secretForm.value} onChange={(e) => setSecretForm({ ...secretForm, value: e.target.value })} />
+            <button type="submit">Сохранить для {env ?? "default"}</button>
+          </form>
+        )}
+        <span className="spacer" />
+        <UpdateBanner />
+      </header>
+
+      {error && (
+        <div className="error-bar" onClick={() => setError(null)}>
+          {error}
+        </div>
+      )}
+
+      {!project ? (
+        <div className="empty">
+          <p>Откройте каталог проекта — Routy найдёт <code>api/env.toml</code> и все <code>*.http</code> файлы.</p>
+          <button onClick={pickFolder}>Открыть проект</button>
+        </div>
+      ) : (
+        <main className="layout">
+          <aside className="sidebar">
+            <div className="sidebar-head">
+              <span className="muted" title={project.root}>api</span>
+              <button className="small" onClick={() => setNewPath(newPath === null ? "" : null)}>+ запрос</button>
+            </div>
+            {newPath !== null && (
+              <form className="new-request" onSubmit={(e) => (e.preventDefault(), createRequest())}>
+                <input placeholder="users/create" value={newPath} onChange={(e) => setNewPath(e.target.value)} autoFocus />
+              </form>
+            )}
+            <FileTree files={project.files} selected={selected} onSelect={select} />
+          </aside>
+
+          <section className="editor">
+            {selected ? (
+              <>
+                <div className="editor-head">
+                  <span>
+                    {selected}
+                    {dirty && <span className="dirty"> ●</span>}
+                  </span>
+                  <span className="spacer" />
+                  <button onClick={save} disabled={!dirty} title="Ctrl+S">Сохранить</button>
+                  <button className="primary" onClick={send} disabled={sending || !!parseError} title="Ctrl+Enter">
+                    {sending ? "…" : "Отправить"}
+                  </button>
+                </div>
+                <textarea value={content} onChange={(e) => setContent(e.target.value)} spellCheck={false} />
+                {parseError && (
+                  <div className="parse-error">
+                    {parseError.line !== null && `строка ${parseError.line}: `}
+                    {parseError.message}
+                  </div>
+                )}
+              </>
+            ) : (
+              <p className="muted pad">Выберите запрос слева</p>
+            )}
+          </section>
+
+          <section className="result">
+            {sendError && <div className="send-error">{sendError}</div>}
+            {outcome ? <ResponseView outcome={outcome} /> : !sendError && <p className="muted pad">Ответ появится здесь</p>}
+          </section>
+        </main>
+      )}
+    </div>
+  );
+}
