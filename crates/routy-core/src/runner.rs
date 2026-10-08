@@ -86,6 +86,9 @@ pub struct RunOutcome {
     pub asserts: Vec<AssertOutcome>,
     /// `> save`, для которых в ответе не нашлось значения.
     pub save_misses: Vec<String>,
+    /// Запросы, вызванные из `*.routy` по ходу этого запроса.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub calls: Vec<crate::lang::exec::CallTrace>,
 }
 
 impl RunOutcome {
@@ -248,6 +251,7 @@ impl Runner {
             saved,
             asserts,
             save_misses,
+            calls: Vec::new(),
         }
     }
 
@@ -281,7 +285,11 @@ pub async fn send(client: &reqwest::Client, req: &ResolvedRequest) -> Result<Res
     }
 
     let started = Instant::now();
-    let resp = builder.send().await?;
+    read_response(builder.send().await?, started).await
+}
+
+/// Ответ целиком; `started` — момент отправки, для `duration_ms`.
+pub(crate) async fn read_response(resp: reqwest::Response, started: Instant) -> Result<Response> {
     let status = resp.status();
     let headers = resp
         .headers()

@@ -1,18 +1,20 @@
 ---
-title: .routy format (draft)
+title: .routy format
 description: Specification of the planned .routy request format — syntax, expressions, request calls and flows.
 sidebar:
   badge:
-    text: Draft
+    text: In progress
     variant: caution
 ---
 
 import { Aside } from '@astrojs/starlight/components';
 
-<Aside type="caution" title="Not implemented yet">
-This is the design of the next request format. Routy does not read `*.routy` files yet — today's
-format is described in [Request file format](/routy/guides/request-format/). The spec may change;
-discussion happens in [GitHub issues](https://github.com/1rowvy/routy/issues).
+<Aside type="caution" title="In progress">
+This is the next request format. `routy run` and `routy check` already read `*.routy`: requests,
+expressions, checks, shapes, `save`, calls with the run cache, flows, polling and cookies. Not yet:
+`cache:` between runs, `multipart`, `schema()`, `routy fmt`, `routy convert`, the app and
+`routy import`. Today's format is described in [Request file format](/routy/guides/request-format/).
+Discussion happens in [GitHub issues](https://github.com/1rowvy/routy/issues).
 </Aside>
 
 ## Goals
@@ -225,11 +227,15 @@ After the response arrives (in `expect`, `save`, `poll`) these are also defined:
 | `headers` | Response headers; names are case-insensitive: `headers.content-type`, `headers["X-Id"]` |
 | `body` | Parsed JSON, or the text if the body is not JSON |
 | `duration` | Time to the full response, milliseconds |
+| `cookies` | Cookies of the run's jar for this request's URL: `cookies.session` — see [Cookies](#cookies) |
 
 ### Access
 
 `a.b`, `a["b"]`, `a[0]`, `a[-1]` (from the end). Reading a missing field or index gives `null`
 instead of an error, so `body.user.address.city == null` is safe and `body.id != null` means "exists".
+
+After `.` a name may contain dashes, as header names do: `headers.content-type`. Write subtraction with
+spaces: `body.total - 1`.
 
 ### Operators
 
@@ -426,9 +432,26 @@ the same response. Ten requests calling `Login()` log in once.
 - `fresh Login()` always sends a new request.
 - A run is one `routy run` in the CLI, and in the app — until the environment is switched or the cache
   is cleared from the variables panel.
-- `cache: 30m` on the callee keeps its response between runs (in the state directory, outside the
-  repo): a login token survives restarts until it expires. A `401` from a request that used a cached
+- `cache: 30m` on the callee keeps its response between runs (in the same state file as saved
+  values, outside the repo): a login token survives restarts until it expires. A `401` from a request that used a cached
   value does not retry automatically; use `fresh` where that matters.
+
+## Cookies
+
+Each run has a cookie jar, like a browser: `Set-Cookie` from a response is stored and sent with later
+requests to the same domain and path, including requests made by [calls](#calling-requests). A session
+login works without saving anything by hand. The jar lives as long as the call cache: one `routy run`,
+or in the app until the environment is switched.
+
+After the response, `cookies` holds the jar's cookies for the request's URL:
+
+```routy
+expect {
+  cookies.session != null
+}
+```
+
+A `Cookie` header in `headers` is sent as written, in addition to the jar's cookies.
 
 ## Polling
 
@@ -567,6 +590,10 @@ routy import go ./cmd/server --check  # what changed in code, exit code ≠ 0
 routy import go ./cmd/server --fix    # apply the fixable changes
 ```
 
+Running a file or a directory runs every request in it, including ones that mostly exist to be
+called (`Login`, `CreateUser`); the [call cache](#caching) makes sure a shared `Login()` is still sent
+once. To run a scenario only, run the flow by name.
+
 ## Formatting
 
 `routy fmt` produces one canonical form, like `gofmt`:
@@ -596,12 +623,3 @@ routy import go ./cmd/server --fix    # apply the fixable changes
 | `> assert body.tags contains "a"` | `body.tags.contains("a")` |
 | `# comment` above the request | `// comment` — the first line becomes the name |
 | `{{$uuid}}`, `{{$timestamp}}`, `{{$randomInt 1 10}}` | `uuid()`, `now()`, `randomInt(1, 10)` |
-
-## Open questions
-
-- Should `routy run <dir>` skip requests that exist only to be called (e.g. `CreateUser`)? Options: a
-  field like `standalone: false`, or running only flows when a directory has any.
-- Cookies: an automatic cookie jar per run, a `cookies` name in expressions, or both.
-- Persisting cached calls that carry secrets: the same state file as saved values, or the keychain.
-- A tree-sitter grammar for editors. The TextMate grammar that highlights the examples on this page
-  (`docs/src/routy.tmLanguage.json`) can seed the VS Code extension.

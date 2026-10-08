@@ -202,6 +202,7 @@ mod tests {
             saved: Default::default(),
             asserts: vec![],
             save_misses: vec![],
+            calls: vec![],
         }
     }
 

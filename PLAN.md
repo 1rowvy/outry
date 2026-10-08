@@ -94,15 +94,18 @@ flow Checkout {
 - `flow Name { … }` — сценарий; `routy run Checkout`, кнопка в GUI; вкладка «Trace» с вызванными запросами
 
 Задачи:
-- [x] Черновик спеки: `docs/…/reference/routy-format.mdx` (EN + RU), подсветка `docs/src/routy.tmLanguage.json`
-- [ ] Закрыть открытые вопросы спеки и снять пометку «черновик»
-- [ ] Парсер и вычислитель выражений в core (замена `parser.rs` / `expr.rs`), ошибки с позицией, `routy check`;
-  lossless-дерево (комментарии, форматирование, позиции) — для `routy fmt`, `--fix` и LSP
-- [ ] Вызовы запросов, кеш, проверка циклов, `flow`, trace в CLI (`-v`) и GUI
+- [x] Спека: `docs/…/reference/routy-format.mdx` (EN + RU), подсветка `docs/src/routy.tmLanguage.json`;
+  открытые вопросы закрыты (`run <каталог>` запускает всё, cookies на прогон + `cookies.x`, `cache:` в state-файле)
+- [x] `crates/routy-core/src/lang/`: парсер с позициями (`Span` у узлов, комментарии отдельно), вычислитель,
+  формы, `routy check` (синтаксис, имена с «did you mean», аргументы, формы, циклы) — `path:line:col`
+- [x] Вызовы запросов, кеш на прогон, `fresh`, циклы, `flow`, `poll`, `only`, `confirm` (`--yes`), cookies;
+  `routy run` по файлу, каталогу, имени и `файл:строка`; trace вызовов в выводе CLI
+- [ ] `cache: 30m` между прогонами (state-файл), `multipart`, `schema("…")` (JSON Schema)
+- [ ] `routy check --env prod`: `only` и недостающие переменные без отправки
 - [ ] `routy fmt` — один канонический вид (как `gofmt`)
 - [ ] `.http` — режим совместимости (читаем как раньше) + `routy convert api/` в `*.routy`
 - [ ] Генерация `*.routy` в `import go`: имя и описание из doc-комментария, `params`, тело из структуры
-- [ ] GUI: подсветка и автодополнение нового формата в CodeMirror, вкладка Trace
+- [ ] GUI: запуск `*.routy` (`lang::exec::Run` на сессию), подсветка и автодополнение в CodeMirror, вкладка Trace
 - [ ] `examples/api`, README, docs, `routy init` — на новый формат
 
 ### 2. Коллекция, которая не устаревает (киллер-фича)

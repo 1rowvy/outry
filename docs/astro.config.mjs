@@ -4,7 +4,7 @@ import starlight from '@astrojs/starlight';
 import starlightLinksValidator from 'starlight-links-validator';
 import { readFileSync } from 'node:fs';
 
-// Подсветка блоков ```routy (черновик формата, reference/routy-format).
+// Подсветка блоков ```routy (формат .routy, reference/routy-format).
 const routyGrammar = JSON.parse(readFileSync(new URL('./src/routy.tmLanguage.json', import.meta.url), 'utf8'));
 
 // GitHub Pages: https://1rowvy.github.io/routy/

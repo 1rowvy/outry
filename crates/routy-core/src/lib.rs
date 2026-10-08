@@ -7,6 +7,7 @@ pub mod error;
 pub mod expr;
 pub mod history;
 pub mod import;
+pub mod lang;
 pub mod parser;
 pub mod project;
 pub mod runner;

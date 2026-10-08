@@ -8,6 +8,10 @@ use std::time::Duration;
 
 use anyhow::{Context, bail};
 use clap::{Parser, Subcommand};
+use routy_core::expr::AssertOutcome;
+use routy_core::lang::ast::Item;
+use routy_core::lang::exec::{CallTrace, FlowOutcome, Outcome, Run};
+use routy_core::lang::{ItemRef, Workspace};
 use routy_core::runner::{Options, RunOutcome};
 use routy_core::vars::{self, Source};
 use routy_core::{Project, Runner, discover};
@@ -25,9 +29,11 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Cmd {
-    /// Выполнить запросы. Каталоги раскрываются во все *.http по алфавиту; порядок важен для `> save`.
+    /// Выполнить запросы. Каталоги раскрываются во все *.http и *.routy по алфавиту; порядок важен
+    /// для `save`. Можно указать запрос или сценарий по имени (`Checkout`, `users.Create`) или по
+    /// строке (`api/orders.routy:12`).
     Run {
-        #[arg(required = true)]
+        #[arg(required = true, value_name = "PATH|NAME")]
         paths: Vec<PathBuf>,
         #[command(flatten)]
         env: EnvArgs,
@@ -52,8 +58,11 @@ enum Cmd {
         /// Не обращаться к системному хранилищу паролей (секреты только из ROUTY_*)
         #[arg(long)]
         no_keyring: bool,
+        /// Отправлять запросы с `confirm: true` без вопроса
+        #[arg(long)]
+        yes: bool,
     },
-    /// Проверить синтаксис файлов без отправки
+    /// Проверить файлы без отправки: синтаксис, а в *.routy — имена вызовов, аргументы, формы, циклы
     Check {
         #[arg(required = true)]
         paths: Vec<PathBuf>,
@@ -195,9 +204,10 @@ fn real_main(cmd: Cmd) -> anyhow::Result<ExitCode> {
             timeout,
             fresh,
             no_keyring,
+            yes,
         } => {
-            let files = expand(&paths)?;
-            let project = find_project(env.project.as_deref(), &paths[0])?;
+            let targets = expand(&paths)?;
+            let project = find_project(env.project.as_deref(), first_existing(&paths))?;
             let opts = Options {
                 timeout: Duration::from_secs(timeout),
                 use_keyring: !no_keyring,
@@ -209,8 +219,20 @@ fn real_main(cmd: Cmd) -> anyhow::Result<ExitCode> {
             }
             runner.vars.overrides.extend(vars);
 
+            let jobs = jobs(&runner.project, &targets)?;
+            let mut lang_run = None;
+            if let Some(ws) = jobs.workspace {
+                let mut run = Run::new(ws, Duration::from_secs(timeout))?;
+                run.confirm = confirm_hook(yes, runner.env.clone());
+                lang_run = Some(run);
+            }
             let rt = tokio::runtime::Runtime::new()?;
-            let ok = rt.block_on(run_all(&mut runner, &files, fail_fast, verbose, json));
+            let opts = RunOpts {
+                fail_fast,
+                verbose,
+                json,
+            };
+            let ok = rt.block_on(run_all(&mut runner, lang_run.as_mut(), &jobs.jobs, opts));
             if !fresh {
                 runner.persist_saved()?;
             }
@@ -222,11 +244,37 @@ fn real_main(cmd: Cmd) -> anyhow::Result<ExitCode> {
         }
         Cmd::Check { paths } => {
             let mut ok = true;
-            for f in expand(&paths)? {
-                let src = std::fs::read_to_string(&f).with_context(|| f.display().to_string())?;
-                if let Err(e) = routy_core::parse(&src) {
-                    eprintln!("{}: {e}", f.display());
-                    ok = false;
+            let targets = expand(&paths)?;
+            let mut routy_files = Vec::new();
+            for t in &targets {
+                match t {
+                    Target::Http(f) => {
+                        let src =
+                            std::fs::read_to_string(f).with_context(|| f.display().to_string())?;
+                        if let Err(e) = routy_core::parse(&src) {
+                            eprintln!("{}: {e}", f.display());
+                            ok = false;
+                        }
+                    }
+                    Target::Routy(f, _) => routy_files.push(f.clone()),
+                    Target::Name(n) => {
+                        bail!("`routy check` takes files and directories, got `{n}`")
+                    }
+                }
+            }
+            if !routy_files.is_empty() {
+                let project = Project::discover(&routy_files[0])?;
+                let (ws, files) = workspace_with(&project, &routy_files)?;
+                let wanted: Vec<PathBuf> = files.iter().map(|f| ws.root.join(f)).collect();
+                let cwd = std::env::current_dir().unwrap_or_default();
+                for mut d in ws.check() {
+                    if wanted.contains(&d.path) {
+                        if let Ok(rel) = d.path.strip_prefix(&cwd) {
+                            d.path = rel.to_path_buf();
+                        }
+                        eprintln!("{d}");
+                        ok = false;
+                    }
                 }
             }
             Ok(if ok {
@@ -284,23 +332,211 @@ fn real_main(cmd: Cmd) -> anyhow::Result<ExitCode> {
     }
 }
 
-/// Каталоги → все *.http внутри; файлы — как есть, в заданном порядке.
-fn expand(paths: &[PathBuf]) -> anyhow::Result<Vec<PathBuf>> {
+/// Что запустить: файл `.http`, файл `.routy` (целиком или элемент на строке), имя.
+enum Target {
+    Http(PathBuf),
+    Routy(PathBuf, Option<usize>),
+    Name(String),
+}
+
+fn is_routy(p: &Path) -> bool {
+    p.extension()
+        .is_some_and(|e| e == discover::ROUTY_EXTENSION)
+}
+
+/// Каталоги → все *.http и *.routy внутри; файлы — как есть, в заданном порядке.
+fn expand(paths: &[PathBuf]) -> anyhow::Result<Vec<Target>> {
+    let file = |p: PathBuf| {
+        if is_routy(&p) {
+            Target::Routy(p, None)
+        } else {
+            Target::Http(p)
+        }
+    };
     let mut out = Vec::new();
     for p in paths {
         if p.is_dir() {
-            let found = discover::request_files(p).with_context(|| p.display().to_string())?;
+            let exts = [discover::EXTENSION, discover::ROUTY_EXTENSION];
+            let found = discover::files(p, &exts).with_context(|| p.display().to_string())?;
             if found.is_empty() {
-                bail!("{}: no *.{} files", p.display(), discover::EXTENSION);
+                bail!("{}: no *.http or *.routy files", p.display());
             }
-            out.extend(found.into_iter().map(|f| p.join(f)));
-        } else if p.exists() {
-            out.push(p.clone());
+            out.extend(found.into_iter().map(|f| file(p.join(f))));
+            continue;
+        }
+        if p.exists() {
+            out.push(file(p.clone()));
+            continue;
+        }
+        let s = p.to_string_lossy();
+        if let Some((f, line)) = s.rsplit_once(':') {
+            let f = PathBuf::from(f);
+            if let (true, Ok(line)) = (f.is_file() && is_routy(&f), line.parse()) {
+                out.push(Target::Routy(f, Some(line)));
+                continue;
+            }
+        }
+        let is_name = !s.is_empty()
+            && s.split('.')
+                .all(|w| w.chars().all(|c| c.is_alphanumeric() || c == '_') && !w.is_empty());
+        if is_name {
+            out.push(Target::Name(s.into_owned()));
         } else {
             bail!("{}: no such file or directory", p.display());
         }
     }
     Ok(out)
+}
+
+/// Первый путь, который существует, — от него ищется проект (имена запросов путями не являются).
+fn first_existing(paths: &[PathBuf]) -> &Path {
+    paths
+        .iter()
+        .find(|p| p.exists())
+        .map_or(Path::new("."), |p| p.as_path())
+}
+
+/// Все *.routy проекта плюс переданные файлы вне его. Возвращает и пути переданных файлов
+/// относительно корня проекта (как они записаны в `Workspace`).
+fn workspace_with(
+    project: &Project,
+    files: &[PathBuf],
+) -> anyhow::Result<(Workspace, Vec<PathBuf>)> {
+    let mut ws = Workspace::load(&project.root)?;
+    let root = std::fs::canonicalize(&project.root).unwrap_or_else(|_| project.root.clone());
+    let mut rels = Vec::new();
+    for f in files {
+        let full = std::fs::canonicalize(f).with_context(|| f.display().to_string())?;
+        let rel = match full.strip_prefix(&root) {
+            Ok(rel) => rel.to_path_buf(),
+            Err(_) => {
+                let text = std::fs::read_to_string(f).with_context(|| f.display().to_string())?;
+                ws.add(full.clone(), text);
+                full
+            }
+        };
+        rels.push(rel);
+    }
+    Ok((ws, rels))
+}
+
+enum Job {
+    Http(PathBuf),
+    Item { file: PathBuf, item: ItemRef },
+    Fail { label: String, error: String },
+}
+
+struct Jobs {
+    jobs: Vec<Job>,
+    /// Есть, если среди целей есть *.routy или имена.
+    workspace: Option<Workspace>,
+}
+
+fn jobs(project: &Project, targets: &[Target]) -> anyhow::Result<Jobs> {
+    let routy: Vec<PathBuf> = targets
+        .iter()
+        .filter_map(|t| match t {
+            Target::Routy(f, _) => Some(f.clone()),
+            _ => None,
+        })
+        .collect();
+    let needs_ws = targets.iter().any(|t| !matches!(t, Target::Http(_)));
+    if !needs_ws {
+        return Ok(Jobs {
+            jobs: targets
+                .iter()
+                .filter_map(|t| match t {
+                    Target::Http(f) => Some(Job::Http(f.clone())),
+                    _ => None,
+                })
+                .collect(),
+            workspace: None,
+        });
+    }
+    let (ws, rels) = workspace_with(project, &routy)?;
+    let mut rels = rels.into_iter();
+    let mut jobs = Vec::new();
+    for t in targets {
+        match t {
+            Target::Http(f) => jobs.push(Job::Http(f.clone())),
+            Target::Name(n) => {
+                let path: Vec<String> = n.split('.').map(str::to_string).collect();
+                match ws.resolve(&path) {
+                    Ok(item) => jobs.push(Job::Item {
+                        file: ws.sources[item.file].full.clone(),
+                        item,
+                    }),
+                    Err(error) => jobs.push(Job::Fail {
+                        label: n.clone(),
+                        error,
+                    }),
+                }
+            }
+            Target::Routy(f, line) => {
+                let rel = rels.next().unwrap_or_default();
+                let Some(fi) = ws.file_index(&rel) else {
+                    let full = ws.root.join(&rel);
+                    let error = ws
+                        .errors
+                        .iter()
+                        .find(|d| d.path == full)
+                        .map_or_else(|| "cannot parse".to_string(), |d| d.to_string());
+                    jobs.push(Job::Fail {
+                        label: f.display().to_string(),
+                        error,
+                    });
+                    continue;
+                };
+                let src = &ws.sources[fi];
+                let mut found = false;
+                for (ii, item) in src.file.items.iter().enumerate() {
+                    if !matches!(item, Item::Request(_) | Item::Flow(_)) {
+                        continue;
+                    }
+                    if let Some(line) = line {
+                        let span = item.span();
+                        if !(src.line(span.start)..=src.line(span.end)).contains(line) {
+                            continue;
+                        }
+                    }
+                    found = true;
+                    jobs.push(Job::Item {
+                        file: f.clone(),
+                        item: ItemRef { file: fi, item: ii },
+                    });
+                }
+                if let (false, Some(line)) = (found, line) {
+                    jobs.push(Job::Fail {
+                        label: format!("{}:{line}", f.display()),
+                        error: "no request or flow on this line".into(),
+                    });
+                }
+            }
+        }
+    }
+    Ok(Jobs {
+        jobs,
+        workspace: Some(ws),
+    })
+}
+
+/// `confirm: true`: `--yes` — отправлять, в терминале — спросить, иначе — отказ с подсказкой.
+fn confirm_hook(yes: bool, env: String) -> Option<routy_core::lang::exec::Confirm> {
+    if yes {
+        return Some(Box::new(|_, _| true));
+    }
+    if !std::io::stdin().is_terminal() {
+        return None;
+    }
+    Some(Box::new(move |name, req| {
+        eprint!(
+            "Send {name} ({} {}) in `{env}`? [y/N] ",
+            req.method, req.url
+        );
+        let mut answer = String::new();
+        std::io::stdin().read_line(&mut answer).is_ok()
+            && matches!(answer.trim().to_lowercase().as_str(), "y" | "yes")
+    }))
 }
 
 fn find_project(explicit: Option<&Path>, first_path: &Path) -> anyhow::Result<Project> {
@@ -310,17 +546,42 @@ fn find_project(explicit: Option<&Path>, first_path: &Path) -> anyhow::Result<Pr
     })
 }
 
-async fn run_all(
-    runner: &mut Runner,
-    files: &[PathBuf],
+struct RunOpts {
     fail_fast: bool,
     verbose: bool,
     json: bool,
+}
+
+async fn run_all(
+    runner: &mut Runner,
+    mut lang: Option<&mut Run>,
+    jobs: &[Job],
+    opts: RunOpts,
 ) -> bool {
     let st = Style::stdout();
     let (mut passed, mut failed) = (0, 0);
-    for f in files {
-        let result = runner.run_path(f).await;
+    for job in jobs {
+        let (file, name, result) = match job {
+            Job::Http(f) => (
+                f.display().to_string(),
+                None,
+                runner.run_path(f).await.map(Outcome::Request),
+            ),
+            Job::Item { file, item } => {
+                let run = lang.as_deref_mut().expect("workspace for .routy jobs");
+                let name = run.workspace().item(*item).name().map(str::to_string);
+                (
+                    file.display().to_string(),
+                    name,
+                    run.run_item(runner, *item).await,
+                )
+            }
+            Job::Fail { label, error } => (
+                label.clone(),
+                None,
+                Err(routy_core::Error::Run(error.clone())),
+            ),
+        };
         let ok = matches!(&result, Ok(o) if o.passed());
         if ok {
             passed += 1
@@ -328,30 +589,32 @@ async fn run_all(
             failed += 1
         }
 
-        if json {
+        if opts.json {
             let line = match &result {
-                Ok(o) => serde_json::json!({ "file": f, "passed": ok, "outcome": o }),
-                Err(e) => {
-                    serde_json::json!({ "file": f, "passed": false, "error": format!("{e:#}") })
+                Ok(o) => {
+                    serde_json::json!({ "file": file, "name": name, "passed": ok, "outcome": o })
                 }
+                Err(e) => serde_json::json!({
+                    "file": file, "name": name, "passed": false, "error": format!("{e:#}")
+                }),
             };
             println!("{line}");
         } else {
+            let label = match &name {
+                Some(n) => format!("{file}  {n}"),
+                None => file,
+            };
             match &result {
-                Ok(o) => print_outcome(&st, f, o, verbose),
-                Err(e) => println!(
-                    "{} {}\n    {}",
-                    st.red("✗"),
-                    f.display(),
-                    st.red(&format!("{e:#}"))
-                ),
+                Ok(Outcome::Request(o)) => print_outcome(&st, &label, o, opts.verbose),
+                Ok(Outcome::Flow(o)) => print_flow(&st, &label, o),
+                Err(e) => println!("{} {label}\n    {}", st.red("✗"), st.red(&format!("{e:#}"))),
             }
         }
-        if !ok && fail_fast {
+        if !ok && opts.fail_fast {
             break;
         }
     }
-    if !json && files.len() > 1 {
+    if !opts.json && jobs.len() > 1 {
         let summary = format!("{passed} passed, {failed} failed");
         println!(
             "\n{}",
@@ -365,29 +628,21 @@ async fn run_all(
     failed == 0
 }
 
-fn print_outcome(st: &Style, file: &Path, o: &RunOutcome, verbose: bool) {
-    let r = &o.response;
-    let mark = if o.passed() {
-        st.green("✓")
-    } else {
-        st.red("✗")
-    };
-    let status = format!("{} {}", r.status, r.status_text);
-    let status = if r.status < 400 {
-        st.green(&status)
-    } else {
-        st.red(&status)
-    };
-    println!(
-        "{mark} {}  {} {}  {status}  {}",
-        file.display(),
-        o.request.method,
-        st.dim(&o.request.url),
-        st.dim(&format!("{}ms {}B", r.duration_ms, r.size))
-    );
-    for a in &o.asserts {
+fn mark(st: &Style, ok: bool) -> String {
+    if ok { st.green("✓") } else { st.red("✗") }
+}
+
+fn print_checks(st: &Style, checks: &[AssertOutcome]) {
+    for a in checks {
         if a.passed {
             println!("    {} {}", st.green("✓"), a.source);
+        } else if let Some(detail) = &a.detail {
+            println!(
+                "    {} {}  {}",
+                st.red("✗"),
+                a.source,
+                st.dim(&format!("— {detail}"))
+            );
         } else {
             let actual = a
                 .actual
@@ -401,6 +656,37 @@ fn print_outcome(st: &Style, file: &Path, o: &RunOutcome, verbose: bool) {
             );
         }
     }
+}
+
+fn print_calls(st: &Style, calls: &[CallTrace]) {
+    for c in calls {
+        let indent = "  ".repeat(c.depth);
+        let info = match (c.cached, c.status, c.duration_ms) {
+            (true, _, _) => "cached".to_string(),
+            (_, Some(s), Some(ms)) => format!("{s}  {ms}ms"),
+            _ => String::new(),
+        };
+        println!("    {indent}{} {}  {}", st.dim("↳"), c.name, st.dim(&info));
+    }
+}
+
+fn print_outcome(st: &Style, label: &str, o: &RunOutcome, verbose: bool) {
+    let r = &o.response;
+    let status = format!("{} {}", r.status, r.status_text);
+    let status = if r.status < 400 {
+        st.green(&status)
+    } else {
+        st.red(&status)
+    };
+    println!(
+        "{} {label}  {} {}  {status}  {}",
+        mark(st, o.passed()),
+        o.request.method,
+        st.dim(&o.request.url),
+        st.dim(&format!("{}ms {}B", r.duration_ms, r.size))
+    );
+    print_calls(st, &o.calls);
+    print_checks(st, &o.asserts);
     for miss in &o.save_misses {
         println!(
             "    {} save {miss}  {}",
@@ -422,6 +708,18 @@ fn print_outcome(st: &Style, file: &Path, o: &RunOutcome, verbose: bool) {
         for line in body.lines() {
             println!("    {line}");
         }
+    }
+}
+
+fn print_flow(st: &Style, label: &str, o: &FlowOutcome) {
+    println!("{} {label}  {}", mark(st, o.passed()), st.dim("flow"));
+    print_calls(st, &o.calls);
+    print_checks(st, &o.checks);
+    if let Some(e) = &o.error {
+        println!("    {} {}", st.red("✗"), st.red(e));
+    }
+    for name in o.saved.keys() {
+        println!("    {} saved {name}", st.dim("→"));
     }
 }
 

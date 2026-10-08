@@ -22,7 +22,7 @@ pub fn eval(name: &str) -> Result<String> {
     let head = parts.next().unwrap_or_default();
     let args: Vec<&str> = parts.collect();
     match (head, args.as_slice()) {
-        ("$uuid", []) => Ok(uuid_v4(fastrand::u128(..))),
+        ("$uuid", []) => Ok(uuid()),
         ("$timestamp", []) => Ok(SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map(|d| d.as_secs())
@@ -45,6 +45,11 @@ pub fn eval(name: &str) -> Result<String> {
             "unknown dynamic variable; available: $uuid, $timestamp, $randomInt [min max]",
         )),
     }
+}
+
+/// Случайный UUID v4.
+pub fn uuid() -> String {
+    uuid_v4(fastrand::u128(..))
 }
 
 fn uuid_v4(bits: u128) -> String {

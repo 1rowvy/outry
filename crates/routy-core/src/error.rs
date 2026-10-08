@@ -7,6 +7,22 @@ pub enum Error {
     #[error("line {line}: {msg}")]
     Parse { line: usize, msg: String },
 
+    /// Ошибка разбора `*.routy`: позиция с точностью до столбца.
+    #[error("{line}:{col}: {msg}")]
+    Syntax {
+        line: usize,
+        col: usize,
+        msg: String,
+    },
+
+    /// Ошибка выполнения `*.routy`: упавший вызов, `only`, цикл, опрос по таймауту.
+    #[error("{0}")]
+    Run(String),
+
+    /// Упал вызванный запрос: `CreateOrder → Login: status == 200 — status is 401`.
+    #[error("{}: {msg}", chain.join(" → "))]
+    Call { chain: Vec<String>, msg: String },
+
     // Вложенная ошибка уже в тексте, поэтому не `#[source]`: иначе anyhow печатает её дважды.
     #[error("{path}: {inner}")]
     InFile { path: PathBuf, inner: Box<Error> },

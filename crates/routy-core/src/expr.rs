@@ -178,6 +178,9 @@ pub struct AssertOutcome {
     pub source: String,
     pub passed: bool,
     pub actual: Option<Value>,
+    /// Почему проверка не прошла, для `*.routy`: `body.total is 0`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
 }
 
 impl Assertion {
@@ -219,6 +222,7 @@ impl Assertion {
             source: self.source.clone(),
             passed,
             actual,
+            detail: None,
         }
     }
 }
