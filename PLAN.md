@@ -1,7 +1,7 @@
 # Routy — план
 
 API-клиент, где запросы — текстовые файлы в репозитории, а коллекция собирается сама из кода.
-Аналог Insomnia/Postman, но без облака и без экспорта/импорта коллекций: правда — в `api/*.http`.
+Аналог Insomnia/Postman, но без облака и без экспорта/импорта коллекций: правда — в `api/*.routy` (раньше `*.http`).
 
 ## Архитектура
 
@@ -21,115 +21,128 @@ GUI и CLI не могут разъехаться: оба вызывают од�
 ### Разрешение переменных (приоритет сверху вниз)
 
 1. `--var name=value` (CLI) / ручные значения
-2. значения из `> save` (сохраняются между запусками в `~/.local/share/routy/state/`, не в репо)
+2. значения из `save` / `> save` (сохраняются между запусками в `~/.local/share/routy/state/`, не в репо)
 3. переменные процесса `ROUTY_<NAME>` — секреты в CI
 4. `[env.<name>]` из `env.toml`, затем общие `[vars]`
 5. системное хранилище паролей (`keyring`): `routy secret set token --env dev`
 
 ## Этапы
 
-### ✅ 0. Каркас и инфраструктура
-- [x] Cargo workspace, единая версия в `[workspace.package]`
-- [x] CI: fmt, clippy, тесты core/cli на Linux/macOS/Windows; typecheck + clippy приложения
-- [x] Release: тег `vX.Y.Z` → приложение (macOS arm64/x64, Linux, Windows) + CLI (5 таргетов) → публикация
-- [x] Автообновление: `tauri-plugin-updater`, подписанные артефакты, `latest.json` в GitHub Releases
-- [x] `scripts/release.sh X.Y.Z` — поднять версию везде
+Сделанное (этапы 0–5: каркас, core, CLI, desktop, переменные, импорт из Go) — в git-истории и README.
 
-### ✅ 1. core: формат + отправка
-- [x] Парсер `.http`: метод (опционален), URL, заголовки, тело, комментарии `#` `//`, CRLF, ошибки с номером строки
-- [x] `{{var}}`, ошибка сразу со списком всех недостающих переменных
-- [x] `env.toml` с окружениями и общими `[vars]`, поиск проекта вверх по дереву
-- [x] Секреты в keyring, мягкая деградация без D-Bus (headless CI)
-- [x] `> save name = body.path`, `> assert <path> <op> <value>` (`== != < <= > >= contains exists`)
-- [x] Авто-`Content-Type: application/json` для JSON-тела
-- [x] Юнит-тесты + сквозной тест с локальным HTTP-сервером
+### 1. Свой формат запросов `*.routy` — приоритет
+C-подобный, декларативный, простой без знания Go: JSON-тело, выражения как в JS/Java/C#, запрос — как функция.
+Решаем до LSP и VS Code-расширения, иначе их придётся переделывать.
 
-### ✅ 2. CLI
-- [x] `routy run <файлы|каталоги>` — цепочки по порядку, `--env`, `--var`, `--fail-fast`, `-v`, `--json`, `--fresh`, exit code
-- [x] `routy check`, `routy envs`, `routy secret set|rm`, `routy init`
-- [x] Установка `curl … install.sh | sh` (Linux, статическая musl-сборка, проверка sha256)
-- [x] `routy update` / `routy update --check` — самообновление из GitHub Releases с проверкой sha256
-- [x] Напоминание о новой версии после команд (раз в сутки, фоном, как у npm)
-- [ ] install.sh и `routy update` для macOS (архивы уже есть) и Windows (`install.ps1`, zip)
+```
+// Create order
+// Creates an order for the current user.
+POST /orders/{shop} {
+  only: [dev, staging]
 
-### ✅ 3. Desktop (Tauri + React)
-- [x] Открытие проекта, дерево файлов, редактор, отправка (Ctrl+Enter), сохранение (Ctrl+S)
-- [x] Вкладки ответа: body (pretty JSON) / headers / tests / request
-- [x] Проверка синтаксиса на лету, live-reload при правке файлов снаружи (`notify`)
-- [x] Выбор окружения, ввод секретов в keyring
-- [x] Каталог без `env.toml` → кнопка «Создать api/env.toml» (та же `project::init`, что и `routy init`)
-- [x] Баннер обновления: скачать → установить → перезапуск
-- [x] CodeMirror 6 вместо textarea: подсветка `.http`/TOML, подчёркивание ошибки на строке, автодополнение `{{var}}` и директив
-- [x] Переименование / удаление / перемещение файлов, контекстное меню дерева
-- [x] История ответов (в памяти + опционально на диск вне репо)
-- [x] Отмена запроса, параллельные запросы (сессия блокируется только на подстановку и разбор ответа)
-- [x] Подсветка JSON, поиск по ответу, превью картинок/HTML, сохранение тела в файл
-- [x] Меню «Проверить обновления», настройка «обновляться автоматически»
+  query { page: 1 }
 
-### ✅ 4. Переменные и окружения
-- [x] Панель переменных: что откуда пришло (env / saved / secret / ROUTY_*), очистка saved
-- [x] Динамические переменные: `{{$uuid}}`, `{{$timestamp}}`, `{{$randomInt}}`, `{{$randomInt min max}}`
-- [x] `routy vars` в CLI — показать итоговые значения (секреты замаскированы, `--reveal`)
-- [x] Объявление секретов в `env.toml` (`secrets = ["token"]`), чтобы GUI подсказывал, чего не хватает
+  headers {
+    Authorization: "Bearer ${Login().body.token}"
+    Idempotency-Key: uuid()
+  }
 
-### ✅ 5. Импорт роутов из Go
-- [x] `routy-core::import` на `tree-sitter` + `tree-sitter-go`
-- [x] chi: `r.Get/Post/...("/path", h)`, `r.Route("/prefix", func(r chi.Router){...})`, `r.Mount`
-- [x] gin: `r.GET(...)`, `r.Group("/v1")` с учётом префиксов групп
-- [x] net/http: шаблоны Go 1.22 `mux.HandleFunc("GET /items/{id}", h)`
-- [x] Роутеры как шаблоны-запросы tree-sitter (`queries/chi.scm`, `queries/gin.scm`) — добавление роутера без кода на Rust; свои через `--query`
-- [x] Префиксы через функции и пакеты: `r.Mount("/x", pkg.Routes())`, `users.Register(v1)`
-- [x] `/users/{id}` и `/users/:id` → `{{id}}`
-- [x] Генерация `api/<resource>/<method>.http` только для отсутствующих файлов; `--dry-run`, отчёт «новые / пропавшие роуты»
-- [x] `routy import go ./cmd/server`, кнопка «Синхронизировать» и вкладка Routes в GUI
-- [x] Что передавать — из кода хендлера: описание (doc-комментарий, swag `@Summary`), JSON-тело из структуры
-  (`Decode(&req)`, `ShouldBindJSON`, `v.Bind(c)`; теги `json`, `binding/validate:"required"`), query, заголовки
+  body {
+    customer: CreateUser(name: "Bob").body.id,
+    items: [{ sku: "A-1", qty: 2 }],
+  }
 
-### 6. Совместимость с `.http` — до продвижения
-Позиционирование «открой `.http`, которые уже лежат в репо» ломается на первом файле из JetBrains/VS Code.
-- [ ] Несколько запросов в одном файле через `###` (как в JetBrains HTTP Client / VS Code REST Client):
-  парсер, `routy run`/`check`, выбор запроса в GUI
+  expect {
+    status == 201
+    body.items.length == 1
+    headers.Location.startsWith("/orders/")
+    body matches Order
+    GetOrder(id: body.id).body.status == "new"
+  }
 
-### 7. Коллекция, которая не устаревает (киллер-фича)
+  save order_id = body.id
+}
+
+flow Checkout {
+  order = CreateOrder(shop: "main")
+  Pay(order: order.body.id)
+  expect { GetOrder(id: order.body.id).body.status == "paid" }
+}
+```
+
+Правила:
+- `МЕТОД /путь` — весь минимальный файл (`GET /health`); блок `{ … }` по необходимости. `{{base}}` подставляется сам,
+  `{shop}` в пути — переменная/параметр (та же запись, что в chi/net/http — импорт кладёт путь как есть)
+- `//` — комментарии; первая строка над запросом — его имя (`Create order` → `CreateOrder`), остальные — описание
+- `body` — JSON5: чистый JSON из DevTools/Swagger вставляется как есть; ключи без кавычек, висячие запятые,
+  сокращение `{ email, password }`; `form`, `multipart`, `file("./payload.json")` для остального
+- переменные — голые имена (`customer: user`), в строках `"${user}"`; `secret.password`, `uuid()`, `now()`, `randomInt(1, 10)`
+- `expect` — по выражению на строку: `== != < <= > >= && || !`, `.length`, `.startsWith()`, `.contains()`,
+  `matches /re/`, `in [..]`, `typeof`; при падении видны обе стороны (`body.total > 0 — got 0`)
+- `body matches Order` / `matches { id: string, total: number }` — форма ответа: Go-структура из импорта,
+  JSON Schema или форма прямо в файле
+- `save name = выражение` — значение для следующих запросов (замена `> save`)
+- `only: [dev, staging]` — запрос не уйдёт в другие env, в т.ч. при косвенном вызове; `confirm: true` — спросить перед отправкой
+- `poll body.status == "paid" every 1s for 30s` — опрос асинхронных операций
+
+Вызовы запросов:
+- запрос — функция: `params { email: "…" }` с умолчаниями + path-параметры; вызов `Login(email: "a@b.c")`, результат — ответ
+- вызовы только как значения: в `headers`, `body`, `query`, `expect`, `flow`; никаких `if`, циклов, своих функций
+- кеш на прогон: тот же вызов с теми же аргументами выполняется один раз; `Login().fresh()` — заново
+- имена уникальны в проекте без импортов, при конфликте — с папкой (`users.Create()`); циклы и конфликты — ошибка `routy check`
+- упавший `expect` вызванного запроса роняет вызывающий, ошибка с цепочкой: `CreateOrder → Login: status == 200 — got 401`
+- `flow Name { … }` — сценарий; `routy run Checkout`, кнопка в GUI; вкладка «Trace» с вызванными запросами
+
+Задачи:
+- [ ] Спека формата в `docs/` (EN + RU): грамматика, выражения и встроенные функции, экранирование, кеш вызовов, `routy fmt`
+- [ ] Парсер и вычислитель выражений в core (замена `parser.rs` / `expr.rs`), ошибки с позицией, `routy check`
+- [ ] Вызовы запросов, кеш, проверка циклов, `flow`, trace в CLI (`-v`) и GUI
+- [ ] `routy fmt` — один канонический вид (как `gofmt`)
+- [ ] `.http` — режим совместимости (читаем как раньше) + `routy convert api/` в `*.routy`
+- [ ] Генерация `*.routy` в `import go`: имя и описание из doc-комментария, `params`, тело из структуры
+- [ ] GUI: подсветка и автодополнение нового формата в CodeMirror, вкладка Trace
+- [ ] `examples/api`, README, docs, `routy init` — на новый формат
+
+### 2. Коллекция, которая не устаревает (киллер-фича)
 Питч: «одна строка в CI — и API-тесты больше не разъедутся с кодом». Bruno/Postman о коде ничего не знают.
-- [ ] `routy import go --check`: exit code ≠ 0, если в коде есть роут без `.http` или `.http` ссылается на удалённый роут
+- [ ] `routy import go --check`: exit code ≠ 0, если в коде есть роут без запроса или запрос ссылается на удалённый роут
   (сравнение «новые / пропавшие» уже есть в `import/mod.rs`)
-- [ ] Дрейф тела запроса: `required`-поле в Go-структуре, которого нет в теле `.http`, — ошибка `--check`
-- [ ] Ассерты из типа ответа: структура в `json.Encode` / `c.JSON` → сгенерированные `> assert body.<field> exists`
+- [ ] Дрейф тела: `required`-поле Go-структуры, которого нет в `body`, — ошибка `--check`
+- [ ] `body matches Order` по Go-структуре из кода (теги `json` уже разбираем); импорт генерирует его из типа ответа
+  (`json.Encode` / `c.JSON`)
+- [ ] JUnit-отчёт (`--report junit.xml`)
 - [ ] Рецепт для CI в docs (GitHub Actions, GitLab) и готовый `routy-action`
 
-### 8. MCP для AI-агентов
-- [ ] `routy mcp` (stdio): инструменты «список запросов», «выполнить файл в env», «показать переменные» поверх `Runner`/`Vars`
-- [ ] Секреты подставляются внутри routy и не попадают к агенту (значения из keyring/`secrets` маскируются в ответах)
+### 3. Редакторы без GUI: `routy lsp`
+- [ ] `routy lsp` (stdio, `tower-lsp` или `lsp-server`) внутри того же бинаря
+- [ ] Диагностика как `routy check`; автодополнение переменных (`Vars::list`), встроенных функций и имён запросов
+- [ ] Hover: значение и источник переменной (`Vars::lookup`, секреты замаскированы), сигнатура вызываемого запроса
+- [ ] Go to definition: переменная → строка в `env.toml`, `Login()` → его файл, `Order` → Go-структура
+- [ ] Code lens «Send» / «Run flow» → ответ в отдельном буфере
+- [ ] Грамматика tree-sitter для `*.routy` (подсветка в Neovim, Helix, Zed)
+- [ ] Страница в docs: настройка редакторов
+
+### 4. VS Code-расширение
+LSP-клиент + интерфейс; логика вся в `routy`, своих правил в расширении нет.
+- [ ] Платформенные VSIX с бинарём `routy` внутри; Marketplace + Open VSX (Cursor, Windsurf)
+- [ ] Code lens «▶ Send», «Send in prod…», «Copy as curl»; ответ в webview (компоненты из `app/src`: ResponseView, BodyViewer)
+- [ ] Боковая панель: дерево запросов, env, переменные, Routes с синхронизацией, история, Trace
+- [ ] Общие React-компоненты вынести в пакет для app и расширения
+
+### 5. MCP для AI-агентов
+- [ ] `routy mcp` (stdio): «список запросов», «выполнить запрос/flow в env», «показать переменные» поверх `Runner`/`Vars`
+- [ ] Секреты подставляются внутри routy и не попадают к агенту (значения из keyring/`secrets` маскируются)
 - [ ] Страница в docs: подключение к Claude Code / Cursor
 
-### 9. Редакторы без GUI: `routy lsp`
-База `.http` стандартная и подсвечивается в JetBrains, VS Code (REST Client/httpYac), Neovim (tree-sitter-http), Helix, Zed,
-но `> save`/`> assert`, `env.toml` и наши `{{$…}}` чужие редакторы не знают. Один LSP закрывает все редакторы сразу.
-- [ ] `routy lsp` (stdio, `tower-lsp` или `lsp-server`) внутри того же бинаря
-- [ ] Диагностика: ошибки парсера и выражений, как `routy check`
-- [ ] Автодополнение `{{var}}` из `Vars::list` по текущему env, `{{$…}}` из `dynamic.rs`, директивы `save`/`assert`
-  (логику вынести из GUI в core)
-- [ ] Hover над `{{var}}`: значение и источник (`Vars::lookup`), секреты замаскированы
-- [ ] Go to definition: `{{base}}` → строка в `env.toml`
-- [ ] Code lens / code action «Send request» → ответ в отдельном буфере
-- [ ] `routy run file.http:12` — запрос под курсором (после `###`), чтобы редактор мог вызывать CLI и без LSP
-- [ ] Подсветка директив `>`: PR в tree-sitter-http или `highlights`/`injections` для Neovim/Helix в docs
-- [ ] Тонкое VS Code-расширение, которое запускает `routy lsp` (ещё и канал продвижения через маркетплейс)
-- [ ] Страница в docs: настройка Neovim, Helix, Zed, VS Code
-
-### 10. Цепочки и проверки
-- [ ] `routy run` по сценарию: `api/flows/signup.flow` со списком файлов
-- [ ] Ещё операторы: `matches /regex/`, `in [..]`, `type == array`, `length`
-- [ ] JUnit-отчёт (`--report junit.xml`) для CI
-- [ ] Запуск коллекции в GUI с отчётом
+### 6. Распространение
+- [ ] install.sh и `routy update` для macOS (архивы уже есть) и Windows (`install.ps1`, zip)
+- [ ] Пакетные менеджеры для CLI: Homebrew tap, AUR, COPR, Scoop/winget
+- [ ] Подпись и нотаризация macOS, подпись Windows-установщика
 
 ### Потом
-- Импорт роутов из других языков (FastAPI, Express, Spring) — когда Go-история заработает и будет что показать
-- Импорт из Postman / Insomnia / OpenAPI
-- GraphQL, WebSocket, multipart, файлы в теле (`< ./payload.json`) — догонялки за Bruno, не раньше этапов 6–8
-- Подпись и нотаризация macOS, подпись Windows-установщика
-- Пакетные менеджеры для CLI: Homebrew tap, AUR, COPR, Scoop/winget
+- Импорт роутов из других языков (FastAPI, Express, Spring) — когда Go-история заработает
+- Импорт из Postman / Insomnia / OpenAPI в `*.routy`
+- GraphQL, WebSocket — не раньше этапов 1–4
 
 ## Релизы и автообновление
 
