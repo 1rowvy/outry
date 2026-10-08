@@ -103,7 +103,22 @@ GUI и CLI не могут разъехаться: оба вызывают од�
 - [ ] Секреты подставляются внутри routy и не попадают к агенту (значения из keyring/`secrets` маскируются в ответах)
 - [ ] Страница в docs: подключение к Claude Code / Cursor
 
-### 9. Цепочки и проверки
+### 9. Редакторы без GUI: `routy lsp`
+База `.http` стандартная и подсвечивается в JetBrains, VS Code (REST Client/httpYac), Neovim (tree-sitter-http), Helix, Zed,
+но `> save`/`> assert`, `env.toml` и наши `{{$…}}` чужие редакторы не знают. Один LSP закрывает все редакторы сразу.
+- [ ] `routy lsp` (stdio, `tower-lsp` или `lsp-server`) внутри того же бинаря
+- [ ] Диагностика: ошибки парсера и выражений, как `routy check`
+- [ ] Автодополнение `{{var}}` из `Vars::list` по текущему env, `{{$…}}` из `dynamic.rs`, директивы `save`/`assert`
+  (логику вынести из GUI в core)
+- [ ] Hover над `{{var}}`: значение и источник (`Vars::lookup`), секреты замаскированы
+- [ ] Go to definition: `{{base}}` → строка в `env.toml`
+- [ ] Code lens / code action «Send request» → ответ в отдельном буфере
+- [ ] `routy run file.http:12` — запрос под курсором (после `###`), чтобы редактор мог вызывать CLI и без LSP
+- [ ] Подсветка директив `>`: PR в tree-sitter-http или `highlights`/`injections` для Neovim/Helix в docs
+- [ ] Тонкое VS Code-расширение, которое запускает `routy lsp` (ещё и канал продвижения через маркетплейс)
+- [ ] Страница в docs: настройка Neovim, Helix, Zed, VS Code
+
+### 10. Цепочки и проверки
 - [ ] `routy run` по сценарию: `api/flows/signup.flow` со списком файлов
 - [ ] Ещё операторы: `matches /regex/`, `in [..]`, `type == array`, `length`
 - [ ] JUnit-отчёт (`--report junit.xml`) для CI
