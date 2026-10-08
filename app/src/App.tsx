@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type MouseEvent } from "react";
 import { getVersion } from "@tauri-apps/api/app";
 import { listen } from "@tauri-apps/api/event";
-import { open } from "@tauri-apps/plugin-dialog";
+import { confirm, open } from "@tauri-apps/plugin-dialog";
 import {
   api,
   type Entry,
@@ -104,6 +104,9 @@ function movedPath(path: string, from: string, to: string): string | null {
   return null;
 }
 
+/** Вопрос с «OK»/«Cancel»: `window.confirm` у Tauri асинхронный и сам по себе не ждёт ответа. */
+const sure = (message: string) => confirm(message, { title: "Routy", kind: "warning" });
+
 function storage(key: string, value?: string | null): string | null {
   try {
     if (value === undefined) return localStorage.getItem(key);
@@ -184,7 +187,7 @@ export default function App() {
   );
 
   const initProject = async () => {
-    if (dirty && !window.confirm("You have unsaved changes. Continue?")) return;
+    if (dirty && !(await sure("You have unsaved changes. Continue?"))) return;
     try {
       applyProject(await api.initProject());
     } catch (e) {
@@ -270,7 +273,7 @@ export default function App() {
   }, [project, routy, selected, savedContent]);
 
   const select = async (path: string) => {
-    if (dirty && !window.confirm("You have unsaved changes. Open another file?")) return;
+    if (dirty && !(await sure("You have unsaved changes. Open another file?"))) return;
     try {
       const text = await api.readRequest(path);
       setSelected(path);
@@ -372,14 +375,19 @@ export default function App() {
       : [...plan.existing.flatMap((e) => e.changes), ...plan.shape_changes]
           .filter((c) => c.fixable && (!ids || ids.includes(c.id)))
           .map((c) => c.file);
-    if (prune && !window.confirm(`Delete ${files.join(", ")}?`)) return;
-    if (dirty && selected && files.map((f) => f.replace(/\\/g, "/")).includes(selected)) {
-      if (!window.confirm("You have unsaved changes in this file. Change it on disk anyway?")) return;
-    }
+    if (prune && !(await sure(`Delete ${files.join(", ")}?`))) return;
+    // Правка идёт по файлу на диске: несохранённое в редакторе после неё перечитывается.
+    const reload = dirty && selected && files.map((f) => f.replace(/\\/g, "/")).includes(selected) ? selected : null;
+    if (reload && !(await sure(`Discard unsaved changes in ${reload} and fix the file?`))) return;
     setRoutesBusy(true);
     try {
       setRoutes(await api.importFix(storage(IMPORT_DIR_KEY + project.root), prune ? [] : ids, prune));
       await refresh();
+      if (reload) {
+        const text = await api.readRequest(reload);
+        setContent(text);
+        setSavedContent(text);
+      }
     } catch (e) {
       setError(String(e));
     } finally {
@@ -422,7 +430,7 @@ export default function App() {
 
   const remove = async (t: TreeTarget) => {
     const what = t.isFile ? t.path : `${t.count} request${t.count === 1 ? "" : "s"} in ${t.path}/`;
-    if (!window.confirm(`Delete ${what}?`)) return;
+    if (!(await sure(`Delete ${what}?`))) return;
     try {
       await api.deletePath(t.path);
       if (selected && movedPath(selected, t.path, "") !== null) {

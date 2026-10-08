@@ -526,7 +526,7 @@ fn describes_handlers() {
         "{text}"
     );
     assert!(
-        text.contains("POST /users {\n  handler: h.CreateUser\n\n  body {\n    note: \"\",\n"),
+        text.contains("POST /users {\n  handler: h.CreateUser\n  headers { X-Tenant-ID: \"\" }\n\n  body {\n    note: \"\",\n"),
         "{text}"
     );
     let file = crate::lang::parse::parse(&text, None).unwrap();
@@ -960,7 +960,14 @@ func createOrder(w http.ResponseWriter, r *http.Request) {
         .existing
         .iter()
         .flat_map(|e| &e.changes)
-        .map(|c| format!("{}:{} {}", c.file.display(), c.line, c.message))
+        .map(|c| {
+            format!(
+                "{}:{} {}",
+                c.file.display().to_string().replace('\\', "/"),
+                c.line,
+                c.message
+            )
+        })
         .collect();
     assert_eq!(
         messages,

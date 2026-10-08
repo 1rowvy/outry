@@ -97,7 +97,7 @@ struct ProjectInfo {
 }
 
 /// Метод из строки запроса без полного разбора: файл с ошибкой тоже получает значок.
-/// В `*.routy` — первый запрос файла, а если в нём только сценарии — `FLOW`.
+/// В `*.routy` — первый запрос файла, а если в нём только сценарии — `FLOW`, только shape — `SHAPE`.
 fn request_method(src: &str, routy: bool) -> String {
     let word = |l: &str| l.split_whitespace().next().unwrap_or_default().to_string();
     let mut lines = src
@@ -110,6 +110,7 @@ fn request_method(src: &str, routy: bool) -> String {
         return match words.iter().find(|w| is_method(w)) {
             Some(m) => m.clone(),
             None if words.iter().any(|w| w == "flow") => "FLOW".into(),
+            None if words.iter().any(|w| w == "shape") => "SHAPE".into(),
             None => "GET".into(),
         };
     }

@@ -216,6 +216,8 @@ struct Project {
     items: HashMap<PathBuf, (usize, usize)>,
     taken: HashSet<PathBuf>,
     sources: HashMap<PathBuf, String>,
+    /// Файлы, которые не разобрались: с кодом они не сравниваются
+    warnings: Vec<String>,
 }
 
 /// Запросы из `*.http` (`{{base}}/…`) и `*.routy` (`/…`) проекта, объявления shape.
@@ -237,8 +239,12 @@ fn scan_project(project_root: &Path, base: &str) -> Result<Project> {
             .extension()
             .is_some_and(|e| e == discover::ROUTY_EXTENSION)
         {
-            let Ok(file) = crate::lang::parse::parse(&src, None) else {
-                continue;
+            let file = match crate::lang::parse::parse(&src, None) {
+                Ok(file) => file,
+                Err(e) => {
+                    p.warnings.push(unparsed(&rel, &e));
+                    continue;
+                }
             };
             let total = file.items.len();
             let mut requests = 0;
@@ -281,8 +287,12 @@ fn scan_project(project_root: &Path, base: &str) -> Result<Project> {
             p.items.insert(rel, (requests, total));
             continue;
         }
-        let Ok(req) = crate::parse(&src) else {
-            continue;
+        let req = match crate::parse(&src) {
+            Ok(req) => req,
+            Err(e) => {
+                p.warnings.push(unparsed(&rel, &e));
+                continue;
+            }
         };
         let Some(path) = req.url.strip_prefix(&prefix) else {
             continue;
@@ -306,6 +316,10 @@ fn scan_project(project_root: &Path, base: &str) -> Result<Project> {
         });
     }
     Ok(p)
+}
+
+fn unparsed(file: &Path, e: &crate::Error) -> String {
+    format!("{}:{e} — not compared with the code", slash(file))
 }
 
 /// Сканирует Go-код в `src_dir` встроенными шаблонами и `extra` (имя, текст `.scm`)
@@ -333,6 +347,7 @@ pub fn plan(project_root: &Path, scan: Scan, base: &str) -> Result<Plan> {
         items,
         mut taken,
         sources,
+        warnings,
     } = scan_project(project_root, base)?;
 
     let shapes_file = shapes
@@ -340,33 +355,25 @@ pub fn plan(project_root: &Path, scan: Scan, base: &str) -> Result<Plan> {
         .map_or_else(|| PathBuf::from(SHAPES_FILE), |(f, _, _)| f.clone());
     let mut out = Plan {
         files: scan.files,
-        warnings: scan.warnings,
+        warnings: scan.warnings.into_iter().chain(warnings).collect(),
         shapes_file,
         ..Plan::default()
     };
     let mut matched = HashSet::new();
     for route in scan.routes {
         let k = key(&route.path);
-        let by_handler: Vec<usize> = known
+        // По `handler:`, а запросы без него (негативные тесты рядом с основным) — по методу и пути.
+        let mut hit: Vec<usize> = known
             .iter()
             .enumerate()
-            .filter(|(_, r)| r.handler.is_some() && r.handler == route.handler)
+            .filter(|(_, r)| match &r.handler {
+                Some(_) => r.handler == route.handler,
+                None => r.key == k && (route.method == ANY || r.method == route.method),
+            })
             .map(|(i, _)| i)
             .collect();
-        let hit = if by_handler.is_empty() {
-            known
-                .iter()
-                .enumerate()
-                .filter(|(_, r)| {
-                    r.handler.is_none()
-                        && r.key == k
-                        && (route.method == ANY || r.method == route.method)
-                })
-                .map(|(i, _)| i)
-                .collect::<Vec<_>>()
-        } else {
-            by_handler
-        };
+        // Файл роута — тот, где `handler:`.
+        hit.sort_by_key(|&i| known[i].handler.is_none());
         if let Some(&first) = hit.first() {
             matched.extend(hit.iter().copied());
             let mut changes: Vec<Change> = hit
@@ -884,6 +891,11 @@ fn content(route: &Route, _base: &str) -> String {
         let defaults: Vec<String> = query.iter().map(|n| format!("{n}: null")).collect();
         fields.push(format!("params {{\n{}\n}}", defaults.join("\n")));
         fields.push(format!("query {{\n{}\n}}", query.join("\n")));
+    }
+    // Заголовки, которые читает обработчик: значение пользователь впишет сам.
+    if !info.headers.is_empty() {
+        let lines: Vec<String> = info.headers.iter().map(|h| format!("{h}: \"\"")).collect();
+        fields.push(format!("headers {{\n{}\n}}", lines.join("\n")));
     }
     match &info.body {
         Some(b) => fields.push(format!("body {}", b.example)),

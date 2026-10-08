@@ -1008,8 +1008,21 @@ fn import(cmd: ImportCmd) -> anyhow::Result<ExitCode> {
         let diags = import_diagnostics(&plan, &shown, &go);
         match format {
             ImportFormat::Json => println!("{}", serde_json::to_string_pretty(&plan)?),
-            ImportFormat::Github => print_github(&diags),
-            ImportFormat::Text => print_check(&plan, &diags),
+            ImportFormat::Github => {
+                print_github(&diags);
+                for w in &plan.warnings {
+                    println!(
+                        "::warning title=routy import go::{}",
+                        w.replace('\n', "%0A")
+                    );
+                }
+            }
+            ImportFormat::Text => {
+                print_check(&plan, &diags);
+                for w in &plan.warnings {
+                    eprintln!("{} {w}", Style::stderr().yellow("warning:"));
+                }
+            }
         }
         return Ok(if plan.has_errors() {
             ExitCode::FAILURE
