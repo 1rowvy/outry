@@ -2,7 +2,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { getVersion } from "@tauri-apps/api/app";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
-import { api, type ParseError, type ProjectInfo, type RunOutcome } from "./api";
+import { api, type ParseError, type ProjectInfo, type RunOutcome, type VarName } from "./api";
+import { CodeEditor } from "./CodeEditor";
 import { FileTree } from "./FileTree";
 import { ResponseView } from "./ResponseView";
 import { TitleBar } from "./TitleBar";
@@ -57,6 +58,7 @@ export default function App() {
   const [newPath, setNewPath] = useState<string | null>(null);
   const [secretForm, setSecretForm] = useState<{ name: string; value: string } | null>(null);
   const [version, setVersion] = useState<string | null>(null);
+  const [vars, setVars] = useState<VarName[]>([]);
 
   const dirty = content !== savedContent;
   const isConfig = selected === CONFIG;
@@ -138,6 +140,12 @@ export default function App() {
       unlisten.then((f) => f());
     };
   }, []);
+
+  // Имена переменных для автодополнения; `> save` после отправки добавляет новые.
+  useEffect(() => {
+    if (!project) return setVars([]);
+    api.varNames(env).then(setVars, () => setVars([]));
+  }, [project, env, outcome]);
 
   // Проверка синтаксиса на лету.
   useEffect(() => {
@@ -352,7 +360,14 @@ export default function App() {
                         </>
                       )}
                     </div>
-                    <textarea value={content} onChange={(e) => setContent(e.target.value)} spellCheck={false} />
+                    <CodeEditor
+                      docKey={selected}
+                      value={content}
+                      onChange={setContent}
+                      language={isConfig ? "toml" : "http"}
+                      error={parseError}
+                      vars={vars}
+                    />
                     {parseError && (
                       <div className="parse-error">
                         {parseError.line !== null && `line ${parseError.line}: `}

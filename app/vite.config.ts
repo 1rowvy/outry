@@ -19,5 +19,7 @@ export default defineConfig({
     target: process.env.TAURI_ENV_PLATFORM === "windows" ? "chrome105" : "safari13",
     minify: process.env.TAURI_ENV_DEBUG ? false : "esbuild",
     sourcemap: !!process.env.TAURI_ENV_DEBUG,
+    // Бандл грузится с диска, а не по сети; CodeMirror один занимает ~400 КБ.
+    chunkSizeWarningLimit: 1000,
   },
 });

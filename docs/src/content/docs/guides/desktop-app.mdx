@@ -20,7 +20,10 @@ The app remembers the last project and reopens it on start.
 
 - The left panel shows every `.http` file in the project; **+** next to **Requests** creates a new one
   (`users/create` becomes `users/create.http`).
-- The editor checks syntax as you type and shows the error with its line number.
+- The editor highlights `.http` syntax and checks it as you type: the line with an error is underlined,
+  and the message is shown below the editor.
+- After `{{` the editor suggests variables of the current environment (from `env.toml` and `> save`);
+  on `>` lines it suggests directives, paths and operators.
 - The switcher under the project name selects an environment from `env.toml`.
 - **Add secret** at the bottom left stores a value in the system keychain for the current environment.
 
@@ -28,6 +31,8 @@ The app remembers the last project and reopens it on start.
 |----------|--------|
 | <kbd>Ctrl</kbd>/<kbd>⌘</kbd> + <kbd>Enter</kbd> | Send the request |
 | <kbd>Ctrl</kbd>/<kbd>⌘</kbd> + <kbd>S</kbd> | Save the file |
+| <kbd>Ctrl</kbd> + <kbd>Space</kbd> | Show suggestions |
+| <kbd>Ctrl</kbd>/<kbd>⌘</kbd> + <kbd>F</kbd> | Search in the file |
 
 The editor's current text is sent, even if it is not saved yet — handy for quick experiments.
 

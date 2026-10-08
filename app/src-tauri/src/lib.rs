@@ -24,6 +24,20 @@ struct Session {
     _watcher: Option<notify::RecommendedWatcher>,
 }
 
+impl Session {
+    /// Раннер окружения; создаётся при первом обращении и подхватывает сохранённые `> save`.
+    fn runner(&mut self, env: Option<&str>) -> CmdResult<&mut Runner> {
+        let env = self.project.resolve_env(env).map_err(err)?;
+        if !self.runners.contains_key(&env) {
+            let mut r =
+                Runner::new(self.project.clone(), Some(&env), Options::default()).map_err(err)?;
+            r.load_saved().map_err(err)?;
+            self.runners.insert(env.clone(), r);
+        }
+        Ok(self.runners.get_mut(&env).expect("inserted above"))
+    }
+}
+
 #[derive(Default)]
 struct AppState(Mutex<Option<Session>>);
 
@@ -199,18 +213,45 @@ async fn send_request(
     let file = routy_core::parse(&content).map_err(err)?;
     let mut guard = state.0.lock().await;
     let s = guard.as_mut().ok_or("no project open")?;
-    let env = s.project.resolve_env(env.as_deref()).map_err(err)?;
-    if !s.runners.contains_key(&env) {
-        let mut r = Runner::new(s.project.clone(), Some(&env), Options::default()).map_err(err)?;
-        r.load_saved().map_err(err)?;
-        s.runners.insert(env.clone(), r);
-    }
-    let runner = s.runners.get_mut(&env).expect("inserted above");
+    let runner = s.runner(env.as_deref())?;
     let outcome = runner.run(&file).await.map_err(err)?;
     if !outcome.saved.is_empty() {
         runner.persist_saved().map_err(err)?;
     }
     Ok(outcome)
+}
+
+#[derive(Serialize)]
+struct VarName {
+    name: String,
+    /// `"env"` — из env.toml, `"saved"` — из `> save`.
+    source: &'static str,
+    /// Значение только для env.toml: в saved часто токены.
+    value: Option<String>,
+}
+
+/// Известные имена переменных окружения — для автодополнения `{{var}}`.
+/// Секреты из хранилища перечислить нельзя, их здесь нет.
+#[tauri::command]
+async fn var_names(state: State<'_, AppState>, env: Option<String>) -> CmdResult<Vec<VarName>> {
+    let mut guard = state.0.lock().await;
+    let s = guard.as_mut().ok_or("no project open")?;
+    let vars = &s.runner(env.as_deref())?.vars;
+    let saved = vars.saved.keys().map(|name| VarName {
+        name: name.clone(),
+        source: "saved",
+        value: None,
+    });
+    let from_env = vars
+        .env
+        .iter()
+        .filter(|(name, _)| !vars.saved.contains_key(*name))
+        .map(|(name, value)| VarName {
+            name: name.clone(),
+            source: "env",
+            value: Some(value.clone()),
+        });
+    Ok(saved.chain(from_env).collect())
 }
 
 #[tauri::command]
@@ -248,6 +289,7 @@ pub fn run() {
             check_request,
             check_config,
             send_request,
+            var_names,
             set_secret,
         ])
         .run(tauri::generate_context!())

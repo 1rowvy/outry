@@ -59,7 +59,7 @@ body {
   font: 13px/1.45 var(--sans);
   -webkit-font-smoothing: antialiased;
 }
-code, pre, textarea { font-family: var(--mono); font-size: 12.5px; }
+code, pre { font-family: var(--mono); font-size: 12.5px; }
 pre { margin: 0; white-space: pre-wrap; word-break: break-word; line-height: 1.65; }
 code { padding: 1px 5px; border-radius: 4px; background: var(--track); font-size: 12px; }
 
@@ -271,10 +271,7 @@ kbd {
 .m-patch { color: var(--m-patch); background: color-mix(in srgb, var(--m-patch) 13%, transparent); }
 .m-delete { color: var(--m-delete); background: color-mix(in srgb, var(--m-delete) 13%, transparent); }
 
-.editor textarea {
-  flex: 1; resize: none; border: 0; border-radius: 0; outline: none; padding: 14px 16px;
-  background: transparent; color: var(--text); tab-size: 2; line-height: 1.65;
-}
+.code-editor { flex: 1; min-height: 0; overflow: hidden; }
 
 .response { display: flex; flex-direction: column; min-height: 0; flex: 1; }
 .response-head {
