@@ -140,6 +140,14 @@ kbd {
 .project-name .muted { font-size: 11px; font-weight: 400; opacity: 0; }
 .project-name:hover .muted { opacity: 1; }
 .envs { margin: 0 2px; overflow-x: auto; }
+.config-link {
+  display: flex; align-items: baseline; gap: 8px; width: 100%;
+  border: 0; background: none; padding: 4px 10px; border-radius: 6px; text-align: left;
+  font: 12.5px var(--mono); color: var(--muted);
+}
+.config-link .muted { font: 11px var(--sans); color: var(--faint); }
+.config-link:hover:not(:disabled) { color: var(--text); }
+.config-link.active, .config-link.active:hover:not(:disabled) { background: var(--panel); color: var(--text); box-shadow: var(--raised-shadow); }
 
 .tree-head {
   display: flex; justify-content: space-between; align-items: center;
@@ -269,6 +277,9 @@ kbd {
 .saved code { color: var(--text); }
 
 .tab-body { flex: 1; overflow: auto; padding: 14px 16px; }
+.config-help { color: var(--muted); }
+.config-help p { margin: 0 0 12px; max-width: 60ch; }
+.config-help pre { margin: 0 0 12px; padding: 12px 14px; border-radius: 8px; background: var(--track); color: var(--text); }
 .tests { list-style: none; margin: 0; padding: 0; font-family: var(--mono); }
 .tests li { padding: 3px 0; }
 .headers { border-collapse: collapse; font-family: var(--mono); font-size: 12px; }

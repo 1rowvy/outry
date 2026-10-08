@@ -8,6 +8,17 @@ import { ResponseView } from "./ResponseView";
 import { UpdateBanner } from "./UpdateBanner";
 
 const LAST_PROJECT_KEY = "routy.lastProject";
+const CONFIG = "env.toml";
+const CONFIG_EXAMPLE = `default = "dev"
+
+[vars]
+version = "v1"
+
+[env.dev]
+base = "http://localhost:8080"
+
+[env.prod]
+base = "https://api.example.com"`;
 const NEW_REQUEST = "GET {{base}}/\n\n> assert status == 200\n";
 
 // Метод из строки запроса — только для метки в шапке; разбирает ядро.
@@ -47,6 +58,7 @@ export default function App() {
   const [version, setVersion] = useState<string | null>(null);
 
   const dirty = content !== savedContent;
+  const isConfig = selected === CONFIG;
   const method = requestMethod(content);
   const cut = (selected ?? "").lastIndexOf("/") + 1;
   const dir = (selected ?? "").slice(0, cut);
@@ -129,7 +141,8 @@ export default function App() {
   // Проверка синтаксиса на лету.
   useEffect(() => {
     if (!selected) return;
-    const t = window.setTimeout(() => api.checkRequest(content).then(setParseError), 150);
+    const check = selected === CONFIG ? api.checkConfig : api.checkRequest;
+    const t = window.setTimeout(() => check(content).then(setParseError), 150);
     return () => clearTimeout(t);
   }, [content, selected]);
 
@@ -149,16 +162,17 @@ export default function App() {
 
   const save = useCallback(async () => {
     if (!selected) return;
+    if (selected === CONFIG && parseError) return;
     try {
       await api.writeRequest(selected, content);
       setSavedContent(content);
     } catch (e) {
       setError(String(e));
     }
-  }, [selected, content]);
+  }, [selected, content, parseError]);
 
   const send = useCallback(async () => {
-    if (!selected || sending) return;
+    if (!selected || selected === CONFIG || sending) return;
     setSending(true);
     setSendError(null);
     try {
@@ -236,6 +250,12 @@ export default function App() {
               ))}
             </div>
           )}
+          {project?.has_config && (
+            <button className={"config-link" + (isConfig ? " active" : "")} onClick={() => select(CONFIG)} title="Переменные окружений">
+              <span>env.toml</span>
+              <span className="muted">переменные</span>
+            </button>
+          )}
         </div>
 
         {project && (
@@ -311,17 +331,29 @@ export default function App() {
                 {selected ? (
                   <>
                     <div className="pane-head">
-                      <span className={"method m-" + method.toLowerCase()}>{method}</span>
+                      {isConfig ? (
+                        <span className="method">ENV</span>
+                      ) : (
+                        <span className={"method m-" + method.toLowerCase()}>{method}</span>
+                      )}
                       <span className="pane-title ellipsis" title={selected}>
                         <span className="muted">{dir}</span>
                         {name}
                       </span>
                       {dirty && <span className="dirty" title="Не сохранено" />}
                       <span className="spacer" />
-                      <button onClick={save} disabled={!dirty} title="Ctrl+S">Сохранить</button>
-                      <button className="primary" onClick={send} disabled={sending || !!parseError} title="Ctrl+Enter">
-                        {sending ? "Отправка…" : "Отправить"}
-                      </button>
+                      {isConfig ? (
+                        <button className="primary" onClick={save} disabled={!dirty || !!parseError} title="Ctrl+S">
+                          Сохранить
+                        </button>
+                      ) : (
+                        <>
+                          <button onClick={save} disabled={!dirty} title="Ctrl+S">Сохранить</button>
+                          <button className="primary" onClick={send} disabled={sending || !!parseError} title="Ctrl+Enter">
+                            {sending ? "Отправка…" : "Отправить"}
+                          </button>
+                        </>
+                      )}
                     </div>
                     <textarea value={content} onChange={(e) => setContent(e.target.value)} spellCheck={false} />
                     {parseError && (
@@ -340,12 +372,33 @@ export default function App() {
               </section>
 
               <section className="panel result">
-                {!outcome && <div className="pane-head" />}
-                {sendError && <div className="send-error">{sendError}</div>}
-                {outcome ? <ResponseView outcome={outcome} /> : !sendError && (
-                  <p className="hint">
-                    {sending ? "Отправка…" : <>Ответ появится здесь — <kbd>Ctrl</kbd> <kbd>Enter</kbd></>}
-                  </p>
+                {isConfig ? (
+                  <>
+                    <div className="pane-head">
+                      <span className="pane-title">Справка</span>
+                    </div>
+                    <div className="tab-body config-help">
+                      <p>
+                        Общие переменные — в <code>[vars]</code>, значения окружения — в <code>[env.имя]</code>; они
+                        перекрывают общие. <code>default</code> — окружение по умолчанию.
+                      </p>
+                      <pre>{CONFIG_EXAMPLE}</pre>
+                      <p>
+                        Токены и пароли сюда не пишите — их место в системном хранилище: «Добавить секрет» внизу слева или
+                        переменная <code>ROUTY_ИМЯ</code>.
+                      </p>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    {!outcome && <div className="pane-head" />}
+                    {sendError && <div className="send-error">{sendError}</div>}
+                    {outcome ? <ResponseView outcome={outcome} /> : !sendError && (
+                      <p className="hint">
+                        {sending ? "Отправка…" : <>Ответ появится здесь — <kbd>Ctrl</kbd> <kbd>Enter</kbd></>}
+                      </p>
+                    )}
+                  </>
                 )}
               </section>
             </div>

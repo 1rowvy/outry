@@ -162,10 +162,8 @@ struct ParseError {
     message: String,
 }
 
-/// Проверка синтаксиса на лету, без отправки.
-#[tauri::command]
-fn check_request(content: String) -> Option<ParseError> {
-    routy_core::parse(&content).err().map(|e| match e {
+fn parse_error(e: routy_core::Error) -> ParseError {
+    match e {
         routy_core::Error::Parse { line, msg } => ParseError {
             line: Some(line),
             message: msg,
@@ -174,7 +172,21 @@ fn check_request(content: String) -> Option<ParseError> {
             line: None,
             message: other.to_string(),
         },
-    })
+    }
+}
+
+/// Проверка синтаксиса на лету, без отправки.
+#[tauri::command]
+fn check_request(content: String) -> Option<ParseError> {
+    routy_core::parse(&content).err().map(parse_error)
+}
+
+/// То же для env.toml, открытого в редакторе.
+#[tauri::command]
+fn check_config(content: String) -> Option<ParseError> {
+    routy_core::project::check_config(&content)
+        .err()
+        .map(parse_error)
 }
 
 /// Отправляет текущее содержимое редактора (даже несохранённое).
@@ -234,6 +246,7 @@ pub fn run() {
             read_request,
             write_request,
             check_request,
+            check_config,
             send_request,
             set_secret,
         ])

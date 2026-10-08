@@ -18,11 +18,11 @@ The app remembers the last project and reopens it on start.
 
 ## Working with requests
 
-- The left panel shows every `.http` file in the project; **+ request** creates a new one
+- The left panel shows every `.http` file in the project; **+** next to **Requests** creates a new one
   (`users/create` becomes `users/create.http`).
 - The editor checks syntax as you type and shows the error with its line number.
-- The environment selector in the toolbar switches between environments from `env.toml`.
-- The **Secret** button stores a value in the system keychain for the current environment.
+- The switcher under the project name selects an environment from `env.toml`.
+- **Add secret** at the bottom left stores a value in the system keychain for the current environment.
 
 | Shortcut | Action |
 |----------|--------|
@@ -30,6 +30,13 @@ The app remembers the last project and reopens it on start.
 | <kbd>Ctrl</kbd>/<kbd>⌘</kbd> + <kbd>S</kbd> | Save the file |
 
 The editor's current text is sent, even if it is not saved yet — handy for quick experiments.
+
+## Editing env.toml
+
+Click **env.toml** under the environment switcher to open the project's
+[`env.toml`](/routy/reference/env-toml/) in the editor. The app checks the TOML as you type and won't
+save a file with an error. After saving, new environments appear in the switcher and new values are
+used by the next request. Keep tokens and passwords out of this file — use **Add secret** instead.
 
 ## Response
 
@@ -47,7 +54,7 @@ immediately. If you have unsaved changes in the app, the open file is not overwr
 
 ## Updates
 
-On start the app checks for a new version. When one is available, a button in the toolbar downloads
+On start the app checks for a new version. When one is available, a button in the sidebar downloads
 it, installs it and restarts the app. Updates are signed and verified before installing.
 
 <Aside>

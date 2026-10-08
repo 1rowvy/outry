@@ -140,6 +140,17 @@ impl Project {
     }
 }
 
+/// Проверяет текст `env.toml`, ничего не загружая — для редактора в GUI.
+/// Ошибка с известной позицией — `Error::Parse` с номером строки (с 1).
+pub fn check_config(src: &str) -> Result<()> {
+    toml::from_str::<Config>(src)
+        .map(|_| ())
+        .map_err(|e| match e.span() {
+            Some(span) => Error::parse(src[..span.start].matches('\n').count() + 1, e.message()),
+            None => Error::from(e),
+        })
+}
+
 const INIT_CONFIG: &str = "\
 # Окружения Routy. Секреты сюда не пишем: `routy secret set token --env dev`.
 default = \"dev\"
@@ -249,6 +260,22 @@ mod tests {
         assert_eq!(init(&api).unwrap(), api);
 
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn check_config_reports_line() {
+        assert!(check_config(INIT_CONFIG).is_ok());
+        match check_config("default = \"dev\"\n\n[env.dev]\nbase = \n") {
+            Err(Error::Parse { line, .. }) => assert_eq!(line, 4),
+            other => panic!("expected parse error, got {other:?}"),
+        }
+        match check_config("defualt = \"dev\"") {
+            Err(Error::Parse { line, msg }) => {
+                assert_eq!(line, 1);
+                assert!(msg.contains("defualt"), "{msg}");
+            }
+            other => panic!("expected parse error, got {other:?}"),
+        }
     }
 
     #[test]

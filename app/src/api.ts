@@ -49,6 +49,7 @@ export const api = {
   readRequest: (path: string) => invoke<string>("read_request", { path }),
   writeRequest: (path: string, content: string) => invoke<void>("write_request", { path, content }),
   checkRequest: (content: string) => invoke<ParseError | null>("check_request", { content }),
+  checkConfig: (content: string) => invoke<ParseError | null>("check_config", { content }),
   sendRequest: (env: string | null, content: string) => invoke<RunOutcome>("send_request", { env, content }),
   setSecret: (env: string | null, name: string, value: string) => invoke<void>("set_secret", { env, name, value }),
 };
