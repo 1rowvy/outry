@@ -90,7 +90,7 @@ export default function App() {
   );
 
   const initProject = async () => {
-    if (dirty && !window.confirm("Есть несохранённые изменения. Продолжить?")) return;
+    if (dirty && !window.confirm("You have unsaved changes. Continue?")) return;
     try {
       applyProject(await api.initProject());
     } catch (e) {
@@ -147,7 +147,7 @@ export default function App() {
   }, [content, selected]);
 
   const select = async (path: string) => {
-    if (dirty && !window.confirm("Есть несохранённые изменения. Открыть другой файл?")) return;
+    if (dirty && !window.confirm("You have unsaved changes. Open another file?")) return;
     try {
       const text = await api.readRequest(path);
       setSelected(path);
@@ -201,7 +201,7 @@ export default function App() {
   }, [send, save]);
 
   const pickFolder = async () => {
-    const dir = await open({ directory: true, title: "Каталог проекта (с api/env.toml)" });
+    const dir = await open({ directory: true, title: "Project folder (with api/env.toml)" });
     if (typeof dir === "string") openProject(dir);
   };
 
@@ -237,12 +237,12 @@ export default function App() {
         </div>
 
         <div className="project">
-          <button className="project-name" onClick={pickFolder} title={project ? `${project.root}\nОткрыть другой проект` : undefined}>
-            <span className="ellipsis">{project ? project.id : "Открыть проект…"}</span>
-            {project && <span className="muted">сменить</span>}
+          <button className="project-name" onClick={pickFolder} title={project ? `${project.root}\nOpen another project` : undefined}>
+            <span className="ellipsis">{project ? project.id : "Open project…"}</span>
+            {project && <span className="muted">change</span>}
           </button>
           {project && project.envs.length > 0 && (
-            <div className="seg envs" role="radiogroup" aria-label="Окружение">
+            <div className="seg envs" role="radiogroup" aria-label="Environment">
               {project.envs.map((e) => (
                 <button key={e} role="radio" aria-checked={e === env} className={e === env ? "active" : ""} onClick={() => setEnv(e)}>
                   {e}
@@ -251,9 +251,9 @@ export default function App() {
             </div>
           )}
           {project?.has_config && (
-            <button className={"config-link" + (isConfig ? " active" : "")} onClick={() => select(CONFIG)} title="Переменные окружений">
+            <button className={"config-link" + (isConfig ? " active" : "")} onClick={() => select(CONFIG)} title="Environment variables">
               <span>env.toml</span>
-              <span className="muted">переменные</span>
+              <span className="muted">variables</span>
             </button>
           )}
         </div>
@@ -261,8 +261,8 @@ export default function App() {
         {project && (
           <>
             <div className="tree-head">
-              <span>Запросы</span>
-              <button className="icon" onClick={() => setNewPath(newPath === null ? "" : null)} title="Новый запрос">
+              <span>Requests</span>
+              <button className="icon" onClick={() => setNewPath(newPath === null ? "" : null)} title="New request">
                 +
               </button>
             </div>
@@ -282,17 +282,17 @@ export default function App() {
           <div className="side-foot">
             {secretForm && (
               <form className="stack" onSubmit={(e) => (e.preventDefault(), saveSecret())}>
-                <input placeholder="имя" value={secretForm.name} onChange={(e) => setSecretForm({ ...secretForm, name: e.target.value })} autoFocus />
-                <input placeholder="значение" type="password" value={secretForm.value} onChange={(e) => setSecretForm({ ...secretForm, value: e.target.value })} />
-                <button type="submit">Сохранить для {env ?? "default"}</button>
+                <input placeholder="name" value={secretForm.name} onChange={(e) => setSecretForm({ ...secretForm, name: e.target.value })} autoFocus />
+                <input placeholder="value" type="password" value={secretForm.value} onChange={(e) => setSecretForm({ ...secretForm, value: e.target.value })} />
+                <button type="submit">Save for {env ?? "default"}</button>
               </form>
             )}
             <button
               className="ghost"
               onClick={() => setSecretForm(secretForm ? null : { name: "", value: "" })}
-              title="Секреты хранятся в системном хранилище паролей"
+              title="Secrets are kept in the system keychain"
             >
-              {secretForm ? "Отмена" : "Добавить секрет"}
+              {secretForm ? "Cancel" : "Add secret"}
             </button>
           </div>
         )}
@@ -307,22 +307,22 @@ export default function App() {
 
         {!project ? (
           <div className="panel empty">
-            <h1>Откройте проект</h1>
+            <h1>Open a project</h1>
             <p>
-              Routy найдёт <code>api/env.toml</code> и все <code>*.http</code> файлы в каталоге.
+              Routy will find <code>api/env.toml</code> and every <code>*.http</code> file in the folder.
             </p>
-            <button className="primary" onClick={pickFolder}>Выбрать каталог</button>
+            <button className="primary" onClick={pickFolder}>Choose folder</button>
           </div>
         ) : (
           <>
             {!project.has_config && (
               <div className="init-bar">
                 <span>
-                  В <code>{project.root}</code> нет <code>env.toml</code> — без него нет окружений и переменных вроде{" "}
+                  <code>{project.root}</code> has no <code>env.toml</code> — without it there are no environments or variables like{" "}
                   <code>{"{{base}}"}</code>.
                 </span>
                 <button className="primary" onClick={initProject}>
-                  Создать api/env.toml
+                  Create api/env.toml
                 </button>
               </div>
             )}
@@ -340,17 +340,17 @@ export default function App() {
                         <span className="muted">{dir}</span>
                         {name}
                       </span>
-                      {dirty && <span className="dirty" title="Не сохранено" />}
+                      {dirty && <span className="dirty" title="Unsaved" />}
                       <span className="spacer" />
                       {isConfig ? (
                         <button className="primary" onClick={save} disabled={!dirty || !!parseError} title="Ctrl+S">
-                          Сохранить
+                          Save
                         </button>
                       ) : (
                         <>
-                          <button onClick={save} disabled={!dirty} title="Ctrl+S">Сохранить</button>
+                          <button onClick={save} disabled={!dirty} title="Ctrl+S">Save</button>
                           <button className="primary" onClick={send} disabled={sending || !!parseError} title="Ctrl+Enter">
-                            {sending ? "Отправка…" : "Отправить"}
+                            {sending ? "Sending…" : "Send"}
                           </button>
                         </>
                       )}
@@ -358,7 +358,7 @@ export default function App() {
                     <textarea value={content} onChange={(e) => setContent(e.target.value)} spellCheck={false} />
                     {parseError && (
                       <div className="parse-error">
-                        {parseError.line !== null && `строка ${parseError.line}: `}
+                        {parseError.line !== null && `line ${parseError.line}: `}
                         {parseError.message}
                       </div>
                     )}
@@ -366,7 +366,7 @@ export default function App() {
                 ) : (
                   <>
                     <div className="pane-head" />
-                    <p className="hint">Выберите запрос слева</p>
+                    <p className="hint">Select a request on the left</p>
                   </>
                 )}
               </section>
@@ -375,17 +375,17 @@ export default function App() {
                 {isConfig ? (
                   <>
                     <div className="pane-head">
-                      <span className="pane-title">Справка</span>
+                      <span className="pane-title">Reference</span>
                     </div>
                     <div className="tab-body config-help">
                       <p>
-                        Общие переменные — в <code>[vars]</code>, значения окружения — в <code>[env.имя]</code>; они
-                        перекрывают общие. <code>default</code> — окружение по умолчанию.
+                        Shared variables go in <code>[vars]</code>, per-environment values in <code>[env.name]</code>;
+                        they override the shared ones. <code>default</code> is the default environment.
                       </p>
                       <pre>{CONFIG_EXAMPLE}</pre>
                       <p>
-                        Токены и пароли сюда не пишите — их место в системном хранилище: «Добавить секрет» внизу слева или
-                        переменная <code>ROUTY_ИМЯ</code>.
+                        Don't put tokens or passwords here — they belong in the system keychain: "Add secret" at the bottom
+                        left, or a <code>ROUTY_NAME</code> environment variable.
                       </p>
                     </div>
                   </>
@@ -395,7 +395,7 @@ export default function App() {
                     {sendError && <div className="send-error">{sendError}</div>}
                     {outcome ? <ResponseView outcome={outcome} /> : !sendError && (
                       <p className="hint">
-                        {sending ? "Отправка…" : <>Ответ появится здесь — <kbd>Ctrl</kbd> <kbd>Enter</kbd></>}
+                        {sending ? "Sending…" : <>The response will appear here — <kbd>Ctrl</kbd> <kbd>Enter</kbd></>}
                       </p>
                     )}
                   </>

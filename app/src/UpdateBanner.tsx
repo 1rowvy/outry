@@ -25,11 +25,11 @@ export function UpdateBanner() {
 
   return (
     <div className="update-banner">
-      <span>Доступна версия {update.version}</span>
+      <span>Version {update.version} is available</span>
       {progress === undefined ? (
-        <button onClick={install}>Обновить и перезапустить</button>
+        <button onClick={install}>Update and restart</button>
       ) : (
-        <span className="muted">{progress === null ? "Загрузка…" : `Загрузка ${progress}%`}</span>
+        <span className="muted">{progress === null ? "Downloading…" : `Downloading ${progress}%`}</span>
       )}
       {error && <span className="bad">{error}</span>}
     </div>

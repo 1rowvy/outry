@@ -45,7 +45,7 @@ export function ResponseView({ outcome }: { outcome: RunOutcome }) {
       </div>
       {Object.keys(outcome.saved).length > 0 && (
         <div className="saved">
-          сохранено: {Object.keys(outcome.saved).map((k) => <code key={k}>{k}</code>)}
+          saved: {Object.keys(outcome.saved).map((k) => <code key={k}>{k}</code>)}
         </div>
       )}
       <div className="tab-body">
@@ -53,7 +53,7 @@ export function ResponseView({ outcome }: { outcome: RunOutcome }) {
         {tab === "headers" && <HeaderTable headers={r.headers} />}
         {tab === "tests" &&
           (checks === 0 ? (
-            <p className="muted">Нет проверок. Добавьте в конец файла: <code>&gt; assert status == 200</code></p>
+            <p className="muted">No checks. Add to the end of the file: <code>&gt; assert status == 200</code></p>
           ) : (
             <ul className="tests">
               {outcome.asserts.map((a, i) => (
@@ -63,7 +63,7 @@ export function ResponseView({ outcome }: { outcome: RunOutcome }) {
                 </li>
               ))}
               {outcome.save_misses.map((m) => (
-                <li key={m} className="bad">✗ save {m} <span className="muted">— нет значения в ответе</span></li>
+                <li key={m} className="bad">✗ save {m} <span className="muted">— no value in the response</span></li>
               ))}
             </ul>
           ))}

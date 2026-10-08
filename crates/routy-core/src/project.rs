@@ -152,7 +152,7 @@ pub fn check_config(src: &str) -> Result<()> {
 }
 
 const INIT_CONFIG: &str = "\
-# Окружения Routy. Секреты сюда не пишем: `routy secret set token --env dev`.
+# Routy environments. Secrets don't go here: `routy secret set token --env dev`.
 default = \"dev\"
 
 [env.dev]

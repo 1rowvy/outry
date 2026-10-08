@@ -37,7 +37,7 @@ function countFiles(node: Node): number {
 export function FileTree(props: { files: string[]; selected: string | null; onSelect: (path: string) => void }) {
   const tree = useMemo(() => buildTree(props.files), [props.files]);
   if (props.files.length === 0) {
-    return <p className="muted pad">Нет *.http файлов</p>;
+    return <p className="muted pad">No *.http files</p>;
   }
   return <ul className="tree">{tree.map((n) => <TreeNode key={n.path} node={n} {...props} />)}</ul>;
 }
