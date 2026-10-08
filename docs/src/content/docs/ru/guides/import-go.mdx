@@ -46,17 +46,48 @@ created 2 files
 Путь может быть строкой, конкатенацией и константой пакета (`apiPrefix + "/users"`). Путь, который
 вычисляется во время работы, не определить — о нём будет предупреждение.
 
+В приложении вкладка **Routes** показывает то же самое для каждого роута; нажмите на новый роут, чтобы
+посмотреть файл до создания.
+
 ## Что создаётся
 
 Параметры пути становятся переменными: `{id}`, `{id:[0-9]+}`, `{path...}`, `:id` и `*path` превращаются
 в `{{id}}` / `{{path}}`.
 
-```http title="api/users/get-by-id.http"
-# chi internal/http/routes.go:25 → h.GetUser
-GET {{base}}/users/{{id}}
+Routy также читает обработчик и показывает, что запрос ожидает:
+
+- **описание** — doc-комментарий обработчика или `@Summary` / `@Description` из аннотаций swag;
+- **тело** — структура, в которую декодируется запрос: `json.NewDecoder(r.Body).Decode(&req)`,
+  `c.ShouldBindJSON(&req)`, `render.DecodeJSON`, своя `decodeJSON(r, &req)` или объект-валидатор с методом
+  `Bind`. Поля берутся из тегов `json`, `binding:"required"` / `validate:"required"` отмечают обязательные,
+  вложенные структуры показываются через точку (`user.email`), комментарий после поля сохраняется;
+- **query** — `r.URL.Query().Get("page")`, `c.Query`, `c.DefaultQuery`, `c.QueryParam`, `r.FormValue`
+  и `c.ShouldBindQuery(&q)` (поля из тегов `form`);
+- **заголовки** — `r.Header.Get("X-Tenant-ID")`, `c.GetHeader`.
+
+```http title="api/users/post.http"
+# Создать пользователя
+# Отправляет приветственное письмо.
+# chi internal/http/users.go:42 → h.CreateUser
+#
+# Headers: X-Tenant-ID
+# Body: dto.CreateUser
+#   name          string  required  ФИО
+#   email         string  required
+#   address.city  string
+POST {{base}}/users
+
+{
+  "name": "",
+  "email": "",
+  "address": {
+    "city": ""
+  }
+}
 ```
 
-У `POST`, `PUT` и `PATCH` — пустое JSON-тело `{}`. Роут на любой метод (`r.Handle`, `Any` в gin)
+Тело — пример с пустыми значениями нужных типов. `POST`, `PUT` и `PATCH`, у которых тело не распознано,
+получают пустое JSON-тело `{}`. Роут на любой метод (`r.Handle`, `Any` в gin)
 создаётся как `GET` с комментарием `# any method`.
 
 Имена файлов повторяют путь: статические сегменты — папки, параметры в конце — в имени.

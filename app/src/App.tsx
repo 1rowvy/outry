@@ -502,7 +502,7 @@ export default function App() {
               </form>
             )}
             <div className="tree-wrap" onContextMenu={(e) => openMenu(e, null)}>
-              <FileTree files={project.files} selected={selected} onSelect={select} onMenu={openMenu} />
+              <FileTree files={project.files} methods={project.methods} selected={selected} onSelect={select} onMenu={openMenu} />
             </div>
           </>
         )}

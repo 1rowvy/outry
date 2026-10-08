@@ -46,17 +46,48 @@ get their prefixes too: `r.Mount("/admin", admin.Routes())`, `users.Register(v1)
 Paths may be string literals, concatenations and package constants (`apiPrefix + "/users"`). A path
 computed at runtime can't be resolved; it is reported as a warning.
 
+In the desktop app the **Routes** tab shows the same information for every route; click a new route to
+preview the file before creating it.
+
 ## Generated files
 
 Path parameters become variables: `{id}`, `{id:[0-9]+}`, `{path...}`, `:id` and `*path` all turn into
 `{{id}}` / `{{path}}`.
 
-```http title="api/users/get-by-id.http"
-# chi internal/http/routes.go:25 → h.GetUser
-GET {{base}}/users/{{id}}
+Routy also reads the handler to show what the request expects:
+
+- **description** — the handler's doc comment, or `@Summary` / `@Description` from swag annotations;
+- **body** — the struct the request is decoded into: `json.NewDecoder(r.Body).Decode(&req)`,
+  `c.ShouldBindJSON(&req)`, `render.DecodeJSON`, your own `decodeJSON(r, &req)`, or a validator object
+  with a `Bind` method. Fields come from `json` tags, `binding:"required"` / `validate:"required"` marks
+  required ones, nested structs are listed with dots (`user.email`), and a comment after a field is kept;
+- **query** — `r.URL.Query().Get("page")`, `c.Query`, `c.DefaultQuery`, `c.QueryParam`, `r.FormValue`
+  and `c.ShouldBindQuery(&q)` (fields from `form` tags);
+- **headers** — `r.Header.Get("X-Tenant-ID")`, `c.GetHeader`.
+
+```http title="api/users/post.http"
+# Create a user
+# Sends a welcome email.
+# chi internal/http/users.go:42 → h.CreateUser
+#
+# Headers: X-Tenant-ID
+# Body: dto.CreateUser
+#   name          string  required  full name
+#   email         string  required
+#   address.city  string
+POST {{base}}/users
+
+{
+  "name": "",
+  "email": "",
+  "address": {
+    "city": ""
+  }
+}
 ```
 
-`POST`, `PUT` and `PATCH` get an empty JSON body `{}`. A route that accepts any method (`r.Handle`,
+The body is an example with empty values of the right types. `POST`, `PUT` and `PATCH` without a
+recognized body get an empty JSON body `{}`. A route that accepts any method (`r.Handle`,
 gin `Any`) is created as `GET` with a `# any method` comment.
 
 File names follow the path: static segments become folders, trailing parameters go into the name.

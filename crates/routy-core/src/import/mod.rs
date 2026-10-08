@@ -32,6 +32,43 @@ pub struct Route {
     pub handler: Option<String>,
     /// Какой шаблон нашёл роут: `chi`, `gin`, `net/http`, …
     pub router: String,
+    /// Что передавать: из кода обработчика
+    pub info: RouteInfo,
+}
+
+/// Описание роута из кода обработчика.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub struct RouteInfo {
+    /// Первая строка doc-комментария или `@Summary`
+    pub summary: Option<String>,
+    pub description: Vec<String>,
+    /// Query-параметры, которые читает обработчик
+    pub query: Vec<Field>,
+    /// Заголовки, которые читает обработчик
+    pub headers: Vec<String>,
+    /// JSON-тело, в которое декодируется запрос
+    pub body: Option<Body>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Body {
+    /// Тип в Go: `dto.CreateUser`
+    pub type_name: String,
+    pub fields: Vec<Field>,
+    /// Пример тела с пустыми значениями
+    pub example: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Field {
+    /// Имя в JSON / query
+    pub name: String,
+    /// Тип в Go
+    pub ty: String,
+    /// `binding:"required"` / `validate:"required"`
+    pub required: bool,
+    /// Комментарий к полю в структуре
+    pub comment: Option<String>,
 }
 
 #[derive(Debug, Default, Serialize)]
@@ -329,25 +366,92 @@ fn free_name(want: &Path, taken: &HashSet<PathBuf>) -> PathBuf {
         .expect("infinite range")
 }
 
+/// Текст нового файла: что это за роут и что в него передавать — комментарием,
+/// пример тела — телом запроса.
 fn content(route: &Route, base: &str) -> String {
-    let source = route.source.to_string_lossy().replace('\\', "/");
-    let mut s = format!("# {} {}", route.router, source);
-    s.push_str(&format!(":{}", route.line));
-    if let Some(h) = &route.handler {
-        s.push_str(&format!(" → {h}"));
+    let info = &route.info;
+    let mut head = Vec::new();
+    if let Some(s) = &info.summary {
+        head.push(s.clone());
     }
-    s.push('\n');
+    head.extend(info.description.iter().cloned());
+    let source = route.source.to_string_lossy().replace('\\', "/");
+    let mut from = format!("{} {source}:{}", route.router, route.line);
+    if let Some(h) = &route.handler {
+        from.push_str(&format!(" → {h}"));
+    }
+    head.push(from);
+    if route.method == ANY {
+        head.push("any method".into());
+    }
+
+    let mut params = Vec::new();
+    let path_vars: Vec<&str> = route
+        .path
+        .split("{{")
+        .skip(1)
+        .filter_map(|s| s.split("}}").next())
+        .collect();
+    if !path_vars.is_empty() {
+        params.push(format!("Path: {}", path_vars.join(", ")));
+    }
+    if !info.query.is_empty() {
+        params.push("Query:".into());
+        params.extend(field_lines(&info.query));
+    }
+    if !info.headers.is_empty() {
+        params.push(format!("Headers: {}", info.headers.join(", ")));
+    }
+    if let Some(b) = &info.body {
+        params.push(format!("Body: {}", b.type_name));
+        params.extend(field_lines(&b.fields));
+    }
+
+    let mut s = String::new();
+    for l in &head {
+        s.push_str(&format!("# {l}\n"));
+    }
+    if !params.is_empty() {
+        s.push_str("#\n");
+        for l in &params {
+            s.push_str(&format!("# {l}\n"));
+        }
+    }
     let method = if route.method == ANY {
-        s.push_str("# any method\n");
         "GET"
     } else {
         &route.method
     };
     s.push_str(&format!("{method} {{{{{base}}}}}{}\n", route.path));
-    if matches!(method, "POST" | "PUT" | "PATCH") {
-        s.push_str("\n{}\n");
+    match &info.body {
+        Some(b) => s.push_str(&format!("\n{}\n", b.example)),
+        None if matches!(method, "POST" | "PUT" | "PATCH") => s.push_str("\n{}\n"),
+        None => {}
     }
     s
+}
+
+/// Поля столбцами: `  name     string  required  ФИО`.
+fn field_lines(fields: &[Field]) -> Vec<String> {
+    let w_name = fields.iter().map(|f| f.name.len()).max().unwrap_or(0);
+    let w_ty = fields
+        .iter()
+        .map(|f| f.ty.chars().count())
+        .max()
+        .unwrap_or(0);
+    fields
+        .iter()
+        .map(|f| {
+            let mut l = format!("  {:w_name$}  {:w_ty$}", f.name, f.ty);
+            if f.required {
+                l.push_str("  required");
+            }
+            if let Some(c) = &f.comment {
+                l.push_str(&format!("  {c}"));
+            }
+            l.trim_end().to_string()
+        })
+        .collect()
 }
 
 #[cfg(test)]

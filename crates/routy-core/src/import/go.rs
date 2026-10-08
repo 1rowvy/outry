@@ -21,6 +21,8 @@ use std::path::{Path, PathBuf};
 use streaming_iterator::StreamingIterator;
 use tree_sitter::{Language, Node, Parser, Query, QueryCursor, Tree};
 
+mod describe;
+
 use super::{Route, Scan};
 use crate::error::{Error, Result};
 
@@ -125,7 +127,7 @@ pub fn scan(dir: &Path, queries: &[RouterQuery]) -> Result<Scan> {
         let rel = path.strip_prefix(dir).unwrap_or(&path).to_path_buf();
         files.push(GoFile::new(rel, src, tree));
     }
-    Ok(Index::build(&files, queries).routes())
+    Ok(Index::build(&files, queries).routes(&files))
 }
 
 fn walk(dir: &Path, out: &mut Vec<PathBuf>) -> Result<()> {
@@ -249,6 +251,8 @@ struct RawRoute {
     method: Option<String>,
     path: String,
     handler: Option<String>,
+    /// Байтовый диапазон выражения-обработчика — для разбора, что передавать
+    handler_range: Option<(usize, usize)>,
     router: String,
     line: usize,
 }
@@ -370,6 +374,7 @@ impl Index {
             method,
             path,
             handler,
+            handler_range: cap.get("handler").map(|n| (n.start_byte(), n.end_byte())),
             router: router.to_string(),
             line,
         });
@@ -424,7 +429,8 @@ impl Index {
         });
     }
 
-    fn routes(self) -> Scan {
+    fn routes(self, files: &[GoFile]) -> Scan {
+        let describer = describe::Describer::new(files, &self.funcs);
         let mut r = Resolver {
             ix: &self,
             memo: HashMap::new(),
@@ -432,6 +438,10 @@ impl Index {
         let mut seen = HashSet::new();
         let mut routes = Vec::new();
         for raw in &self.routes {
+            let info = raw
+                .handler_range
+                .map(|h| describer.describe(raw.site.file, h))
+                .unwrap_or_default();
             for prefix in r.base(raw.site, &raw.recv, 0) {
                 let path = super::normalize_route(&join(&prefix, &raw.path));
                 let method = raw.method.clone().unwrap_or_else(|| super::ANY.to_string());
@@ -443,6 +453,7 @@ impl Index {
                         line: raw.line,
                         handler: raw.handler.clone(),
                         router: raw.router.clone(),
+                        info: info.clone(),
                     });
                 }
             }

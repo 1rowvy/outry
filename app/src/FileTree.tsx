@@ -1,14 +1,22 @@
-import { useMemo, type MouseEvent } from "react";
+import { useMemo, useState, type MouseEvent } from "react";
 
 interface Node {
   name: string;
   path: string;
   children: Node[];
   isFile: boolean;
+  method: string;
+  /** Подпись файла: имя без префикса метода (`get-by-id` → `by-id`) или имя папки */
+  label: string;
 }
 
-function buildTree(files: string[]): Node[] {
-  const root: Node = { name: "", path: "", children: [], isFile: false };
+const METHOD_ORDER = ["GET", "POST", "PUT", "PATCH", "DELETE"];
+const SHORT: Record<string, string> = { DELETE: "DEL", PATCH: "PTCH", OPTIONS: "OPT" };
+/** Фильтр показывается, когда файлов больше этого */
+const FILTER_FROM = 8;
+
+function buildTree(files: string[], methods: Record<string, string>): Node[] {
+  const root: Node = { name: "", path: "", children: [], isFile: false, method: "", label: "" };
   for (const file of files) {
     let cur = root;
     const parts = file.split("/");
@@ -16,18 +24,56 @@ function buildTree(files: string[]): Node[] {
       const isFile = i === parts.length - 1;
       let next = cur.children.find((c) => c.name === part && c.isFile === isFile);
       if (!next) {
-        next = { name: part, path: parts.slice(0, i + 1).join("/"), children: [], isFile };
+        const method = isFile ? (methods[file] ?? "GET") : "";
+        next = { name: part, path: parts.slice(0, i + 1).join("/"), children: [], isFile, method, label: "" };
         cur.children.push(next);
       }
       cur = next;
     });
   }
-  const sort = (nodes: Node[]) => {
-    nodes.sort((a, b) => Number(a.isFile) - Number(b.isFile) || a.name.localeCompare(b.name));
-    nodes.forEach((n) => sort(n.children));
+  return compact(root.children, "");
+}
+
+/** `users/get.http` → `users`, `users/get-by-id.http` → `by-id`, `users/create.http` → `create`. */
+function fileLabel(node: Node, parent: string): string {
+  const base = node.name.replace(/\.http$/, "");
+  const m = node.method.toLowerCase();
+  if (base === m) return parent || base;
+  if (base.startsWith(m + "-")) return base.slice(m.length + 1);
+  return base;
+}
+
+/**
+ * Сжимает дерево: цепочка единственных папок — одна строка (`api / v1`),
+ * папка с единственным файлом — сам файл (`auth/login/post.http` → `POST login`).
+ */
+function compact(nodes: Node[], parent: string): Node[] {
+  const out = nodes.map((n): Node => {
+    if (n.isFile) return { ...n, label: fileLabel(n, parent) };
+    let dir = n;
+    let name = n.name;
+    while (dir.children.length === 1 && !dir.children[0].isFile) {
+      dir = dir.children[0];
+      name += " / " + dir.name;
+    }
+    if (dir.children.length === 1) {
+      const file = dir.children[0];
+      const own = fileLabel(file, "");
+      const label = own === file.method.toLowerCase() ? name : `${name} / ${own}`;
+      return { ...file, label };
+    }
+    return { ...dir, name, children: compact(dir.children, dir.name) };
+  });
+  const rank = (m: string) => {
+    const i = METHOD_ORDER.indexOf(m);
+    return i < 0 ? METHOD_ORDER.length : i;
   };
-  sort(root.children);
-  return root.children;
+  return out.sort(
+    (a, b) =>
+      Number(a.isFile) - Number(b.isFile) ||
+      (a.isFile ? a.label : a.name).localeCompare(b.isFile ? b.label : b.name) ||
+      rank(a.method) - rank(b.method),
+  );
 }
 
 export interface TreeTarget {
@@ -45,20 +91,52 @@ function countFiles(node: Node): number {
 
 interface Props {
   files: string[];
+  methods: Record<string, string>;
   selected: string | null;
   onSelect: (path: string) => void;
   onMenu: OnMenu;
 }
 
 export function FileTree(props: Props) {
-  const tree = useMemo(() => buildTree(props.files), [props.files]);
+  const [filter, setFilter] = useState("");
+  const filtering = filter.trim() !== "";
+  const shown = useMemo(() => {
+    const terms = filter.toLowerCase().split(/\s+/).filter(Boolean);
+    return props.files.filter((f) => {
+      const hay = `${props.methods[f] ?? ""} ${f}`.toLowerCase();
+      return terms.every((t) => hay.includes(t));
+    });
+  }, [props.files, props.methods, filter]);
+  const tree = useMemo(() => buildTree(shown, props.methods), [shown, props.methods]);
   if (props.files.length === 0) {
     return <p className="muted pad">No *.http files</p>;
   }
-  return <ul className="tree">{tree.map((n) => <TreeNode key={n.path} node={n} {...props} />)}</ul>;
+  return (
+    <>
+      {(props.files.length > FILTER_FROM || filter) && (
+        <input
+          className="tree-filter"
+          type="search"
+          placeholder="Filter"
+          value={filter}
+          onChange={(e) => setFilter(e.target.value)}
+          onKeyDown={(e) => e.key === "Escape" && setFilter("")}
+        />
+      )}
+      {tree.length === 0 ? (
+        <p className="muted pad">Nothing matches</p>
+      ) : (
+        <ul className="tree">
+          {tree.map((n) => (
+            <TreeNode key={n.path + (filtering ? ":f" : "")} node={n} {...props} />
+          ))}
+        </ul>
+      )}
+    </>
+  );
 }
 
-function TreeNode(props: Omit<Props, "files"> & { node: Node }) {
+function TreeNode(props: Omit<Props, "files" | "methods"> & { node: Node }) {
   const { node } = props;
   if (node.isFile) {
     return (
@@ -69,7 +147,8 @@ function TreeNode(props: Omit<Props, "files"> & { node: Node }) {
           onContextMenu={(e) => props.onMenu(e, { path: node.path, isFile: true, count: 1 })}
           title={node.path}
         >
-          {node.name.replace(/\.http$/, "")}
+          <span className={"tree-method m-" + node.method.toLowerCase()}>{SHORT[node.method] ?? node.method}</span>
+          <span className="ellipsis">{node.label}</span>
         </button>
       </li>
     );

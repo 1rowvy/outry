@@ -9,6 +9,8 @@ export interface ProjectInfo {
   /** false — каталог открыт без env.toml */
   has_config: boolean;
   files: string[];
+  /** путь → метод из строки запроса */
+  methods: Record<string, string>;
 }
 
 export interface Header {
@@ -80,6 +82,24 @@ export interface Route {
   line: number;
   handler: string | null;
   router: string;
+  /** Что передавать — из кода обработчика */
+  info: RouteInfo;
+}
+
+export interface Field {
+  name: string;
+  /** тип в Go */
+  ty: string;
+  required: boolean;
+  comment: string | null;
+}
+
+export interface RouteInfo {
+  summary: string | null;
+  description: string[];
+  query: Field[];
+  headers: string[];
+  body: { type_name: string; fields: Field[]; example: string } | null;
 }
 
 export interface ImportPlan {

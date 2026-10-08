@@ -52,7 +52,18 @@
 }
 
 * { box-sizing: border-box; }
-html, body, #root { height: 100%; margin: 0; }
+/* Окно не прокручивается целиком: прокручиваются только панели. */
+html, body, #root { height: 100%; margin: 0; overflow: hidden; }
+
+/* Тонкие скроллбары вместо системных (на Windows — классические со стрелками). */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track, ::-webkit-scrollbar-corner { background: transparent; }
+::-webkit-scrollbar-button { display: none; }
+::-webkit-scrollbar-thumb {
+  border: 3px solid transparent; border-radius: 10px; background-clip: padding-box;
+  background-color: color-mix(in srgb, var(--text) 16%, transparent);
+}
+::-webkit-scrollbar-thumb:hover { background-color: color-mix(in srgb, var(--text) 30%, transparent); }
 body {
   background: var(--win);
   color: var(--text);
@@ -107,8 +118,9 @@ kbd {
 /* Сегментированный переключатель: окружения и вкладки ответа */
 
 .seg { display: flex; gap: 2px; padding: 2px; border-radius: 8px; background: var(--track); }
+/* Кнопки растягиваются поровну, но не уже своего текста. */
 .seg button {
-  flex: 1; min-width: 0; padding: 3px 10px; border: 0; border-radius: 6px;
+  flex: 1 0 auto; padding: 3px 10px; border: 0; border-radius: 6px;
   background: none; color: var(--muted); font-size: 12px; white-space: nowrap;
 }
 .seg button:hover:not(:disabled) { background: none; color: var(--text); }
@@ -116,7 +128,7 @@ kbd {
 
 .app {
   display: grid; grid-template-columns: 236px minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr);
-  height: 100%;
+  height: 100%; overflow: hidden;
 }
 
 /* Шапка окна */
@@ -176,6 +188,10 @@ kbd {
 }
 .tree-head + .stack { padding: 2px 2px 8px; }
 .tree-wrap { flex: 1; overflow: auto; min-height: 0; padding: 0 2px 8px; }
+.tree-filter {
+  position: sticky; top: 0; z-index: 1; width: 100%; margin-bottom: 4px;
+  padding: 4px 9px; font-size: 12px; background: var(--win);
+}
 
 .update-banner {
   display: flex; flex-direction: column; align-items: flex-start; gap: 8px;
@@ -188,7 +204,7 @@ kbd {
 /* Дерево */
 
 .tree { list-style: none; margin: 0; padding: 0; }
-.tree .tree { margin-left: 10px; padding-left: 6px; border-left: 1px solid var(--line); }
+.tree .tree { margin-left: 11px; padding-left: 3px; border-left: 1px solid var(--line); }
 .tree summary {
   display: flex; align-items: center; gap: 7px;
   cursor: pointer; padding: 4px 8px; border-radius: 6px; color: var(--muted);
@@ -205,10 +221,12 @@ kbd {
 .tree summary .muted { font-size: 11px; color: var(--faint); }
 .tree summary:hover { background: var(--hover); color: var(--text); }
 .tree-file {
-  display: block; width: 100%; text-align: left; border: 0; background: none;
-  padding: 4px 10px; border-radius: 6px; color: var(--muted);
-  font-family: var(--mono); font-size: 12.5px; font-weight: 400;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  display: flex; align-items: center; gap: 6px; width: 100%; text-align: left; border: 0; background: none;
+  padding: 4px 8px; border-radius: 6px; color: var(--muted);
+  font-size: 12.5px; font-weight: 400; white-space: nowrap;
+}
+.tree-file .tree-method {
+  flex: none; width: 32px; font: 700 9.5px/1 var(--mono); letter-spacing: 0.02em; background: none;
 }
 .tree-file:hover:not(:disabled) { color: var(--text); }
 .tree-file.active, .tree-file.active:hover:not(:disabled) {
@@ -397,9 +415,19 @@ label.check small { display: block; color: var(--faint); font-size: 11.5px; }
 .routes-warning { margin: 4px 14px; font: 12px var(--mono); color: var(--m-patch); }
 .routes h3 { margin: 12px 14px 0; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--faint); }
 .routes .history-list { flex: none; overflow: visible; padding: 4px 6px; }
-.r-row { display: flex; align-items: center; gap: 8px; padding: 6px 8px; }
+.routes .history-list button, .r-row {
+  display: grid; grid-template-columns: 10px 50px minmax(0, 1fr); align-items: center; justify-items: start;
+  column-gap: 8px; row-gap: 3px; padding: 6px 8px;
+}
 .r-mark { flex: none; width: 10px; font: 700 12px var(--mono); color: var(--faint); }
 .r-mark.new { color: var(--m-get); }
 .r-mark.stale { color: var(--bad); }
-.r-path { flex: 1; min-width: 0; font: 12px var(--mono); }
-.r-file { flex: 0 1 auto; max-width: 35%; text-align: right; color: var(--faint); }
+.r-path { font: 12px var(--mono); overflow-wrap: anywhere; }
+.r-sub { grid-column: 3; font-size: 11px; color: var(--faint); }
+.r-summary { grid-column: 3; font-size: 12px; color: var(--text); }
+.r-needs { grid-column: 3; font: 11px var(--mono); color: var(--muted); overflow-wrap: anywhere; }
+.r-preview {
+  margin: 2px 8px 8px 26px; padding: 10px 12px; border-radius: 8px;
+  background: var(--track); font-size: 11.5px; line-height: 1.5; color: var(--muted);
+}
+.r-sub .r-file { font-family: var(--mono); color: var(--muted); }

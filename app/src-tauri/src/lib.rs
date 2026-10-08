@@ -59,13 +59,33 @@ struct ProjectInfo {
     /// `false` — открыт каталог без env.toml; фронт предлагает его создать.
     has_config: bool,
     files: Vec<String>,
+    /// Метод каждого файла (для значков в дереве)
+    methods: HashMap<String, String>,
+}
+
+/// Метод из строки запроса без полного разбора: файл с ошибкой тоже получает значок.
+fn request_method(src: &str) -> String {
+    src.lines()
+        .map(str::trim)
+        .find(|l| !l.is_empty() && !l.starts_with('#') && !l.starts_with("//"))
+        .and_then(|l| l.split_whitespace().next())
+        .filter(|w| w.bytes().all(|b| b.is_ascii_uppercase()))
+        .unwrap_or("GET")
+        .to_string()
 }
 
 fn project_info(p: &Project) -> CmdResult<ProjectInfo> {
-    let files = discover::request_files(&p.root)
+    let files: Vec<String> = discover::request_files(&p.root)
         .map_err(err)?
         .into_iter()
         .map(|f| f.to_string_lossy().replace('\\', "/"))
+        .collect();
+    let methods = files
+        .iter()
+        .map(|f| {
+            let src = std::fs::read_to_string(p.root.join(f)).unwrap_or_default();
+            (f.clone(), request_method(&src))
+        })
         .collect();
     Ok(ProjectInfo {
         root: p.root.clone(),
@@ -74,6 +94,7 @@ fn project_info(p: &Project) -> CmdResult<ProjectInfo> {
         default_env: p.resolve_env(None).ok(),
         has_config: p.has_config(),
         files,
+        methods,
     })
 }
 

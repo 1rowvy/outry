@@ -554,12 +554,16 @@ fn import(cmd: ImportCmd) -> anyhow::Result<ExitCode> {
         .max()
         .unwrap_or(0);
     let route = |r: &routy_core::import::Route| {
-        format!(
+        let mut line = format!(
             "{} {}  {}",
             r.method,
             r.path,
             st.dim(&format!("{}:{}", r.source.display(), r.line))
-        )
+        );
+        if let Some(summary) = &r.info.summary {
+            line.push_str(&format!("  {summary}"));
+        }
+        line
     };
     for f in &plan.new {
         let file = format!("{:width$}", shown(&f.file));

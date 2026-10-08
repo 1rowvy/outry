@@ -264,6 +264,7 @@ fn route(method: &str, path: &str) -> Route {
         line: 7,
         handler: Some("h.Get".into()),
         router: "chi".into(),
+        info: RouteInfo::default(),
     }
 }
 
@@ -330,4 +331,247 @@ fn plan_creates_only_missing_files() {
     assert!(again.new.is_empty());
     assert_eq!(again.existing.len(), 4);
     assert!(apply(&dir.0, &plan).unwrap().is_empty(), "never overwrites");
+}
+
+const DESCRIBE_MAIN: &str = r#"package main
+
+import (
+	"encoding/json"
+	"net/http"
+
+	"github.com/go-chi/chi/v5"
+	"example.com/svc/dto"
+)
+
+func main() {
+	r := chi.NewRouter()
+	h := &Handler{}
+	r.Post("/users", h.CreateUser)
+	r.Get("/users", h.ListUsers)
+	r.Put("/users/{id}", http.HandlerFunc(h.UpdateUser))
+	r.Post("/inline", func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Text string `json:"text"`
+		}
+		json.NewDecoder(r.Body).Decode(&in)
+	})
+}
+
+// CreateUser creates a user.
+// Sends a welcome email.
+func (h *Handler) CreateUser(w http.ResponseWriter, r *http.Request) {
+	var req dto.CreateUser
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		return
+	}
+	_ = r.Header.Get("X-Tenant-ID")
+}
+
+// @Summary List users
+// @Tags users
+func (h *Handler) ListUsers(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	page := q.Get("page")
+	limit := r.URL.Query().Get("limit")
+	rows, _ := h.db.Query("SELECT * FROM users WHERE x = ?", page)
+	_, _ = limit, rows
+}
+
+func (h *Handler) UpdateUser(w http.ResponseWriter, r *http.Request) {
+	req := &dto.UpdateUser{}
+	decodeJSON(r, req)
+	readJSON(r, &req)
+}
+"#;
+
+const DESCRIBE_DTO: &str = r#"package dto
+
+import "time"
+
+type Status string
+
+type Base struct {
+	Note string `json:"note,omitempty"`
+}
+
+type CreateUser struct {
+	Base
+	Name     string            `json:"name" validate:"required,min=2"` // ФИО
+	Email    string            `json:"email" validate:"required,email"`
+	Age      *int              `json:"age,omitempty"`
+	Status   Status            `json:"status"`
+	Tags     []string          `json:"tags"`
+	Address  Address           `json:"address"`
+	Meta     map[string]string `json:"meta"`
+	Born     time.Time         `json:"born"`
+	Password string            `json:"-"`
+	internal int
+	Legacy   bool
+}
+
+type Address struct {
+	City string `json:"city"`
+}
+
+type UpdateUser struct {
+	Name string `json:"name"`
+}
+"#;
+
+#[test]
+fn describes_handlers() {
+    let dir = TempDir::new("describe");
+    dir.write("main.go", DESCRIBE_MAIN);
+    dir.write("dto/dto.go", DESCRIBE_DTO);
+    let s = scan(&dir);
+    let get = |m: &str, p: &str| {
+        s.routes
+            .iter()
+            .find(|r| r.method == m && r.path == p)
+            .unwrap_or_else(|| panic!("{m} {p}: {:?}", routes(&s)))
+            .info
+            .clone()
+    };
+
+    let create = get("POST", "/users");
+    assert_eq!(
+        create.summary.as_deref(),
+        Some("CreateUser creates a user.")
+    );
+    assert_eq!(create.description, ["Sends a welcome email."]);
+    assert_eq!(create.headers, ["X-Tenant-ID"]);
+    let body = create.body.unwrap();
+    assert_eq!(body.type_name, "dto.CreateUser");
+    let names: Vec<&str> = body.fields.iter().map(|f| f.name.as_str()).collect();
+    assert_eq!(
+        names,
+        [
+            "note",
+            "name",
+            "email",
+            "age",
+            "status",
+            "tags",
+            "address.city",
+            "meta",
+            "born",
+            "Legacy"
+        ]
+    );
+    let name = &body.fields[1];
+    assert!(name.required);
+    assert_eq!(name.comment.as_deref(), Some("ФИО"));
+    assert!(!body.fields[3].required);
+    let example: serde_json::Value = serde_json::from_str(&body.example).unwrap();
+    assert_eq!(
+        example,
+        serde_json::json!({
+            "note": "", "name": "", "email": "", "age": 0, "status": "", "tags": [""],
+            "address": {"city": ""}, "meta": {}, "born": "2006-01-02T15:04:05Z", "Legacy": false
+        })
+    );
+    assert!(
+        body.example.starts_with("{\n  \"note\""),
+        "field order kept"
+    );
+    assert!(
+        body.example.contains("\"tags\": [\"\"],"),
+        "{}",
+        body.example
+    );
+
+    let list = get("GET", "/users");
+    assert_eq!(list.summary.as_deref(), Some("List users"));
+    assert!(list.description.is_empty(), "{:?}", list.description);
+    let query: Vec<&str> = list.query.iter().map(|f| f.name.as_str()).collect();
+    assert_eq!(query, ["page", "limit"]);
+    assert!(list.body.is_none());
+
+    let update = get("PUT", "/users/{{id}}");
+    assert_eq!(update.body.unwrap().type_name, "dto.UpdateUser");
+
+    let inline = get("POST", "/inline");
+    assert_eq!(inline.body.unwrap().example, "{\n  \"text\": \"\"\n}");
+
+    // Всё это попадает в создаваемый файл.
+    let route = s
+        .routes
+        .iter()
+        .find(|r| r.method == "POST" && r.path == "/users")
+        .unwrap();
+    let text = content(route, DEFAULT_BASE);
+    assert!(text.starts_with("# CreateUser creates a user.\n# Sends a welcome email.\n# chi main.go:14 → h.CreateUser\n#\n"), "{text}");
+    assert!(
+        text.contains("# Headers: X-Tenant-ID\n# Body: dto.CreateUser\n"),
+        "{text}"
+    );
+    assert!(
+        text.contains("#   name          string             required  ФИО\n"),
+        "{text}"
+    );
+    assert!(
+        text.contains("POST {{base}}/users\n\n{\n  \"note\": \"\","),
+        "{text}"
+    );
+    crate::parse(&text).unwrap();
+}
+
+#[test]
+fn describes_gin_bindings() {
+    let dir = TempDir::new("describe-gin");
+    dir.write(
+        "main.go",
+        r#"package main
+
+import "github.com/gin-gonic/gin"
+
+type loginReq struct {
+	Login    string `json:"login" binding:"required"`
+	Password string `json:"password" binding:"required"`
+}
+
+type listQuery struct {
+	Page int    `form:"page"`
+	Sort string `form:"sort" binding:"required"`
+}
+
+func main() {
+	r := gin.Default()
+	r.POST("/login", login)
+	r.GET("/items", listItems)
+}
+
+func login(c *gin.Context) {
+	var req loginReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		return
+	}
+}
+
+func listItems(c *gin.Context) {
+	var q listQuery
+	_ = c.ShouldBindQuery(&q)
+	_ = c.DefaultQuery("lang", "en")
+	_ = c.GetHeader("Accept-Language")
+}
+"#,
+    );
+    let s = scan(&dir);
+    let login = &s.routes.iter().find(|r| r.path == "/login").unwrap().info;
+    let body = login.body.as_ref().unwrap();
+    assert!(body.fields.iter().all(|f| f.required));
+    assert_eq!(
+        body.example,
+        "{\n  \"login\": \"\",\n  \"password\": \"\"\n}"
+    );
+
+    let items = &s.routes.iter().find(|r| r.path == "/items").unwrap().info;
+    let q: Vec<(&str, bool)> = items
+        .query
+        .iter()
+        .map(|f| (f.name.as_str(), f.required))
+        .collect();
+    assert_eq!(q, [("page", false), ("sort", true), ("lang", false)]);
+    assert_eq!(items.headers, ["Accept-Language"]);
+    assert!(items.body.is_none());
 }

@@ -82,7 +82,8 @@ GUI и CLI не могут разъехаться: оба вызывают од�
 - [x] `/users/{id}` и `/users/:id` → `{{id}}`
 - [x] Генерация `api/<resource>/<method>.http` только для отсутствующих файлов; `--dry-run`, отчёт «новые / пропавшие роуты»
 - [x] `routy import go ./cmd/server`, кнопка «Синхронизировать» и вкладка Routes в GUI
-- [ ] Позже: тело запроса из структур хендлеров (`json.Decode(&req)` → поля структуры с тегами `json:`)
+- [x] Что передавать — из кода хендлера: описание (doc-комментарий, swag `@Summary`), JSON-тело из структуры
+  (`Decode(&req)`, `ShouldBindJSON`, `v.Bind(c)`; теги `json`, `binding/validate:"required"`), query, заголовки
 
 ### 6. Цепочки и проверки
 - [ ] `routy run` по сценарию: `api/flows/signup.flow` со списком файлов
