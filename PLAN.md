@@ -85,16 +85,34 @@ GUI и CLI не могут разъехаться: оба вызывают од�
 - [x] Что передавать — из кода хендлера: описание (doc-комментарий, swag `@Summary`), JSON-тело из структуры
   (`Decode(&req)`, `ShouldBindJSON`, `v.Bind(c)`; теги `json`, `binding/validate:"required"`), query, заголовки
 
-### 6. Цепочки и проверки
+### 6. Совместимость с `.http` — до продвижения
+Позиционирование «открой `.http`, которые уже лежат в репо» ломается на первом файле из JetBrains/VS Code.
+- [ ] Несколько запросов в одном файле через `###` (как в JetBrains HTTP Client / VS Code REST Client):
+  парсер, `routy run`/`check`, выбор запроса в GUI
+
+### 7. Коллекция, которая не устаревает (киллер-фича)
+Питч: «одна строка в CI — и API-тесты больше не разъедутся с кодом». Bruno/Postman о коде ничего не знают.
+- [ ] `routy import go --check`: exit code ≠ 0, если в коде есть роут без `.http` или `.http` ссылается на удалённый роут
+  (сравнение «новые / пропавшие» уже есть в `import/mod.rs`)
+- [ ] Дрейф тела запроса: `required`-поле в Go-структуре, которого нет в теле `.http`, — ошибка `--check`
+- [ ] Ассерты из типа ответа: структура в `json.Encode` / `c.JSON` → сгенерированные `> assert body.<field> exists`
+- [ ] Рецепт для CI в docs (GitHub Actions, GitLab) и готовый `routy-action`
+
+### 8. MCP для AI-агентов
+- [ ] `routy mcp` (stdio): инструменты «список запросов», «выполнить файл в env», «показать переменные» поверх `Runner`/`Vars`
+- [ ] Секреты подставляются внутри routy и не попадают к агенту (значения из keyring/`secrets` маскируются в ответах)
+- [ ] Страница в docs: подключение к Claude Code / Cursor
+
+### 9. Цепочки и проверки
 - [ ] `routy run` по сценарию: `api/flows/signup.flow` со списком файлов
 - [ ] Ещё операторы: `matches /regex/`, `in [..]`, `type == array`, `length`
 - [ ] JUnit-отчёт (`--report junit.xml`) для CI
 - [ ] Запуск коллекции в GUI с отчётом
 
 ### Потом
-- Несколько запросов в одном файле через `###` (совместимость с JetBrains HTTP Client / VS Code REST Client)
+- Импорт роутов из других языков (FastAPI, Express, Spring) — когда Go-история заработает и будет что показать
 - Импорт из Postman / Insomnia / OpenAPI
-- GraphQL, WebSocket, multipart, файлы в теле (`< ./payload.json`)
+- GraphQL, WebSocket, multipart, файлы в теле (`< ./payload.json`) — догонялки за Bruno, не раньше этапов 6–8
 - Подпись и нотаризация macOS, подпись Windows-установщика
 - Пакетные менеджеры для CLI: Homebrew tap, AUR, COPR, Scoop/winget
 
