@@ -288,6 +288,7 @@ kbd {
 .m-put { color: var(--m-put); background: color-mix(in srgb, var(--m-put) 13%, transparent); }
 .m-patch { color: var(--m-patch); background: color-mix(in srgb, var(--m-patch) 13%, transparent); }
 .m-delete { color: var(--m-delete); background: color-mix(in srgb, var(--m-delete) 13%, transparent); }
+.m-flow { color: var(--accent); background: color-mix(in srgb, var(--accent) 13%, transparent); }
 
 .code-editor { flex: 1; min-height: 0; overflow: hidden; }
 
@@ -431,3 +432,14 @@ label.check small { display: block; color: var(--faint); font-size: 11.5px; }
   background: var(--track); font-size: 11.5px; line-height: 1.5; color: var(--muted);
 }
 .r-sub .r-file { font-family: var(--mono); color: var(--muted); }
+
+/* *.routy: вызванные запросы и итог сценария */
+.trace { list-style: none; margin: 0; padding: 0; font-family: var(--mono); font-size: 12px; }
+.trace li { display: flex; align-items: center; gap: 8px; padding: 3px 0; }
+.t-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.t-status { font-weight: 600; }
+.t-status.ok { color: var(--m-get); }
+.t-status.bad { color: var(--bad); }
+.t-cached { color: var(--muted); background: var(--hover); }
+.flow-error { margin-bottom: 10px; font-family: var(--mono); color: var(--bad); white-space: pre-wrap; }
+.flow-h { margin: 16px 0 6px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--faint); }

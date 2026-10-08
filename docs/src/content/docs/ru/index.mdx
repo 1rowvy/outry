@@ -1,6 +1,6 @@
 ---
 title: Routy
-description: API-клиент, где запросы — текстовые .http-файлы в репозитории. Приложение и CLI для CI работают на одном ядре.
+description: API-клиент, где запросы — текстовые .routy-файлы в репозитории. Приложение и CLI для CI работают на одном ядре.
 template: splash
 hero:
   tagline: API-клиент, где запросы — обычные текстовые файлы в репозитории. Одно ядро у приложения и CLI — они не могут разъехаться.
@@ -22,20 +22,25 @@ import { Card, CardGrid } from '@astrojs/starlight/components';
 curl -fsSL https://raw.githubusercontent.com/1rowvy/routy/master/install.sh | sh
 ```
 
-```http title="api/users/create.http"
-POST {{base}}/users
-Authorization: Bearer {{token}}
+```routy title="api/users/create.routy"
+// Create user
+POST /users {
+  headers { Authorization: "Bearer ${Login().body.token}" }
+  body { name: "Viktor", role: "admin" }
 
-{"name": "Viktor"}
+  expect {
+    status == 201
+    body matches { id: string, name: string }
+  }
 
-> save user_id = body.id
-> assert status == 201
+  save user_id = body.id
+}
 ```
 
 <CardGrid>
 	<Card title="Запросы живут в git" icon="document">
-		Один `.http`-файл на запрос. Их можно ревьюить в пулл-реквестах, искать grep'ом и править в любом
-		редакторе — приложение сразу подхватывает изменения.
+		Запросы — `.routy`-файлы: JSON-тело и проверки, которые читаются как код. Их можно ревьюить в
+		пулл-реквестах, искать grep'ом и править в любом редакторе — приложение сразу подхватывает изменения.
 	</Card>
 	<Card title="Один движок везде" icon="laptop">
 		Приложение и CLI `routy` вызывают одно и то же ядро на Rust: запрос, который работает в GUI,
@@ -45,8 +50,8 @@ Authorization: Bearer {{token}}
 		Токены лежат в системном хранилище паролей, а в CI приходят из переменных `ROUTY_*`. Случайно
 		закоммитить нечего.
 	</Card>
-	<Card title="Цепочки и проверки" icon="approve-check">
-		`> save` берёт значение из ответа для следующего запроса, `> assert` проверяет статус, заголовки и
-		JSON. Если что-то упало — ненулевой код выхода.
+	<Card title="Запросы вызывают запросы" icon="approve-check">
+		`Login().body.token` логинится один раз за прогон и переиспользует ответ; `flow` описывает сценарий.
+		`expect` проверяет статус, заголовки и форму тела. Если что-то упало — ненулевой код выхода.
 	</Card>
 </CardGrid>

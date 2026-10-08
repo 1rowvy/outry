@@ -2,10 +2,21 @@ import { useCallback, useEffect, useRef, useState, type MouseEvent } from "react
 import { getVersion } from "@tauri-apps/api/app";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
-import { api, type Entry, type ImportReport, type ParseError, type ProjectInfo, type VarInfo, type VarName } from "./api";
+import {
+  api,
+  type Entry,
+  type FlowOutcome,
+  type ImportReport,
+  type ParseError,
+  type ProjectInfo,
+  type Symbols,
+  type VarInfo,
+  type VarName,
+} from "./api";
 import { CodeEditor } from "./CodeEditor";
 import { ContextMenu, type MenuItem } from "./ContextMenu";
 import { FileTree, type TreeTarget } from "./FileTree";
+import { FlowView } from "./FlowView";
 import { HistoryList } from "./HistoryList";
 import { ResponseView } from "./ResponseView";
 import { RoutesPanel } from "./RoutesPanel";
@@ -33,10 +44,26 @@ base = "http://localhost:8080"
 [env.prod]
 base = "https://api.example.com"`;
 const NEW_REQUEST = "GET {{base}}/\n\n> assert status == 200\n";
+const NEW_ROUTY = "GET / {\n  expect { status == 200 }\n}\n";
+const REQUEST_EXT = /\.(http|routy)$/;
+
+const isRouty = (path: string | null) => !!path?.endsWith(".routy");
 
 // Метод из строки запроса — только для метки в шапке; разбирает ядро.
-function requestMethod(text: string): string {
-  for (const line of text.split("\n")) {
+// В *.routy — запрос или сценарий, на котором стоит курсор.
+function requestMethod(text: string, routy: boolean, cursor: number): string {
+  const lines = text.split("\n");
+  if (routy) {
+    let found = "";
+    for (let i = 0; i < lines.length; i++) {
+      const m = /^([A-Z]{2,})\s|^(flow)\s/.exec(lines[i]);
+      if (!m) continue;
+      if (i + 1 > cursor && found) break;
+      found = m[1] ?? "FLOW";
+    }
+    return found || "GET";
+  }
+  for (const line of lines) {
     const t = line.trim();
     if (!t || t.startsWith("#") || t.startsWith("//")) continue;
     return /^([A-Z]+)\s/.exec(t)?.[1] ?? "GET";
@@ -47,6 +74,10 @@ function requestMethod(text: string): string {
 /** Последний ответ, ошибка и запрос в полёте — на каждый файл, чтобы запросы шли параллельно. */
 interface Run {
   entry?: Entry;
+  /** *.routy: итог сценария */
+  flow?: FlowOutcome;
+  /** *.routy: что запускали */
+  name?: string;
   error?: string;
   /** id для отмены */
   pending?: number;
@@ -60,10 +91,10 @@ interface PathForm {
   value: string;
 }
 
-/** `users/create` → `users/create.http`; каталоги — без расширения. */
-function normalizePath(value: string, isDir: boolean): string {
+/** `users/create` → `users/create.routy` (или с расширением `ext`); каталоги — без расширения. */
+function normalizePath(value: string, isDir: boolean, ext = ".routy"): string {
   const p = value.trim().replace(/^\/+|\/+$/g, "");
-  return isDir ? p : p.replace(/(\.http)?$/, ".http");
+  return isDir || REQUEST_EXT.test(p) ? p : p + ext;
 }
 
 /** Путь после переименования `from` → `to` (файла или каталога). */
@@ -90,7 +121,9 @@ export default function App() {
   const [selected, setSelected] = useState<string | null>(null);
   const [content, setContent] = useState("");
   const [savedContent, setSavedContent] = useState("");
-  const [parseError, setParseError] = useState<ParseError | null>(null);
+  const [parseErrors, setParseErrors] = useState<ParseError[]>([]);
+  const [cursor, setCursor] = useState(1);
+  const [symbols, setSymbols] = useState<Symbols | null>(null);
   const [runs, setRuns] = useState<Record<string, Run>>({});
   const [opened, setOpened] = useState<Entry | null>(null);
   const [view, setView] = useState<View>("response");
@@ -116,10 +149,12 @@ export default function App() {
   const shown = opened ?? run?.entry ?? null;
   const bump = () => setTick((t) => t + 1);
   const isConfig = selected === CONFIG;
-  const method = requestMethod(content);
+  const routy = isRouty(selected);
+  const parseError = parseErrors[0] ?? null;
+  const method = requestMethod(content, routy, cursor);
   const cut = (selected ?? "").lastIndexOf("/") + 1;
   const dir = (selected ?? "").slice(0, cut);
-  const name = (selected ?? "").slice(cut).replace(/\.http$/, "");
+  const name = (selected ?? "").slice(cut).replace(REQUEST_EXT, "");
   // Для обработчика событий файловой системы нужны актуальные значения без переподписки.
   const live = useRef({ selected, dirty });
   live.current = { selected, dirty };
@@ -216,13 +251,23 @@ export default function App() {
     api.history().then(setHistory, () => setHistory([]));
   }, [root, tick]);
 
-  // Проверка синтаксиса на лету.
+  // Проверка на лету: синтаксис, а в *.routy — ещё имена вызовов, аргументы и формы (routy check).
   useEffect(() => {
     if (!selected) return;
-    const check = selected === CONFIG ? api.checkConfig : api.checkRequest;
-    const t = window.setTimeout(() => check(content).then(setParseError), 150);
+    const one = (e: ParseError | null) => setParseErrors(e ? [e] : []);
+    const t = window.setTimeout(() => {
+      if (selected === CONFIG) api.checkConfig(content).then(one);
+      else if (isRouty(selected)) api.checkRouty(selected, content).then(setParseErrors, (e) => one({ line: null, col: null, message: String(e) }));
+      else api.checkRequest(content).then(one);
+    }, 150);
     return () => clearTimeout(t);
   }, [content, selected]);
+
+  // Имена запросов и сценариев для автодополнения в *.routy.
+  useEffect(() => {
+    if (!project || !routy) return;
+    api.routySymbols().then(setSymbols, () => setSymbols(null));
+  }, [project, routy, selected, savedContent]);
 
   const select = async (path: string) => {
     if (dirty && !window.confirm("You have unsaved changes. Open another file?")) return;
@@ -249,7 +294,7 @@ export default function App() {
     }
   }, [selected, content, parseError]);
 
-  const send = useCallback(async () => {
+  const send = useCallback(async (line?: number) => {
     if (!selected || selected === CONFIG || runs[selected]?.pending) return;
     const path = selected;
     const id = ++nextId.current;
@@ -257,15 +302,20 @@ export default function App() {
     setOpened(null);
     setView("response");
     try {
-      const entry = await api.sendRequest(id, env, path, content);
-      setRuns((r) => ({ ...r, [path]: { entry } }));
+      if (isRouty(path)) {
+        const res = await api.runRouty(id, env, path, content, line ?? cursor);
+        setRuns((r) => ({ ...r, [path]: { entry: res.entry ?? undefined, flow: res.flow ?? undefined, name: res.name } }));
+      } else {
+        const entry = await api.sendRequest(id, env, path, content);
+        setRuns((r) => ({ ...r, [path]: { entry } }));
+      }
     } catch (e) {
       const msg = String(e);
       setRuns((r) => ({ ...r, [path]: { ...r[path], pending: undefined, error: msg === "cancelled" ? undefined : msg } }));
     } finally {
       bump();
     }
-  }, [selected, runs, env, content]);
+  }, [selected, runs, env, content, cursor]);
 
   const cancel = () => {
     if (run?.pending) api.cancelRequest(run.pending);
@@ -321,12 +371,13 @@ export default function App() {
   const submitPath = async () => {
     if (!pathForm) return;
     const from = pathForm.from;
-    const path = normalizePath(pathForm.value, from ? !from.isFile : false);
-    if (!path || path === ".http") return;
+    const ext = from?.isFile ? (from.path.match(REQUEST_EXT)?.[0] ?? ".routy") : ".routy";
+    const path = normalizePath(pathForm.value, from ? !from.isFile : false, ext);
+    if (!path || REQUEST_EXT.test(path) && path.replace(REQUEST_EXT, "") === "") return;
     try {
       if (!from) {
         if (project?.files.includes(path)) throw new Error(`${path} already exists`);
-        await api.writeRequest(path, NEW_REQUEST);
+        await api.writeRequest(path, isRouty(path) ? NEW_ROUTY : NEW_REQUEST);
         setPathForm(null);
         await refresh();
         await select(path);
@@ -362,9 +413,10 @@ export default function App() {
   };
 
   const duplicate = async (path: string) => {
-    const base = path.replace(/\.http$/, "");
-    let copy = `${base}-copy.http`;
-    for (let i = 2; project?.files.includes(copy); i++) copy = `${base}-copy${i}.http`;
+    const ext = path.match(REQUEST_EXT)?.[0] ?? ".routy";
+    const base = path.replace(REQUEST_EXT, "");
+    let copy = `${base}-copy${ext}`;
+    for (let i = 2; project?.files.includes(copy); i++) copy = `${base}-copy${i}${ext}`;
     try {
       await api.writeRequest(copy, await api.readRequest(path));
       await refresh();
@@ -385,7 +437,7 @@ export default function App() {
     }
     if (t) {
       items.push(
-        { label: "Rename / Move…", run: () => setPathForm({ from: t, value: t.isFile ? t.path.replace(/\.http$/, "") : t.path }) },
+        { label: "Rename / Move…", run: () => setPathForm({ from: t, value: t.isFile ? t.path.replace(REQUEST_EXT, "") : t.path }) },
         { label: "Delete", danger: true, run: () => remove(t) },
       );
     }
@@ -396,6 +448,14 @@ export default function App() {
     try {
       await api.clearSaved(env);
       bump();
+    } catch (e) {
+      setError(String(e));
+    }
+  };
+
+  const resetRun = async () => {
+    try {
+      await api.resetRun();
     } catch (e) {
       setError(String(e));
     }
@@ -539,7 +599,8 @@ export default function App() {
           <div className="panel empty">
             <h1>Open a project</h1>
             <p>
-              Routy will find <code>api/env.toml</code> and every <code>*.http</code> file in the folder.
+              Routy will find <code>api/env.toml</code> and every <code>*.routy</code> and <code>*.http</code> file in the
+              folder.
             </p>
             <button className="primary" onClick={pickFolder}>Choose folder</button>
           </div>
@@ -582,8 +643,13 @@ export default function App() {
                           {run?.pending ? (
                             <button onClick={cancel} title="Cancel the request">Cancel</button>
                           ) : (
-                            <button className="primary" onClick={send} disabled={!!parseError} title="Ctrl+Enter">
-                              Send
+                            <button
+                              className="primary"
+                              onClick={() => send()}
+                              disabled={!!parseError}
+                              title={routy ? "Run the request or flow at the cursor (Ctrl+Enter)" : "Ctrl+Enter"}
+                            >
+                              {routy ? "Run" : "Send"}
                             </button>
                           )}
                         </>
@@ -593,14 +659,18 @@ export default function App() {
                       docKey={selected}
                       value={content}
                       onChange={setContent}
-                      language={isConfig ? "toml" : "http"}
-                      error={parseError}
+                      language={isConfig ? "toml" : routy ? "routy" : "http"}
+                      errors={parseErrors}
                       vars={vars}
+                      symbols={symbols}
+                      onCursor={setCursor}
+                      onRun={(line) => send(line)}
                     />
                     {parseError && (
                       <div className="parse-error">
                         {parseError.line !== null && `line ${parseError.line}: `}
                         {parseError.message}
+                        {parseErrors.length > 1 && <span className="muted"> (+{parseErrors.length - 1} more)</span>}
                       </div>
                     )}
                   </>
@@ -662,7 +732,13 @@ export default function App() {
                     onOpen={select}
                   />
                 ) : view === "vars" ? (
-                  <VarsPanel env={env} vars={varList} onClearSaved={clearSaved} onSetSecret={(name) => setSecretForm({ name, value: "" })} />
+                  <VarsPanel
+                    env={env}
+                    vars={varList}
+                    onClearSaved={clearSaved}
+                    onResetRun={resetRun}
+                    onSetSecret={(name) => setSecretForm({ name, value: "" })}
+                  />
                 ) : isConfig ? (
                   <div className="tab-body config-help">
                     <p>
@@ -679,7 +755,9 @@ export default function App() {
                 ) : (
                   <>
                     {run?.error && !opened && <div className="send-error">{run.error}</div>}
-                    {shown && (opened || !run?.error) ? (
+                    {run?.flow && !opened && !run.error ? (
+                      <FlowView name={run.name ?? "flow"} flow={run.flow} />
+                    ) : shown && (opened || !run?.error) ? (
                       <ResponseView key={shown.id} entry={shown} onError={setError} />
                     ) : (
                       !run?.error && (

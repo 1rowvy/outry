@@ -3,10 +3,13 @@
 
 use std::collections::HashMap;
 use std::path::{Component, Path, PathBuf};
+use std::sync::Arc;
 
 use base64::Engine;
 use notify::{RecursiveMode, Watcher};
 use routy_core::history::{Entry, History, history_path};
+use routy_core::lang::exec::{FlowOutcome, Outcome, Run};
+use routy_core::lang::{Workspace, ast::Item};
 use routy_core::runner::Options;
 use routy_core::vars::{VarInfo, mask};
 use routy_core::{Project, Runner, discover, dynamic};
@@ -20,10 +23,20 @@ fn err(e: impl std::fmt::Display) -> String {
     e.to_string()
 }
 
+/// Прогон `*.routy`: кеш вызовов и cookies живут, пока не сменили окружение или не сбросили.
+/// Свой раннер — чтобы долгий сценарий не держал сессию; сохранённые значения синхронизируются
+/// с раннером окружения до и после запуска.
+struct LangRun {
+    run: Run,
+    runner: Runner,
+}
+
 struct Session {
     project: Project,
     /// Раннер на окружение: в нём живут значения `> save` между запросами.
     runners: HashMap<String, Runner>,
+    /// Окружение прогона — снаружи мьютекса: он занят, пока идёт сценарий.
+    lang: Option<(String, Arc<Mutex<LangRun>>)>,
     history: History,
     _watcher: Option<notify::RecommendedWatcher>,
 }
@@ -40,6 +53,26 @@ impl Session {
         }
         Ok(self.runners.get_mut(&env).expect("inserted above"))
     }
+
+    /// Прогон `*.routy` окружения; другое окружение — новый прогон.
+    fn lang_run(&mut self, env: Option<&str>) -> CmdResult<(String, Arc<Mutex<LangRun>>)> {
+        let env = self.project.resolve_env(env).map_err(err)?;
+        if let Some((e, l)) = &self.lang {
+            if *e == env {
+                return Ok((env, l.clone()));
+            }
+        }
+        let runner =
+            Runner::new(self.project.clone(), Some(&env), Options::default()).map_err(err)?;
+        let run = Run::new(Workspace::default(), Options::default().timeout).map_err(err)?;
+        let l = Arc::new(Mutex::new(LangRun { run, runner }));
+        self.lang = Some((env.clone(), l.clone()));
+        Ok((env, l))
+    }
+}
+
+fn is_routy(path: &str) -> bool {
+    path.ends_with(&format!(".{}", discover::ROUTY_EXTENSION))
 }
 
 #[derive(Default)]
@@ -64,18 +97,32 @@ struct ProjectInfo {
 }
 
 /// Метод из строки запроса без полного разбора: файл с ошибкой тоже получает значок.
-fn request_method(src: &str) -> String {
-    src.lines()
+/// В `*.routy` — первый запрос файла, а если в нём только сценарии — `FLOW`.
+fn request_method(src: &str, routy: bool) -> String {
+    let word = |l: &str| l.split_whitespace().next().unwrap_or_default().to_string();
+    let mut lines = src
+        .lines()
         .map(str::trim)
-        .find(|l| !l.is_empty() && !l.starts_with('#') && !l.starts_with("//"))
-        .and_then(|l| l.split_whitespace().next())
+        .filter(|l| !l.is_empty() && !l.starts_with('#') && !l.starts_with("//"));
+    let is_method = |w: &str| w.len() >= 2 && w.bytes().all(|b| b.is_ascii_uppercase());
+    if routy {
+        let words: Vec<String> = lines.map(word).collect();
+        return match words.iter().find(|w| is_method(w)) {
+            Some(m) => m.clone(),
+            None if words.iter().any(|w| w == "flow") => "FLOW".into(),
+            None => "GET".into(),
+        };
+    }
+    lines
+        .next()
+        .map(word)
         .filter(|w| w.bytes().all(|b| b.is_ascii_uppercase()))
-        .unwrap_or("GET")
-        .to_string()
+        .unwrap_or_else(|| "GET".into())
 }
 
 fn project_info(p: &Project) -> CmdResult<ProjectInfo> {
-    let files: Vec<String> = discover::request_files(&p.root)
+    let exts = [discover::EXTENSION, discover::ROUTY_EXTENSION];
+    let files: Vec<String> = discover::files(&p.root, &exts)
         .map_err(err)?
         .into_iter()
         .map(|f| f.to_string_lossy().replace('\\', "/"))
@@ -84,7 +131,7 @@ fn project_info(p: &Project) -> CmdResult<ProjectInfo> {
         .iter()
         .map(|f| {
             let src = std::fs::read_to_string(p.root.join(f)).unwrap_or_default();
-            (f.clone(), request_method(&src))
+            (f.clone(), request_method(&src, is_routy(f)))
         })
         .collect();
     Ok(ProjectInfo {
@@ -139,6 +186,7 @@ async fn open(app: tauri::AppHandle, state: &AppState, dir: &Path) -> CmdResult<
     *state.session.lock().await = Some(Session {
         project,
         runners: HashMap::new(),
+        lang: None,
         history: History::default(),
         _watcher: watcher,
     });
@@ -179,6 +227,7 @@ async fn refresh_project(state: State<'_, AppState>) -> CmdResult<ProjectInfo> {
     let c = (&project.config, &s.project.config);
     if c.0.env != c.1.env || c.0.vars != c.1.vars || c.0.secrets != c.1.secrets {
         s.runners.clear();
+        s.lang = None;
     }
     s.project = project;
     project_info(&s.project)
@@ -223,7 +272,7 @@ async fn rename_path(state: State<'_, AppState>, from: String, to: String) -> Cm
     Ok(())
 }
 
-/// Удаляет файл запроса или все `*.http` в каталоге. Прочие файлы не трогаем:
+/// Удаляет файл запроса или все `*.http` и `*.routy` в каталоге. Прочие файлы не трогаем:
 /// каталог исчезает, только если в нём больше ничего не осталось.
 #[tauri::command]
 async fn delete_path(state: State<'_, AppState>, path: String) -> CmdResult<()> {
@@ -232,13 +281,17 @@ async fn delete_path(state: State<'_, AppState>, path: String) -> CmdResult<()> 
     let root = &s.project.root;
     let full = inside(root, &path)?;
     if full.is_dir() {
-        for f in discover::request_files(&full).map_err(err)? {
+        let exts = [discover::EXTENSION, discover::ROUTY_EXTENSION];
+        for f in discover::files(&full, &exts).map_err(err)? {
             let f = full.join(f);
             std::fs::remove_file(&f).map_err(err)?;
             prune_empty(&full, f.parent());
         }
         prune_empty(root, Some(&full));
-    } else if full.extension().is_some_and(|e| e == discover::EXTENSION) {
+    } else if full
+        .extension()
+        .is_some_and(|e| e == discover::EXTENSION || e == discover::ROUTY_EXTENSION)
+    {
         std::fs::remove_file(&full).map_err(err)?;
         prune_empty(root, full.parent());
     } else {
@@ -260,6 +313,8 @@ fn prune_empty(root: &Path, mut dir: Option<&Path>) {
 #[derive(Serialize)]
 struct ParseError {
     line: Option<usize>,
+    /// Столбец (с 1) — есть у ошибок `*.routy`.
+    col: Option<usize>,
     message: String,
 }
 
@@ -267,13 +322,236 @@ fn parse_error(e: routy_core::Error) -> ParseError {
     match e {
         routy_core::Error::Parse { line, msg } => ParseError {
             line: Some(line),
+            col: None,
+            message: msg,
+        },
+        routy_core::Error::Syntax { line, col, msg } => ParseError {
+            line: Some(line),
+            col: Some(col),
             message: msg,
         },
         other => ParseError {
             line: None,
+            col: None,
             message: other.to_string(),
         },
     }
+}
+
+/// Все `*.routy` проекта, а файл `path` — с текстом из редактора.
+fn workspace(root: &Path, path: &str, content: String) -> CmdResult<Workspace> {
+    let mut ws = Workspace::load(root).map_err(err)?;
+    ws.add(PathBuf::from(path), content);
+    Ok(ws)
+}
+
+/// `routy check` для открытого `*.routy` на лету: синтаксис, имена вызовов, аргументы, формы, циклы.
+#[tauri::command]
+async fn check_routy(
+    state: State<'_, AppState>,
+    path: String,
+    content: String,
+) -> CmdResult<Vec<ParseError>> {
+    let root = {
+        let guard = state.session.lock().await;
+        let s = guard.as_ref().ok_or("no project open")?;
+        inside(&s.project.root, &path)?;
+        s.project.root.clone()
+    };
+    let ws = workspace(&root, &path, content)?;
+    let full = root.join(&path);
+    Ok(ws
+        .check()
+        .into_iter()
+        .filter(|d| d.path == full)
+        .map(|d| ParseError {
+            line: Some(d.line),
+            col: Some(d.col),
+            message: d.msg,
+        })
+        .collect())
+}
+
+#[derive(Serialize)]
+struct Callable {
+    /// Как вызывать: `Login` или `users.Create`, если имя не уникально
+    name: String,
+    kind: &'static str,
+    params: Vec<String>,
+    /// Первая строка описания
+    doc: Option<String>,
+}
+
+#[derive(Serialize)]
+struct Symbols {
+    callables: Vec<Callable>,
+    shapes: Vec<String>,
+}
+
+/// Запросы, сценарии и формы проекта — для автодополнения в `*.routy`.
+#[tauri::command]
+async fn routy_symbols(state: State<'_, AppState>) -> CmdResult<Symbols> {
+    let root = {
+        let guard = state.session.lock().await;
+        guard
+            .as_ref()
+            .ok_or("no project open")?
+            .project
+            .root
+            .clone()
+    };
+    let ws = Workspace::load(&root).map_err(err)?;
+    let mut callables = Vec::new();
+    for (r, name) in ws.callables() {
+        let qualified = if ws.resolve(&[name.to_string()]).is_ok() {
+            name.to_string()
+        } else {
+            let folder = ws.sources[r.file].folder();
+            if folder.is_empty() {
+                name.to_string()
+            } else {
+                format!("{folder}.{name}")
+            }
+        };
+        let (kind, doc) = match ws.item(r) {
+            Item::Flow(f) => ("flow", f.doc.description.lines().next().map(String::from)),
+            Item::Request(q) => (
+                "request",
+                Some(format!(
+                    "{} {}",
+                    q.method,
+                    q.target.span.text(&ws.sources[r.file].text)
+                )),
+            ),
+            _ => continue,
+        };
+        callables.push(Callable {
+            name: qualified,
+            kind,
+            params: ws.params_of(r),
+            doc,
+        });
+    }
+    let mut shapes: Vec<String> = ws
+        .sources
+        .iter()
+        .flat_map(|s| &s.file.items)
+        .filter_map(|i| match i {
+            Item::Shape(d) => Some(d.name.clone()),
+            _ => None,
+        })
+        .collect();
+    shapes.sort();
+    Ok(Symbols { callables, shapes })
+}
+
+#[derive(Serialize)]
+struct RoutyResult {
+    /// Имя запущенного запроса или сценария
+    name: String,
+    /// Запрос: ответ (он же запись истории)
+    entry: Option<Entry>,
+    /// Сценарий: проверки, сохранённое и trace
+    flow: Option<FlowOutcome>,
+}
+
+/// Запрос или сценарий `*.routy` на строке `line` (текст — из редактора, даже несохранённый).
+/// Сессия заблокирована только на подготовку и запись результата — HTTP идёт без неё.
+#[tauri::command]
+async fn run_routy(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    id: u64,
+    env: Option<String>,
+    path: String,
+    content: String,
+    line: usize,
+) -> CmdResult<RoutyResult> {
+    let (lang, root, saved, cached) = {
+        let mut guard = state.session.lock().await;
+        let s = guard.as_mut().ok_or("no project open")?;
+        inside(&s.project.root, &path)?;
+        let runner = s.runner(env.as_deref())?;
+        let (saved, cached) = (runner.vars.saved.clone(), runner.cached_calls.clone());
+        (
+            s.lang_run(env.as_deref())?,
+            s.project.root.clone(),
+            saved,
+            cached,
+        )
+    };
+    let (env_name, lang) = lang;
+    let ws = workspace(&root, &path, content)?;
+    let full = root.join(&path);
+    if let Some(d) = ws.errors.iter().find(|d| d.path == full) {
+        return Err(format!("{}:{}: {}", d.line, d.col, d.msg));
+    }
+    let file = ws
+        .file_index(Path::new(&path))
+        .ok_or("file is not in the project")?;
+    let item = ws
+        .item_at(file, line)
+        .ok_or("no request or flow in this file")?;
+    let name = ws.item(item).name().unwrap_or("request").to_string();
+
+    let mut guard = lang.lock().await;
+    let l = &mut *guard;
+    l.run.set_workspace(ws);
+    l.runner.vars.saved = saved;
+    l.runner.cached_calls = cached;
+    l.run.confirm = Some(Box::new(move |name, req| {
+        use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
+        let dialog = app
+            .dialog()
+            .message(format!("{} {}\n\nin `{env_name}`", req.method, req.url))
+            .title(format!("Send {name}?"))
+            .kind(MessageDialogKind::Warning)
+            .buttons(MessageDialogButtons::OkCancelCustom(
+                "Send".into(),
+                "Cancel".into(),
+            ));
+        tokio::task::block_in_place(|| dialog.blocking_show())
+    }));
+
+    let (cancel, cancelled) = oneshot::channel();
+    state.inflight.lock().unwrap().insert(id, cancel);
+    let result = tokio::select! {
+        r = l.run.run_item(&mut l.runner, item) => Some(r),
+        _ = cancelled => None,
+    };
+    state.inflight.lock().unwrap().remove(&id);
+    l.run.confirm = None;
+    let (saved, cached) = (l.runner.vars.saved.clone(), l.runner.cached_calls.clone());
+    drop(guard);
+
+    let mut guard = state.session.lock().await;
+    let s = guard.as_mut().ok_or("no project open")?;
+    let runner = s.runner(env.as_deref())?;
+    runner.vars.saved = saved;
+    runner.cached_calls = cached;
+    runner.persist_saved().map_err(err)?;
+    let env = runner.env.clone();
+    match result.ok_or("cancelled")?.map_err(err)? {
+        Outcome::Request(outcome) => Ok(RoutyResult {
+            name,
+            entry: Some(s.history.push(&path, &env, outcome).cloned().map_err(err)?),
+            flow: None,
+        }),
+        Outcome::Flow(flow) => Ok(RoutyResult {
+            name,
+            entry: None,
+            flow: Some(flow),
+        }),
+    }
+}
+
+/// Новый прогон `*.routy`: забыть кеш вызовов и cookies.
+#[tauri::command]
+async fn reset_run(state: State<'_, AppState>) -> CmdResult<()> {
+    let mut guard = state.session.lock().await;
+    let s = guard.as_mut().ok_or("no project open")?;
+    s.lang = None;
+    Ok(())
 }
 
 /// Проверка синтаксиса на лету, без отправки.
@@ -571,6 +849,10 @@ pub fn run() {
             read_request,
             write_request,
             check_request,
+            check_routy,
+            routy_symbols,
+            run_routy,
+            reset_run,
             check_config,
             rename_path,
             delete_path,

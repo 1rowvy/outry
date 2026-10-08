@@ -1,0 +1,19 @@
+// Create user
+POST /anything/users {
+  params { name: "Viktor" }
+
+  headers {
+    Authorization: "Bearer ${Login().body.json.access_token}"
+    X-Request-Id: uuid()
+  }
+
+  body { name, request_id: uuid() }
+
+  expect {
+    status == 200
+    body.json.name == name
+    body.json.request_id matches /^[0-9a-f-]{36}$/
+    headers.content-type.contains("json")
+    duration < 5000
+  }
+}

@@ -22,7 +22,7 @@ import { Steps, Aside } from '@astrojs/starlight/components';
    routy init
    ```
 
-   Появятся `api/env.toml` с окружениями `dev` и `prod` и пример запроса `api/health/get.http`.
+   Появятся `api/env.toml` с окружениями `dev` и `prod` и пример запроса `api/health.routy`.
 
 3. Укажите адрес API в `api/env.toml`:
 
@@ -36,26 +36,35 @@ import { Steps, Aside } from '@astrojs/starlight/components';
    base = "https://api.example.com"
    ```
 
-4. Напишите запрос — по файлу на запрос:
+4. Напишите запрос. Путь дописывается к `base`, комментарий над запросом — его имя:
 
-   ```http title="api/users/list.http"
-   GET {{base}}/users
-   Accept: application/json
+   ```routy title="api/users/list.routy"
+   // List users
+   GET /users {
+     query { page: 1 }
 
-   > assert status == 200
+     expect {
+       status == 200
+       body.items.length > 0
+     }
+   }
    ```
+
+   Самый короткий запрос — одна строка: `GET /health`.
 
 5. Запустите:
 
    ```sh
-   routy run api/users/list.http
-   routy run api              # все *.http внутри api/ по алфавиту
+   routy run api/users/list.routy
+   routy run ListUsers        # по имени
+   routy run api              # все *.routy и *.http внутри api/ по алфавиту
    routy run api --env prod   # другое окружение
    ```
 
    ```txt
-   ✓ api/users/list.http  GET http://localhost:8080/users  200 OK  12ms 532B
+   ✓ api/users/list.routy  ListUsers  GET http://localhost:8080/users?page=1  200 OK  12ms 532B
        ✓ status == 200
+       ✓ body.items.length > 0
    ```
 
 </Steps>
@@ -65,9 +74,12 @@ import { Steps, Aside } from '@astrojs/starlight/components';
 файлы, а правки из редактора появляются сразу.
 </Aside>
 
+Уже есть `.http`-файлы? `routy convert api/` перепишет их в `.routy` — см.
+[Файлы .http](/routy/ru/guides/request-format/).
+
 ## Дальше
 
-- [Формат файла запроса](/routy/ru/guides/request-format/)
+- [Формат .routy](/routy/ru/reference/routy-format/) — полный справочник
+- [Вызовы запросов и проверки](/routy/ru/guides/chains-and-assertions/)
 - [Переменные и окружения](/routy/ru/guides/variables/)
-- [Цепочки запросов и проверки](/routy/ru/guides/chains-and-assertions/)
 - [Routy в CI](/routy/ru/guides/ci/)

@@ -1,9 +1,15 @@
 ---
-title: Request file format
-description: How a .http request file is structured — request line, headers, body and directives.
+title: .http files
+description: The older .http request format — still supported — and converting it to .routy.
 ---
 
 import { Aside } from '@astrojs/starlight/components';
+
+<Aside>
+New requests are written in [`.routy`](/routy/reference/routy-format/): requests that call each
+other, flows, checks that read like code. `.http` files keep working — both formats can live in one
+project — and `routy convert` [rewrites them](#converting-to-routy) when you are ready.
+</Aside>
 
 Every request is a separate file with the `.http` extension. The layout follows plain HTTP:
 
@@ -67,7 +73,51 @@ api/
 `routy run api` runs files in alphabetical order of their paths, so numeric prefixes are a simple way
 to order a chain. Hidden folders and `node_modules`, `target`, `vendor`, `dist` are skipped.
 
-<Aside type="note" title="Coming next">
-A more readable `.routy` format with request calls and flows is being designed — see the
-[spec](/routy/reference/routy-format/). `.http` files will keep working.
-</Aside>
+## Converting to .routy
+
+```sh
+routy convert api/ --dry-run   # print the result
+routy convert api/             # write a .routy next to every .http
+routy convert api/ --rm        # … and delete the .http files
+```
+
+```http title="api/auth/login.http"
+# Login
+POST {{base}}/auth/login
+X-Request-Id: {{$uuid}}
+
+{"email": "{{email}}", "password": "{{password}}", "remember": true}
+
+> save token = body.access_token
+> assert status == 200
+> assert body.user.id exists
+```
+
+```routy title="api/auth/login.routy"
+// Login
+POST /auth/login {
+  headers { X-Request-Id: uuid() }
+  body { email, password, remember: true }
+
+  expect {
+    status == 200
+    body.user.id != null
+  }
+
+  save token = body.access_token
+}
+```
+
+- The first comment line becomes the request's name if it is short (up to four words); otherwise a name
+  is made from the file name and the comment becomes the description.
+- `{{base}}/…` becomes a path, `{{x}}` in it a [parameter](/routy/reference/routy-format/#parameters)
+  `{x}`; other URLs stay as they are.
+- A JSON body stays JSON: `"{{x}}"` becomes the variable `x`, `{{x}}` outside quotes becomes `number(x)`.
+  Other bodies become strings.
+- `> assert` turns into `expect`; `exists` into `!= null`, `contains` into `.contains()`. `.routy` compares
+  without type coercion, so a header compared with a number is wrapped in `number()`.
+- `{{$uuid}}`, `{{$timestamp}}` and `{{$randomInt 1 10}}` become `uuid()`, `now()` and
+  `randomInt(1, 9)` — the upper bound is inclusive in `.routy`.
+
+An existing `.routy` file is never overwritten. The full mapping is in the
+[format reference](/routy/reference/routy-format/#compatibility-with-http).

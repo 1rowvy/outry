@@ -18,39 +18,46 @@ A desktop app for clicking through requests and a CLI for running them as tests 
 
 ---
 
-```http
-# api/users/create.http
-POST {{base}}/users
-Authorization: Bearer {{token}}
+```routy
+// api/users/create.routy
 
-{"name": "Viktor"}
+// Create user
+POST /users {
+  headers { Authorization: "Bearer ${Login().body.token}" }
+  body { name: "Viktor", role: "admin" }
 
-> save user_id = body.id
-> assert status == 201
-> assert body.name == "Viktor"
+  expect {
+    status == 201
+    body.name == "Viktor"
+    body matches { id: string, name: string }
+  }
+
+  save user_id = body.id
+}
 ```
 
 ```console
 $ routy run api
-✓ api/auth/login.http  POST http://localhost:8080/login  200 OK  12ms 184B
+✓ api/auth/login.routy  Login  POST http://localhost:8080/login  200 OK  12ms 184B
     ✓ status == 200
-    → saved token
-✓ api/users/create.http  POST http://localhost:8080/users  201 Created  9ms 61B
+✓ api/users/create.routy  CreateUser  POST http://localhost:8080/users  201 Created  9ms 61B
+    ↳ Login  cached
     ✓ status == 201
     ✓ body.name == "Viktor"
+    ✓ body matches { id: string, name: string }
     → saved user_id
-✗ api/users/get.http  GET http://localhost:8080/users/7  200 OK  4ms 211B
-    ✗ status == 201  (actual: 200)
+✗ api/users/get.routy  GetUser  GET http://localhost:8080/users/7  200 OK  4ms 211B
+    ✗ body.role == "admin"  — body.role is "user"
 
 2 passed, 1 failed
 ```
 
 ## Why Routy
 
-- **Requests live in git.** One `.http` file per request. Review them in pull requests, grep them, edit them in any editor. The app picks up outside changes instantly.
+- **Requests live in git.** `.routy` files: a JSON body, checks that read like code, no Go or JS needed. Review them in pull requests, grep them, edit them in any editor. The app picks up outside changes instantly.
 - **The same engine everywhere.** The desktop app and the `routy` CLI call the same Rust core, so a request that works in the GUI works in CI. They can't drift apart.
 - **Secrets stay out of the repo.** Tokens go to the system keychain locally and come from `ROUTY_*` environment variables in CI, so there's nothing to commit by accident.
-- **Chains and checks built in.** `> save` a value from one response and use it in the next request. `> assert` on status, timing, headers and the JSON body. A failure gives a non-zero exit code.
+- **Requests call requests.** `Login().body.token` logs in once per run and reuses the response; no run order to maintain. `flow` describes a scenario; `expect` checks status, timing, headers and the body's shape. A failure gives a non-zero exit code.
 - **No account, no cloud, no lock-in.** It's plain text: if you stop using Routy, your requests are still readable files.
 
 ## Installation
@@ -100,8 +107,9 @@ and installs them in one click (on Linux, only the AppImage self-updates).
 
 ```sh
 cd my-service
-routy init                 # creates api/env.toml and api/health/get.http
+routy init                 # creates api/env.toml and api/health.routy
 routy run api              # sends every request in api/, alphabetically
+routy run CreateUser       # or one, by name
 ```
 
 Or open the folder in the desktop app. It offers to create `api/env.toml` if there isn't one.
@@ -109,44 +117,60 @@ Or open the folder in the desktop app. It offers to create `api/env.toml` if the
 Have a Go service? Generate a request for every route (chi, gin, `net/http`); existing files are left alone:
 
 ```sh
-routy import go .          # + api/users/get-by-id.http   GET /users/{{id}}
+routy import go .          # + api/users/get-by-id.routy  GET /users/{id}
 ```
 
 See [Import routes from Go](https://1rowvy.github.io/routy/guides/import-go/).
 
 ## Request files
 
-```http
-# Comments start with # or //
-POST {{base}}/users?version={{version}}
-Content-Type: application/json
-Authorization: Bearer {{token}}
+The smallest file is one line — `GET /health`. Everything else is added when needed:
 
-{"name": "Viktor", "role": "admin"}
+```routy
+// Get order
+// The comment's first line is the name: GetOrder.
+GET /orders/{id} {
+  query { expand: "items" }
+  headers { X-Request-Id: uuid() }
 
-> save user_id = body.id
-> assert status == 201
-> assert duration < 500
-> assert headers.content-type contains json
+  expect {
+    status == 200
+    body.items.length > 0
+    body.items.all(i => i.qty > 0)
+    body matches Order
+  }
+}
+
+shape Order {
+  id: string,
+  total: number,
+  items: [{ sku: string, qty: integer }],
+}
+
+// Checkout
+flow Checkout {
+  order = CreateOrder(shop: "main")
+  Pay(order: order.body.id)
+  expect { GetOrder(id: order.body.id).body.status == "paid" }
+}
 ```
 
 | Part | Rule |
 |------|------|
-| Request line | `METHOD URL`. The method is optional and defaults to `GET` |
-| Headers | `Name: value`, one per line, until the first blank line |
-| Body | Everything after the blank line. JSON bodies get `Content-Type: application/json` automatically |
-| Variables | `{{name}}` anywhere: URL, headers, body. `{{$uuid}}`, `{{$timestamp}}`, `{{$randomInt 1 100}}` are generated per request |
-| Directives | Lines starting with `>` at the end of the file, run after the response arrives |
+| Request | `METHOD /path` is appended to `base`; `https://…` is used as is. `{id}` in the path is a parameter |
+| Name | The first line of the `//` comment above: `// Get order` → `GetOrder` |
+| Fields | `params`, `only: [dev]`, `confirm: true`, `timeout: 10s`, `cache: 30m`, `query`, `headers`, `body` / `form` / `multipart`, `poll`, `expect`, `save` |
+| Body | JSON5 with expressions: `{ name, role: "admin", id: CreateUser().body.id }` |
+| Values | Bare names are variables; `"${name}"` in strings; `uuid()`, `now()`, `randomInt(1, 10)` |
+| Checks | `== != < > && \|\| !`, `in`, `matches /re/`, `matches Shape`, `matches schema("x.json")`, `.contains()`, `.length`, … |
+| Calls | `Login(email: "a")` is the response of `Login`; sent once per run, `fresh Login()` sends again |
 
-**Directives**
+Full reference: [.routy format](https://1rowvy.github.io/routy/reference/routy-format/).
+`routy fmt` keeps files in one style; `routy check --env prod` finds missing variables and calls
+blocked by `only` without sending anything.
 
-- `> save <name> = <path>` stores a value for the following requests (and later runs).
-- `> assert <path> <op> <value>` checks the response. Operators: `==` `!=` `<` `<=` `>` `>=` `contains` `exists`.
-
-**Paths:** `status`, `duration`, `body`, `body.items[0].id`, `body["weird key"]`, `headers.content-type`.
-
-Full reference: [request format](https://1rowvy.github.io/routy/guides/request-format/) ·
-[expressions](https://1rowvy.github.io/routy/reference/expressions/).
+Older `.http` files keep working next to `.routy`, and `routy convert api/` rewrites them —
+see [.http files](https://1rowvy.github.io/routy/guides/request-format/).
 
 ## Environments and variables
 
@@ -165,10 +189,10 @@ base = "https://api.example.com"
 version = "v2"             # overrides [vars]
 ```
 
-When Routy resolves `{{name}}`, the first match wins:
+When Routy resolves a variable, the first match wins:
 
 1. `--var name=value` on the command line
-2. values captured by `> save`
+2. values captured by `save`
 3. `ROUTY_<NAME>` environment variables
 4. `[env.<current>]`, then `[vars]` in `env.toml`
 5. the system keychain
@@ -199,6 +223,11 @@ In the app, use **Add secret** at the bottom of the sidebar. In CI, set `ROUTY_T
     curl -fsSL https://raw.githubusercontent.com/1rowvy/routy/master/install.sh | sh
     echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
+- name: Lint request files
+  run: |
+    routy fmt --check api
+    routy check api --env ci --no-keyring
+
 - name: Run API tests
   run: routy run api --env ci --no-keyring --fail-fast
   env:
@@ -212,7 +241,7 @@ Use `--json` for JSON Lines output, one object per request. See the [CI guide](h
 
 ```sh
 routy init [DIR]                       # create api/env.toml and an example request
-routy run <PATHS>...                   # send requests; folders run alphabetically as a chain
+routy run <PATHS|NAMES>...             # send requests; folders run alphabetically, names and file:line too
     -e, --env <ENV>                    #   environment from env.toml
     --var <NAME=VALUE>                 #   override a variable (repeatable)
     --fail-fast                        #   stop at the first failure
@@ -220,7 +249,11 @@ routy run <PATHS>...                   # send requests; folders run alphabetical
     --json                             #   JSON Lines output for CI
     --fresh                            #   ignore values saved by previous runs
     --no-keyring                       #   secrets only from ROUTY_*
-routy check <PATHS>...                 # syntax check, nothing is sent
+    --yes                              #   send `confirm: true` requests without asking
+routy check <PATHS>... [--env ENV]     # syntax, names, arguments, shapes, cycles; with --env also
+                                       #   `only` and missing variables. Nothing is sent
+routy fmt [PATHS]... [--check]         # canonical style for *.routy, like gofmt
+routy convert [PATHS]... [--rm]        # *.http → *.routy
 routy vars [-e ENV] [--reveal]         # final variable values and their sources
 routy envs                             # list environments (* = default)
 routy import go [DIR] [--dry-run]      # create requests for Go routes that have no file yet
@@ -232,8 +265,10 @@ All commands and flags: [CLI reference](https://1rowvy.github.io/routy/reference
 
 ## Desktop app
 
-- A file tree of every `*.http` in the project with rename / move / delete, plus an environment switcher
-- An editor with live syntax checking. <kbd>Ctrl</kbd>+<kbd>Enter</kbd> sends, <kbd>Ctrl</kbd>+<kbd>S</kbd> saves
+- A file tree of every `*.routy` and `*.http` in the project with rename / move / delete, plus an environment switcher
+- An editor with highlighting, live `routy check` and completion of requests, variables and functions.
+  <kbd>Ctrl</kbd>+<kbd>Enter</kbd> (or ▶ next to a request) runs the request or flow at the cursor, <kbd>Ctrl</kbd>+<kbd>S</kbd> saves
+- A trace of the requests a request or flow called, with what came from the run's cache
 - Requests run in parallel and can be cancelled
 - The response shows highlighted, searchable body, image and HTML previews, headers, test results and the
   exact request that was sent; the body can be saved to a file
@@ -247,7 +282,8 @@ More in the [desktop app guide](https://1rowvy.github.io/routy/guides/desktop-ap
 ## Development
 
 ```
-crates/routy-core   parser, templating, runner, assertions, keychain: all behavior lives here
+crates/routy-core   .routy parser, checker, formatter and executor; .http support, variables, keychain,
+                    Go route import: all behavior lives here
 crates/routy-cli    the `routy` binary, a thin wrapper over core
 app/                Tauri 2 + React desktop app, also a thin wrapper over core
 docs/               Astro Starlight documentation site (English + Russian)

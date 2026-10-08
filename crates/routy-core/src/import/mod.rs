@@ -1,7 +1,7 @@
-//! Импорт роутов из кода сервиса: находим роуты, сравниваем с `*.http` проекта
-//! и создаём файлы только для отсутствующих. Существующие файлы не трогаем никогда.
+//! Импорт роутов из кода сервиса: находим роуты, сравниваем с запросами проекта (`*.routy` и
+//! `*.http`) и создаём `*.routy` только для отсутствующих. Существующие файлы не трогаем никогда.
 //!
-//! Роут и файл совпадают, если совпадает метод и путь URL после `{{base}}`
+//! Роут и запрос совпадают по `handler:`, а без него — по методу и пути после `base`
 //! (параметры сравниваются как «любое значение»: `/users/{id}` ~ `{{base}}/users/{{user_id}}`).
 
 pub mod go;
@@ -86,7 +86,7 @@ pub struct Plan {
     pub new: Vec<NewFile>,
     /// Роуты, для которых файл уже есть
     pub existing: Vec<Existing>,
-    /// Файлы с `{{base}}/…`, которым нет роута в коде
+    /// Запросы к `base`, которым нет роута в коде
     pub stale: Vec<Stale>,
     pub warnings: Vec<String>,
 }
@@ -112,6 +112,89 @@ pub struct Stale {
     pub url: String,
 }
 
+/// Запрос проекта, с которым сравниваются роуты.
+struct Known {
+    file: PathBuf,
+    method: String,
+    url: String,
+    key: String,
+    handler: Option<String>,
+}
+
+/// Запросы из `*.http` (`{{base}}/…`) и `*.routy` (`/…`) проекта.
+fn known_requests(
+    project_root: &Path,
+    base: &str,
+    taken: &mut HashSet<PathBuf>,
+) -> Result<Vec<Known>> {
+    let prefix = format!("{{{{{base}}}}}");
+    let mut known = Vec::new();
+    let exts = [discover::EXTENSION, discover::ROUTY_EXTENSION];
+    for rel in discover::files(project_root, &exts)? {
+        // `get.http` занимает и `get.routy`: два файла с одним именем в дереве путают.
+        taken.insert(rel.with_extension(discover::ROUTY_EXTENSION));
+        taken.insert(rel.clone());
+        let Ok(src) = std::fs::read_to_string(project_root.join(&rel)) else {
+            continue;
+        };
+        if rel
+            .extension()
+            .is_some_and(|e| e == discover::ROUTY_EXTENSION)
+        {
+            let Ok(file) = crate::lang::parse::parse(&src, None) else {
+                continue;
+            };
+            for item in &file.items {
+                let crate::lang::ast::Item::Request(r) = item else {
+                    continue;
+                };
+                use crate::lang::ast::{TargetKind, TargetPart};
+                if r.target.kind != TargetKind::Path {
+                    continue;
+                }
+                let mut path = String::new();
+                for p in &r.target.parts {
+                    match p {
+                        TargetPart::Lit(l) => path.push_str(l),
+                        _ => path.push_str("{{x}}"),
+                    }
+                }
+                let path = path
+                    .split(['?', '#'])
+                    .next()
+                    .unwrap_or_default()
+                    .to_string();
+                known.push(Known {
+                    file: rel.clone(),
+                    method: r.method.clone(),
+                    url: r.target.span.text(&src).to_string(),
+                    key: key(&path),
+                    handler: r.fields.handler.clone(),
+                });
+            }
+            continue;
+        }
+        let Ok(req) = crate::parse(&src) else {
+            continue;
+        };
+        let Some(path) = req.url.strip_prefix(&prefix) else {
+            continue;
+        };
+        let path = path.split(['?', '#']).next().unwrap_or_default();
+        if !path.is_empty() && !path.starts_with('/') {
+            continue; // {{base}}x — не наш случай
+        }
+        known.push(Known {
+            file: rel,
+            method: req.method,
+            url: req.url.clone(),
+            key: key(path),
+            handler: None,
+        });
+    }
+    Ok(known)
+}
+
 /// Сканирует Go-код в `src_dir` встроенными шаблонами и `extra` (имя, текст `.scm`)
 /// и сравнивает с файлами проекта в `project_root`.
 pub fn plan_go(
@@ -130,26 +213,8 @@ pub fn plan_go(
 
 /// Раскладывает найденные роуты на новые и уже существующие, находит файлы без роутов.
 pub fn plan(project_root: &Path, scan: Scan, base: &str) -> Result<Plan> {
-    let prefix = format!("{{{{{base}}}}}");
-    let mut known = Vec::new();
     let mut taken: HashSet<PathBuf> = HashSet::new();
-    for rel in discover::request_files(project_root)? {
-        taken.insert(rel.clone());
-        let Ok(src) = std::fs::read_to_string(project_root.join(&rel)) else {
-            continue;
-        };
-        let Ok(req) = crate::parse(&src) else {
-            continue;
-        };
-        let Some(path) = req.url.strip_prefix(&prefix) else {
-            continue;
-        };
-        let path = path.split(['?', '#']).next().unwrap_or_default();
-        if !path.is_empty() && !path.starts_with('/') {
-            continue; // {{base}}x — не наш случай
-        }
-        known.push((rel, req.method, req.url.clone(), key(path)));
-    }
+    let known = known_requests(project_root, base, &mut taken)?;
 
     let mut out = Plan {
         files: scan.files,
@@ -159,16 +224,30 @@ pub fn plan(project_root: &Path, scan: Scan, base: &str) -> Result<Plan> {
     let mut matched = HashSet::new();
     for route in scan.routes {
         let k = key(&route.path);
-        let hit = known
+        let by_handler: Vec<usize> = known
             .iter()
             .enumerate()
-            .filter(|(_, (_, m, _, kk))| *kk == k && (route.method == ANY || *m == route.method))
+            .filter(|(_, r)| r.handler.is_some() && r.handler == route.handler)
             .map(|(i, _)| i)
-            .collect::<Vec<_>>();
+            .collect();
+        let hit = if by_handler.is_empty() {
+            known
+                .iter()
+                .enumerate()
+                .filter(|(_, r)| {
+                    r.handler.is_none()
+                        && r.key == k
+                        && (route.method == ANY || r.method == route.method)
+                })
+                .map(|(i, _)| i)
+                .collect::<Vec<_>>()
+        } else {
+            by_handler
+        };
         if let Some(&first) = hit.first() {
             matched.extend(hit.iter().copied());
             out.existing.push(Existing {
-                file: known[first].0.clone(),
+                file: known[first].file.clone(),
                 route,
             });
             continue;
@@ -185,7 +264,11 @@ pub fn plan(project_root: &Path, scan: Scan, base: &str) -> Result<Plan> {
         .into_iter()
         .enumerate()
         .filter(|(i, _)| !matched.contains(i))
-        .map(|(_, (file, method, url, _))| Stale { file, method, url })
+        .map(|(_, k)| Stale {
+            file: k.file,
+            method: k.method,
+            url: k.url,
+        })
         .collect();
     Ok(out)
 }
@@ -304,8 +387,8 @@ fn key(path: &str) -> String {
     format!("/{}", segs.join("/"))
 }
 
-/// `GET /users` → `users/get.http`, `GET /users/{{id}}` → `users/get-by-id.http`,
-/// `GET /users/{{id}}/posts` → `users/posts/get.http`, `GET /` → `root/get.http`.
+/// `GET /users` → `users/get.routy`, `GET /users/{{id}}` → `users/get-by-id.routy`,
+/// `GET /users/{{id}}/posts` → `users/posts/get.routy`, `GET /` → `root/get.routy`.
 fn file_name(route: &Route) -> PathBuf {
     let segs: Vec<&str> = route.path.split('/').filter(|s| !s.is_empty()).collect();
     let last_static = segs.iter().rposition(|s| !s.contains("{{"));
@@ -333,7 +416,7 @@ fn file_name(route: &Route) -> PathBuf {
         name.push_str("-by-");
         name.push_str(&params.join("-"));
     }
-    path.push(format!("{name}.{}", discover::EXTENSION));
+    path.push(format!("{name}.{}", discover::ROUTY_EXTENSION));
     path
 }
 
@@ -354,47 +437,38 @@ fn sanitize(s: &str) -> String {
     }
 }
 
-/// `users/get.http` занят → `users/get-2.http`, …
+/// `users/get.routy` занят → `users/get-2.routy`, …
 fn free_name(want: &Path, taken: &HashSet<PathBuf>) -> PathBuf {
     if !taken.contains(want) {
         return want.to_path_buf();
     }
     let stem = want.file_stem().unwrap_or_default().to_string_lossy();
     (2..)
-        .map(|n| want.with_file_name(format!("{stem}-{n}.{}", discover::EXTENSION)))
+        .map(|n| want.with_file_name(format!("{stem}-{n}.{}", discover::ROUTY_EXTENSION)))
         .find(|p| !taken.contains(p))
         .expect("infinite range")
 }
 
-/// Текст нового файла: что это за роут и что в него передавать — комментарием,
-/// пример тела — телом запроса.
-fn content(route: &Route, base: &str) -> String {
+/// Текст нового `*.routy`: имя и описание из doc-комментария обработчика, откуда роут, что в
+/// него передавать; `handler:`, query-параметры как `params`, пример тела из структуры.
+fn content(route: &Route, _base: &str) -> String {
     let info = &route.info;
-    let mut head = Vec::new();
-    if let Some(s) = &info.summary {
-        head.push(s.clone());
-    }
-    head.extend(info.description.iter().cloned());
+    let func = route
+        .handler
+        .as_deref()
+        .and_then(|h| h.rsplit('.').next())
+        .filter(|f| is_go_ident(f));
+    let (title, mut doc) = title(route, func);
     let source = route.source.to_string_lossy().replace('\\', "/");
     let mut from = format!("{} {source}:{}", route.router, route.line);
     if let Some(h) = &route.handler {
         from.push_str(&format!(" → {h}"));
     }
-    head.push(from);
+    doc.push(from);
     if route.method == ANY {
-        head.push("any method".into());
+        doc.push("any method".into());
     }
-
     let mut params = Vec::new();
-    let path_vars: Vec<&str> = route
-        .path
-        .split("{{")
-        .skip(1)
-        .filter_map(|s| s.split("}}").next())
-        .collect();
-    if !path_vars.is_empty() {
-        params.push(format!("Path: {}", path_vars.join(", ")));
-    }
     if !info.query.is_empty() {
         params.push("Query:".into());
         params.extend(field_lines(&info.query));
@@ -407,14 +481,14 @@ fn content(route: &Route, base: &str) -> String {
         params.extend(field_lines(&b.fields));
     }
 
-    let mut s = String::new();
-    for l in &head {
-        s.push_str(&format!("# {l}\n"));
+    let mut s = format!("// {title}\n");
+    for l in &doc {
+        s.push_str(&format!("// {l}\n"));
     }
     if !params.is_empty() {
-        s.push_str("#\n");
+        s.push_str("//\n");
         for l in &params {
-            s.push_str(&format!("# {l}\n"));
+            s.push_str(&format!("// {l}\n"));
         }
     }
     let method = if route.method == ANY {
@@ -422,13 +496,127 @@ fn content(route: &Route, base: &str) -> String {
     } else {
         &route.method
     };
-    s.push_str(&format!("{method} {{{{{base}}}}}{}\n", route.path));
+    let path = route.path.replace("{{", "{").replace("}}", "}");
+    let mut fields = Vec::new();
+    if let Some(h) = &route.handler {
+        if h.split('.').all(is_go_ident) {
+            fields.push(format!("handler: {h}"));
+        }
+    }
+    // Query — параметры запроса: `ListUsers(page: 2)`; `null` в query не уходит.
+    let query: Vec<&str> = info
+        .query
+        .iter()
+        .map(|f| f.name.as_str())
+        .filter(|n| is_param(n) && !path.contains(&format!("{{{n}}}")))
+        .collect();
+    if !query.is_empty() {
+        let defaults: Vec<String> = query.iter().map(|n| format!("{n}: null")).collect();
+        fields.push(format!("params {{\n{}\n}}", defaults.join("\n")));
+        fields.push(format!("query {{\n{}\n}}", query.join("\n")));
+    }
     match &info.body {
-        Some(b) => s.push_str(&format!("\n{}\n", b.example)),
-        None if matches!(method, "POST" | "PUT" | "PATCH") => s.push_str("\n{}\n"),
+        Some(b) => fields.push(format!("body {}", b.example)),
+        None if matches!(method, "POST" | "PUT" | "PATCH") => fields.push("body {}".into()),
         None => {}
     }
-    s
+    if fields.is_empty() {
+        s.push_str(&format!("{method} {path}\n"));
+    } else {
+        s.push_str(&format!("{method} {path} {{\n{}\n}}\n", fields.join("\n")));
+    }
+    crate::lang::fmt::format(&s).unwrap_or(s)
+}
+
+/// Имя запроса и описание. `CreateUser creates a user.` (doc-комментарий Go) → `Create user`
+/// и сам комментарий в описании; короткий `@Summary` — сам и есть имя.
+fn title(route: &Route, func: Option<&str>) -> (String, Vec<String>) {
+    let info = &route.info;
+    let mut doc: Vec<String> = Vec::new();
+    let summary = info
+        .summary
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+    let short = summary.filter(|s| {
+        let words = s.split_whitespace().count();
+        (1..=4).contains(&words)
+            && !s.ends_with('.')
+            && func.is_none_or(|f| !s.starts_with(&format!("{f} ")))
+    });
+    let title = match (short, func) {
+        (Some(s), _) => s.to_string(),
+        (None, Some(f)) => {
+            doc.extend(summary.map(String::from));
+            words(f)
+        }
+        (None, None) => {
+            doc.extend(summary.map(String::from));
+            let segs: Vec<&str> = route
+                .path
+                .split('/')
+                .filter(|s| !s.is_empty() && !s.contains("{{"))
+                .collect();
+            let method = if route.method == ANY {
+                "get"
+            } else {
+                &route.method
+            };
+            let mut t = method.to_ascii_lowercase();
+            if let Some(last) = segs.last() {
+                t.push(' ');
+                t.push_str(last);
+            }
+            if route.path.ends_with("}}") {
+                t.push_str(" by id");
+            }
+            capitalize(&t)
+        }
+    };
+    doc.extend(info.description.iter().cloned());
+    (title, doc)
+}
+
+/// `CreateUser` → `Create user`, `getHTTPStatus` → `Get http status`.
+fn words(ident: &str) -> String {
+    let chars: Vec<char> = ident.chars().collect();
+    let mut out = String::new();
+    for (i, &c) in chars.iter().enumerate() {
+        let next_lower = chars.get(i + 1).is_some_and(|n| n.is_lowercase());
+        let prev_lower = i > 0 && chars[i - 1].is_lowercase();
+        if i > 0 && c.is_uppercase() && (prev_lower || next_lower) {
+            out.push(' ');
+        }
+        if c == '_' {
+            out.push(' ');
+            continue;
+        }
+        out.extend(c.to_lowercase());
+    }
+    capitalize(
+        out.split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ")
+            .as_str(),
+    )
+}
+
+fn capitalize(s: &str) -> String {
+    let mut chars = s.chars();
+    chars
+        .next()
+        .map(|c| c.to_uppercase().chain(chars).collect())
+        .unwrap_or_default()
+}
+
+fn is_go_ident(s: &str) -> bool {
+    s.starts_with(|c: char| c.is_alphabetic() || c == '_')
+        && s.chars().all(|c| c.is_alphanumeric() || c == '_')
+}
+
+/// Имя query-параметра годится в имя параметра запроса.
+fn is_param(s: &str) -> bool {
+    is_go_ident(s) && !crate::lang::parse::RESERVED.contains(&s)
 }
 
 /// Поля столбцами: `  name     string  required  ФИО`.

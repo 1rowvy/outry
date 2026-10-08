@@ -3,8 +3,8 @@ title: Routy в CI
 description: Используйте файлы запросов как API-тесты в GitHub Actions и других CI.
 ---
 
-Те же `.http`-файлы, что вы гоняете в приложении, могут запускаться как API-тесты на каждый пуш. Пройдёт
-ли джоба, решают проверки.
+Те же `.routy`- (и `.http`-) файлы, что вы гоняете в приложении, могут запускаться как API-тесты на каждый
+пуш. Пройдёт ли джоба, решают проверки `expect`.
 
 ## GitHub Actions
 
@@ -26,6 +26,11 @@ jobs:
           curl -fsSL https://raw.githubusercontent.com/1rowvy/routy/master/install.sh | sh
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
+      - name: Check request files
+        run: |
+          routy fmt --check api
+          routy check api --env ci --no-keyring
+
       - name: Run API tests
         run: routy run api --env ci --no-keyring --fail-fast
         env:
@@ -46,14 +51,26 @@ routy run api --json > results.jsonl
 ```
 
 ```json
-{"file":"api/users/get.http","passed":true,"outcome":{"request":{…},"response":{"status":200,…},"asserts":[…],"saved":{},"save_misses":[]}}
-{"file":"api/users/bad.http","passed":false,"error":"api/users/bad.http: undefined variable(s): id"}
+{"file":"api/users/get.routy","name":"GetUser","passed":true,"outcome":{"kind":"request","request":{…},"response":{"status":200,…},"asserts":[…],"calls":[…],"saved":{}}}
+{"file":"api/users/bad.routy","name":"GetUser","passed":false,"error":"undefined variable(s): id"}
 ```
 
-## Только синтаксис
+У сценария в `outcome` — `"kind":"flow"` с полями `checks`, `calls`, `saved` и `error`.
 
-`routy check` разбирает все файлы без отправки запросов — быстрый шаг линтинга:
+## Проверка без отправки
+
+`routy check` читает все файлы без отправки запросов — быстрый шаг линтинга. В `.routy` он проверяет ещё
+имена вызываемых запросов, их аргументы, формы и циклы вызовов. С `--env` — то, что зависит от окружения:
+запросы, которым `only` его запрещает, и переменные, которых в нём нет:
 
 ```sh
 routy check api
+routy check api --env ci
 ```
+
+```txt
+api/orders/create.routy:7:22: variable `api_key` is not defined in ci
+api/orders/create.routy:9:13: `Seed` is limited to dev and cannot be called in ci
+```
+
+`routy fmt --check api` падает, если файл не в каноническом виде; `routy fmt api` исправляет.

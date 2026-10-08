@@ -23,7 +23,7 @@ import { Steps, Aside } from '@astrojs/starlight/components';
    ```
 
    This creates `api/env.toml` with `dev` and `prod` environments and an example request
-   `api/health/get.http`.
+   `api/health.routy`.
 
 3. Point `base` at your API in `api/env.toml`:
 
@@ -37,26 +37,35 @@ import { Steps, Aside } from '@astrojs/starlight/components';
    base = "https://api.example.com"
    ```
 
-4. Write a request — one file per request:
+4. Write a request. The path is appended to `base`; the comment above is the request's name:
 
-   ```http title="api/users/list.http"
-   GET {{base}}/users
-   Accept: application/json
+   ```routy title="api/users/list.routy"
+   // List users
+   GET /users {
+     query { page: 1 }
 
-   > assert status == 200
+     expect {
+       status == 200
+       body.items.length > 0
+     }
+   }
    ```
+
+   The smallest request is one line: `GET /health`.
 
 5. Run it:
 
    ```sh
-   routy run api/users/list.http
-   routy run api              # every *.http under api/, in alphabetical order
+   routy run api/users/list.routy
+   routy run ListUsers        # by name
+   routy run api              # every *.routy and *.http under api/, in alphabetical order
    routy run api --env prod   # another environment
    ```
 
    ```txt
-   ✓ api/users/list.http  GET http://localhost:8080/users  200 OK  12ms 532B
+   ✓ api/users/list.routy  ListUsers  GET http://localhost:8080/users?page=1  200 OK  12ms 532B
        ✓ status == 200
+       ✓ body.items.length > 0
    ```
 
 </Steps>
@@ -66,9 +75,12 @@ Prefer a GUI? Open the same folder in the [desktop app](/routy/guides/desktop-ap
 files, and edits made in your editor show up immediately.
 </Aside>
 
+Already have `.http` files? `routy convert api/` rewrites them into `.routy` — see
+[.http files](/routy/guides/request-format/).
+
 ## Next steps
 
-- [Request file format](/routy/guides/request-format/)
+- [.routy format](/routy/reference/routy-format/) — the full reference
+- [Calling requests and checks](/routy/guides/chains-and-assertions/)
 - [Variables and environments](/routy/guides/variables/)
-- [Chaining requests and assertions](/routy/guides/chains-and-assertions/)
 - [Running Routy in CI](/routy/guides/ci/)

@@ -167,7 +167,7 @@ base = \"http://localhost:8080\"
 base = \"https://api.example.com\"
 ";
 
-const INIT_EXAMPLE: &str = "GET {{base}}/health\n\n> assert status == 200\n";
+const INIT_EXAMPLE: &str = "// Health\nGET /health {\n  expect { status == 200 }\n}\n";
 
 /// Создаёт `api/env.toml` и пример запроса. Если `dir` сам называется `api`,
 /// файлы кладутся прямо в него. Возвращает каталог проекта (тот, где `env.toml`).
@@ -187,9 +187,8 @@ pub fn init(dir: &Path) -> Result<PathBuf> {
     }
     std::fs::create_dir_all(&api)?;
     std::fs::write(&config, INIT_CONFIG)?;
-    let example = api.join("health").join("get.http");
+    let example = api.join("health.routy");
     if !example.exists() {
-        std::fs::create_dir_all(example.parent().expect("has parent"))?;
         std::fs::write(example, INIT_EXAMPLE)?;
     }
     Ok(api)
@@ -259,7 +258,8 @@ mod tests {
         assert_eq!(p.root, api);
         assert!(p.has_config());
         assert_eq!(p.resolve_env(None).unwrap(), "dev");
-        assert!(api.join("health/get.http").is_file());
+        let example = std::fs::read_to_string(api.join("health.routy")).unwrap();
+        crate::lang::parse::parse(&example, None).unwrap();
         assert!(init(&dir).is_err(), "second init must not overwrite");
 
         // Открыли сам каталог api/ без env.toml — не создаём api/api/.

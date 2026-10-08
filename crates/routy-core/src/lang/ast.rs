@@ -180,6 +180,8 @@ pub struct Flow {
     pub doc: Doc,
     pub name: String,
     pub params: Vec<Param>,
+    /// `params { … }` целиком, если есть.
+    pub params_span: Option<Span>,
     pub steps: Vec<Step>,
 }
 
@@ -193,7 +195,8 @@ pub enum Step {
     },
     /// Вызов ради побочного эффекта: `Pay(order: id)`.
     Do(Expr),
-    Expect(Vec<Expr>),
+    /// Проверки и `expect { … }` целиком.
+    Expect(Vec<Expr>, Span),
     Save(Save),
 }
 

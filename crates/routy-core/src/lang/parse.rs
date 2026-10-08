@@ -71,7 +71,7 @@ pub fn pascal_case(s: &str) -> Option<String> {
     (!out.is_empty()).then(|| out.to_string())
 }
 
-const RESERVED: &[&str] = &[
+pub(crate) const RESERVED: &[&str] = &[
     "let", "shape", "flow", "fresh", "save", "expect", "poll", "every", "for", "matches", "in",
     "typeof",
 ];
@@ -82,11 +82,11 @@ fn is_method(w: &str) -> bool {
     w.len() >= 2 && w.bytes().all(|b| b.is_ascii_uppercase())
 }
 
-fn is_ident_start(c: char) -> bool {
+pub(crate) fn is_ident_start(c: char) -> bool {
     c.is_alphabetic() || c == '_'
 }
 
-fn is_ident_char(c: char) -> bool {
+pub(crate) fn is_ident_char(c: char) -> bool {
     c.is_alphanumeric() || c == '_'
 }
 
@@ -663,11 +663,12 @@ impl<'a> Parser<'a> {
                         return p.err(span.start, "duplicate `params`");
                     }
                     p.next()?;
-                    params = Some(p.params()?);
+                    params = Some((p.params()?, Span::new(span.start, p.pos)));
                 }
                 "expect" => {
                     p.next()?;
-                    steps.push(Step::Expect(p.checks()?));
+                    let checks = p.checks()?;
+                    steps.push(Step::Expect(checks, Span::new(span.start, p.pos)));
                 }
                 "save" => steps.push(Step::Save(p.save()?)),
                 _ => {
@@ -699,7 +700,8 @@ impl<'a> Parser<'a> {
             span: Span::new(start.start, self.pos),
             doc,
             name,
-            params: params.unwrap_or_default(),
+            params_span: params.as_ref().map(|(_, s)| *s),
+            params: params.map(|(p, _)| p).unwrap_or_default(),
             steps,
         })
     }
@@ -1861,7 +1863,7 @@ POST /orders/{shop} {
             [
                 Step::Bind { .. },
                 Step::Do(_),
-                Step::Expect(_),
+                Step::Expect(..),
                 Step::Save(_)
             ]
         ));

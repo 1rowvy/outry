@@ -1,0 +1,12 @@
+// Me
+// The token comes from calling Login — it is sent once per run, however many
+// requests call it.
+GET /bearer {
+  headers { Authorization: "Bearer ${Login().body.json.access_token}" }
+
+  expect {
+    status == 200
+    body.authenticated == true
+    body.token == "demo-token"
+  }
+}

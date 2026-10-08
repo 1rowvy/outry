@@ -1,7 +1,0 @@
-# Login: httpbin echoes the request body back in the `json` field.
-POST {{base}}/anything/login
-
-{"user": "{{user}}", "access_token": "demo-token"}
-
-> save token = body.json.access_token
-> assert status == 200

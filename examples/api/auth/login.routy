@@ -1,0 +1,12 @@
+// Login
+// httpbin echoes the request body back in the `json` field.
+POST /anything/login {
+  body { user, access_token: "demo-token" }
+
+  expect {
+    status == 200
+    body matches Echo
+  }
+
+  save token = body.json.access_token
+}

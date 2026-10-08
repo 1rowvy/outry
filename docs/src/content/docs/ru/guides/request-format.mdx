@@ -1,9 +1,15 @@
 ---
-title: Формат файла запроса
-description: Из чего состоит .http-файл — строка запроса, заголовки, тело и директивы.
+title: Файлы .http
+description: Прежний формат запросов .http — он по-прежнему поддерживается — и перевод в .routy.
 ---
 
 import { Aside } from '@astrojs/starlight/components';
+
+<Aside>
+Новые запросы пишутся в [`.routy`](/routy/ru/reference/routy-format/): запросы вызывают друг друга,
+есть сценарии, проверки читаются как код. Файлы `.http` продолжают работать — оба формата уживаются в
+одном проекте, — а `routy convert` [перепишет их](#перевод-в-routy), когда будете готовы.
+</Aside>
 
 Каждый запрос — отдельный файл с расширением `.http`. Устроен он как обычный HTTP:
 
@@ -67,7 +73,52 @@ api/
 `routy run api` выполняет файлы в алфавитном порядке путей, так что числовые префиксы — простой способ
 задать порядок цепочки. Скрытые папки, а также `node_modules`, `target`, `vendor` и `dist` пропускаются.
 
-<Aside type="note" title="Что дальше">
-Проектируется более читаемый формат `.routy` с вызовами запросов и сценариями — см.
-[спецификацию](/routy/ru/reference/routy-format/). Файлы `.http` продолжат работать.
-</Aside>
+## Перевод в .routy
+
+```sh
+routy convert api/ --dry-run   # напечатать результат
+routy convert api/             # записать .routy рядом с каждым .http
+routy convert api/ --rm        # … и удалить .http
+```
+
+```http title="api/auth/login.http"
+# Login
+POST {{base}}/auth/login
+X-Request-Id: {{$uuid}}
+
+{"email": "{{email}}", "password": "{{password}}", "remember": true}
+
+> save token = body.access_token
+> assert status == 200
+> assert body.user.id exists
+```
+
+```routy title="api/auth/login.routy"
+// Login
+POST /auth/login {
+  headers { X-Request-Id: uuid() }
+  body { email, password, remember: true }
+
+  expect {
+    status == 200
+    body.user.id != null
+  }
+
+  save token = body.access_token
+}
+```
+
+- Первая строка комментария становится именем запроса, если она короткая (до четырёх слов); иначе имя
+  строится из имени файла, а комментарий уходит в описание.
+- `{{base}}/…` становится путём, `{{x}}` в нём — [параметром](/routy/ru/reference/routy-format/#параметры)
+  `{x}`; остальные URL остаются как есть.
+- JSON-тело остаётся JSON: `"{{x}}"` становится переменной `x`, `{{x}}` без кавычек — `number(x)`.
+  Остальные тела становятся строками.
+- `> assert` превращается в `expect`; `exists` — в `!= null`, `contains` — в `.contains()`. `.routy`
+  сравнивает без приведения типов, поэтому заголовок, который сравнивали с числом, оборачивается в
+  `number()`.
+- `{{$uuid}}`, `{{$timestamp}}` и `{{$randomInt 1 10}}` становятся `uuid()`, `now()` и `randomInt(1, 9)` —
+  в `.routy` верхняя граница включается.
+
+Существующий `.routy` не перезаписывается. Полное соответствие — в
+[справочнике формата](/routy/ru/reference/routy-format/#совместимость-с-http).

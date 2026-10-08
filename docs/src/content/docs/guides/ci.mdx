@@ -3,8 +3,8 @@ title: Running Routy in CI
 description: Use your request files as API tests in GitHub Actions and other CI systems.
 ---
 
-The same `.http` files you click through in the app can run as API tests on every push. Assertions
-decide whether the job passes.
+The same `.routy` (and `.http`) files you click through in the app can run as API tests on every push.
+`expect` checks decide whether the job passes.
 
 ## GitHub Actions
 
@@ -26,6 +26,11 @@ jobs:
           curl -fsSL https://raw.githubusercontent.com/1rowvy/routy/master/install.sh | sh
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
+      - name: Check request files
+        run: |
+          routy fmt --check api
+          routy check api --env ci --no-keyring
+
       - name: Run API tests
         run: routy run api --env ci --no-keyring --fail-fast
         env:
@@ -46,14 +51,26 @@ routy run api --json > results.jsonl
 ```
 
 ```json
-{"file":"api/users/get.http","passed":true,"outcome":{"request":{…},"response":{"status":200,…},"asserts":[…],"saved":{},"save_misses":[]}}
-{"file":"api/users/bad.http","passed":false,"error":"api/users/bad.http: undefined variable(s): id"}
+{"file":"api/users/get.routy","name":"GetUser","passed":true,"outcome":{"kind":"request","request":{…},"response":{"status":200,…},"asserts":[…],"calls":[…],"saved":{}}}
+{"file":"api/users/bad.routy","name":"GetUser","passed":false,"error":"undefined variable(s): id"}
 ```
 
-## Check syntax only
+A flow's `outcome` has `"kind":"flow"` with `checks`, `calls`, `saved` and `error`.
 
-`routy check` parses every file without sending requests — a fast lint step:
+## Lint without sending
+
+`routy check` reads every file without sending requests — a fast lint step. In `.routy` it also checks
+names of called requests, their arguments, shapes and call cycles. With `--env` it checks what depends
+on the environment: requests whose `only` excludes it, and variables that are not defined in it:
 
 ```sh
 routy check api
+routy check api --env ci
 ```
+
+```txt
+api/orders/create.routy:7:22: variable `api_key` is not defined in ci
+api/orders/create.routy:9:13: `Seed` is limited to dev and cannot be called in ci
+```
+
+`routy fmt --check api` fails when a file is not in the canonical style; `routy fmt api` fixes it.

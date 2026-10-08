@@ -16,6 +16,7 @@ use crate::error::{Error, Result};
 use crate::expr::{AssertOutcome, value_to_var};
 use crate::parser::Header;
 use crate::runner::{ResolvedRequest, Response, RunOutcome, Runner, read_response};
+use crate::state::{CachedCall, unix_now};
 
 /// Запрос, вызванный по ходу выполнения: для trace в CLI и GUI.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -72,8 +73,9 @@ pub struct Run {
     jar: Arc<Jar>,
     client: reqwest::Client,
     no_redirects: reqwest::Client,
+    /// Ответы вызовов по `файл#имя:аргументы` — ключ переживает замену рабочего пространства.
     cache: HashMap<String, Value>,
-    lets: HashMap<usize, Vec<(String, Value)>>,
+    lets: HashMap<std::path::PathBuf, Vec<(String, Value)>>,
     /// `save` этого прогона: в `Vars` значения — строки, а здесь — как были (число, объект).
     typed: HashMap<String, Value>,
     pub confirm: Option<Confirm>,
@@ -100,6 +102,13 @@ impl Run {
         &self.ws
     }
 
+    /// Новые тексты файлов (правки в редакторе) без нового прогона: кеш вызовов, cookies и
+    /// сохранённые значения остаются, `let` вычисляются заново.
+    pub fn set_workspace(&mut self, ws: Workspace) {
+        self.ws = Arc::new(ws);
+        self.lets.clear();
+    }
+
     /// Новый прогон: кеш вызовов, cookies и `let` — заново.
     pub fn reset(&mut self) -> Result<()> {
         self.jar = Arc::new(Jar::default());
@@ -121,16 +130,21 @@ impl Run {
             trace: Vec::new(),
         };
         match ws.item(r) {
-            Item::Request(_) => {
-                let mut o = ex.request(r, Vec::new()).await?;
+            Item::Request(req) => {
+                // Упавший вызов — с именем запущенного в начале цепочки: `Me → Login: …`.
+                let mut o = ex
+                    .request(r, Vec::new())
+                    .await
+                    .map_err(|e| match (&e, &req.name) {
+                        (Error::Call { .. }, Some(name)) => chained(name, e),
+                        _ => e,
+                    })?;
                 o.calls = std::mem::take(&mut ex.trace);
                 // Запуск без аргументов — то же, что вызов `Name()`: следующий вызов возьмёт ответ.
                 if o.passed() {
                     let cookies = ex.cookies(&o.request.url);
-                    let key = cache_key(r, &Value::Object(Map::new()));
-                    ex.run
-                        .cache
-                        .insert(key, response_value(&o.response, cookies));
+                    let v = response_value(&o.response, cookies);
+                    ex.remember(r, &Value::Object(Map::new()), v);
                 }
                 Ok(Outcome::Request(o))
             }
@@ -144,8 +158,22 @@ impl Run {
     }
 }
 
-fn cache_key(r: ItemRef, args: &Value) -> String {
-    format!("{}:{}:{args}", r.file, r.item)
+/// Ключ кеша вызовов (и `cache:` между прогонами): индексы элементов меняются от правок,
+/// путь и имя — реже.
+fn persist_key(ws: &Workspace, r: ItemRef, args: &Value) -> String {
+    let name = match ws.item(r).name() {
+        Some(n) => n.to_string(),
+        None => format!("@{}", r.item),
+    };
+    format!("{}#{name}:{args}", ws.sources[r.file].path.display())
+}
+
+/// `cache: 30m` запроса — `None` у сценариев и запросов без него.
+fn cache_ttl(ws: &Workspace, r: ItemRef) -> Option<Duration> {
+    match ws.item(r) {
+        Item::Request(req) => req.fields.cache,
+        _ => None,
+    }
 }
 
 fn clients(jar: &Arc<Jar>, timeout: Duration) -> Result<(reqwest::Client, reqwest::Client)> {
@@ -234,11 +262,18 @@ impl Exec<'_> {
         let ws = self.run.ws.clone();
         let target = ws.resolve(&call.path).map_err(Error::Run)?;
         let args_obj = Value::Object(args.iter().cloned().collect::<Map<_, _>>());
-        let key = cache_key(target, &args_obj);
+        let key = persist_key(&ws, target, &args_obj);
         let is_flow = matches!(ws.item(target), Item::Flow(_));
         let depth = self.stack.len().saturating_sub(1);
 
         if !call.fresh && !is_flow {
+            let stored = cache_ttl(&ws, target)
+                .and_then(|_| self.runner.cached_calls.get(&key))
+                .filter(|c| c.fresh())
+                .map(|c| c.value.clone());
+            if let Some(v) = stored {
+                self.run.cache.entry(key.clone()).or_insert(v);
+            }
             if let Some(v) = self.run.cache.get(&key) {
                 self.trace.push(CallTrace {
                     name,
@@ -289,18 +324,36 @@ impl Exec<'_> {
         }
         let cookies = self.cookies(&out.request.url);
         let v = response_value(&out.response, cookies);
-        self.run.cache.insert(key, v.clone());
+        let args_obj = std::mem::take(&mut self.trace[idx].args);
+        self.remember(target, &args_obj, v.clone());
+        self.trace[idx].args = args_obj;
         Ok(v)
     }
 
+    /// Ответ вызова — в кеш прогона и, если у запроса есть `cache:`, в state-файл.
+    fn remember(&mut self, r: ItemRef, args: &Value, v: Value) {
+        let ws = self.run.ws.clone();
+        let key = persist_key(&ws, r, args);
+        if let Some(ttl) = cache_ttl(&ws, r) {
+            self.runner.cached_calls.insert(
+                key.clone(),
+                CachedCall {
+                    expires: unix_now() + ttl.as_secs().max(1),
+                    value: v.clone(),
+                },
+            );
+        }
+        self.run.cache.insert(key, v);
+    }
+
     /// `env` и `let` файла; `let` вычисляются один раз за прогон.
-    async fn base_locals(&mut self, src: &Source, file: usize) -> Result<Locals> {
+    async fn base_locals(&mut self, src: &Source) -> Result<Locals> {
         let mut locals = vec![("env".to_string(), Value::String(self.runner.env.clone()))];
-        if let Some(lets) = self.run.lets.get(&file) {
+        if let Some(lets) = self.run.lets.get(&src.path) {
             locals.extend(lets.iter().cloned());
             return Ok(locals);
         }
-        let mut ev = Eval::new(self, &src.text);
+        let mut ev = eval_in(self, src);
         ev.locals = locals;
         let mut lets = Vec::new();
         for item in &src.file.items {
@@ -311,7 +364,7 @@ impl Exec<'_> {
             }
         }
         drop(ev);
-        self.run.lets.insert(file, lets.clone());
+        self.run.lets.insert(src.path.clone(), lets.clone());
         let mut locals = vec![("env".to_string(), Value::String(self.runner.env.clone()))];
         locals.extend(lets);
         Ok(locals)
@@ -332,7 +385,7 @@ impl Exec<'_> {
                 return Err(Error::Run(format!("`{name}` has no parameter `{a}`")));
             }
         }
-        let mut ev = Eval::new(self, &src.text);
+        let mut ev = eval_in(self, src);
         ev.locals = locals;
         for p in params {
             if args.iter().any(|(a, _)| *a == p.name) {
@@ -383,7 +436,7 @@ impl Exec<'_> {
         args: Vec<(String, Value)>,
     ) -> Result<RunOutcome> {
         let src = &ws.sources[r.file];
-        let locals = self.base_locals(src, r.file).await?;
+        let locals = self.base_locals(src).await?;
         let allowed = ws.params_of(r);
         let locals = self
             .bind_params(src, name, &req.fields.params, &allowed, args, locals)
@@ -416,7 +469,7 @@ impl Exec<'_> {
             let Some(poll) = &req.fields.poll else {
                 break (response, cookies);
             };
-            let mut ev = Eval::new(self, &src.text);
+            let mut ev = eval_in(self, src);
             ev.locals = locals.clone();
             set_response(&mut ev, &response, cookies.clone());
             match ev.eval(&poll.until).await? {
@@ -440,7 +493,7 @@ impl Exec<'_> {
             tokio::time::sleep(poll.every).await;
         };
 
-        let mut ev = Eval::new(self, &src.text);
+        let mut ev = eval_in(self, src);
         ev.locals = locals;
         set_response(&mut ev, &response, cookies);
         let mut asserts = Vec::new();
@@ -487,7 +540,7 @@ impl Exec<'_> {
         req: &Request,
         locals: Locals,
     ) -> Result<(ResolvedRequest, Option<Vec<u8>>, Locals)> {
-        let mut ev = Eval::new(self, &src.text);
+        let mut ev = eval_in(self, src);
         ev.locals = locals;
         ev.missing = Some(Vec::new());
 
@@ -536,26 +589,22 @@ impl Exec<'_> {
             None => (None, None),
             Some(Body::Value(e)) => match &e.kind {
                 ExprKind::Builtin(f, args) if f == "file" => {
-                    let [arg] = args.as_slice() else {
-                        return Err(Error::expr(e.span.text(&src.text), "file() takes a path"));
-                    };
-                    let path = value_to_var(&ev.eval(arg).await?);
-                    let full = src
-                        .full
-                        .parent()
-                        .unwrap_or(std::path::Path::new("."))
-                        .join(&path);
-                    let bytes =
-                        std::fs::read(&full).map_err(|err| Error::from(err).in_file(&full))?;
-                    (Some(bytes), Some(mime(&path)))
+                    let (path, bytes) = read_file(&mut ev, src, e, args).await?;
+                    (Some(bytes), Some(mime(&path).to_string()))
                 }
                 ExprKind::Str(_) => {
                     let v = value_to_var(&ev.eval(e).await?);
-                    (Some(v.into_bytes()), Some("text/plain; charset=utf-8"))
+                    (
+                        Some(v.into_bytes()),
+                        Some("text/plain; charset=utf-8".into()),
+                    )
                 }
                 _ => {
                     let v = ev.eval(e).await?;
-                    (Some(serde_json::to_vec(&v)?), Some("application/json"))
+                    (
+                        Some(serde_json::to_vec(&v)?),
+                        Some("application/json".into()),
+                    )
                 }
             },
             Some(Body::Form(entries)) => {
@@ -571,11 +620,50 @@ impl Exec<'_> {
                     .join("&");
                 (
                     Some(text.into_bytes()),
-                    Some("application/x-www-form-urlencoded"),
+                    Some("application/x-www-form-urlencoded".into()),
                 )
             }
-            Some(Body::Multipart(_)) => {
-                return Err(Error::Run("multipart bodies are not supported yet".into()));
+            Some(Body::Multipart(entries)) => {
+                let boundary = format!("routy-{}", crate::dynamic::uuid().replace('-', ""));
+                let mut out = Vec::new();
+                for e in entries {
+                    let mut part = |head: String, data: &[u8]| {
+                        out.extend_from_slice(format!("--{boundary}\r\n{head}\r\n\r\n").as_bytes());
+                        out.extend_from_slice(data);
+                        out.extend_from_slice(b"\r\n");
+                    };
+                    let key = e.key.replace('"', "%22");
+                    if let ExprKind::Builtin(f, args) = &e.value.kind {
+                        if f == "file" {
+                            let (path, bytes) = read_file(&mut ev, src, &e.value, args).await?;
+                            let name = std::path::Path::new(&path)
+                                .file_name()
+                                .map(|n| n.to_string_lossy().replace('"', "%22"))
+                                .unwrap_or_default();
+                            part(
+                                format!(
+                                    "Content-Disposition: form-data; name=\"{key}\"; filename=\"{name}\"\r\nContent-Type: {}",
+                                    mime(&path)
+                                ),
+                                &bytes,
+                            );
+                            continue;
+                        }
+                    }
+                    let mut values = Vec::new();
+                    pairs(&mut values, &e.key, ev.eval(&e.value).await?);
+                    for (_, v) in values {
+                        part(
+                            format!("Content-Disposition: form-data; name=\"{key}\""),
+                            v.as_bytes(),
+                        );
+                    }
+                }
+                out.extend_from_slice(format!("--{boundary}--\r\n").as_bytes());
+                (
+                    Some(out),
+                    Some(format!("multipart/form-data; boundary={boundary}")),
+                )
             }
         };
 
@@ -605,7 +693,7 @@ impl Exec<'_> {
             {
                 headers.push(Header {
                     name: "Content-Type".into(),
-                    value: ct.into(),
+                    value: ct,
                 });
             }
         }
@@ -680,7 +768,7 @@ impl Exec<'_> {
         args: Vec<(String, Value)>,
     ) -> Result<FlowOutcome> {
         let src = &ws.sources[r.file];
-        let locals = self.base_locals(src, r.file).await?;
+        let locals = self.base_locals(src).await?;
         let allowed = ws.params_of(r);
         let locals = self
             .bind_params(src, &fl.name, &fl.params, &allowed, args, locals)
@@ -688,7 +776,7 @@ impl Exec<'_> {
 
         let mut out = FlowOutcome::default();
         let mut values = Vec::new();
-        let mut ev = Eval::new(self, &src.text);
+        let mut ev = eval_in(self, src);
         ev.locals = locals;
         for step in &fl.steps {
             match step {
@@ -705,7 +793,7 @@ impl Exec<'_> {
                         break;
                     }
                 }
-                Step::Expect(checks) => {
+                Step::Expect(checks, _) => {
                     let mut failed = false;
                     for c in checks {
                         let o = ev.check(c).await;
@@ -740,6 +828,12 @@ impl Exec<'_> {
         out.saved = self.save(values);
         Ok(out)
     }
+}
+
+fn eval_in<'a>(host: &'a mut dyn Host, src: &'a Source) -> Eval<'a> {
+    let mut ev = Eval::new(host, &src.text);
+    ev.dir = src.full.parent().map(Into::into).unwrap_or_default();
+    ev
 }
 
 /// Имена ответа в выражениях: `status`, `headers`, `body`, `duration`, `cookies`.
@@ -778,6 +872,26 @@ fn response_value(r: &Response, cookies: Value) -> Value {
     out.insert("duration".into(), Value::from(r.duration_ms));
     out.insert("cookies".into(), cookies);
     Value::Object(out)
+}
+
+/// `file("./x.png")`: путь относительно файла `.routy` и содержимое.
+async fn read_file(
+    ev: &mut Eval<'_>,
+    src: &Source,
+    e: &Expr,
+    args: &[Expr],
+) -> Result<(String, Vec<u8>)> {
+    let [arg] = args else {
+        return Err(Error::expr(e.span.text(&src.text), "file() takes a path"));
+    };
+    let path = value_to_var(&ev.eval(arg).await?);
+    let full = src
+        .full
+        .parent()
+        .unwrap_or(std::path::Path::new("."))
+        .join(&path);
+    let bytes = std::fs::read(&full).map_err(|err| Error::from(err).in_file(&full))?;
+    Ok((path, bytes))
 }
 
 /// Пары `key=value` для query и form: массив повторяет ключ, `null` пропускается.

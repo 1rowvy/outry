@@ -1,7 +1,0 @@
-# Uses the token saved by the previous request.
-GET {{base}}/bearer
-Authorization: Bearer {{token}}
-
-> assert status == 200
-> assert body.authenticated == true
-> assert body.token == demo-token

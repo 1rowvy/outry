@@ -1,31 +1,31 @@
 ---
 title: Импорт роутов из Go
-description: Файлы запросов для всех роутов chi, gin и net/http в Go-сервисе.
+description: Запросы .routy для всех роутов chi, gin и net/http в Go-сервисе.
 ---
 
-Routy читает исходники Go-сервиса, находит зарегистрированные роуты и создаёт `.http`-файл для каждого
-роута, у которого его ещё нет. Существующие файлы не меняются никогда, поэтому импорт можно повторять
-после добавления эндпоинтов.
+Routy читает исходники Go-сервиса, находит зарегистрированные роуты и создаёт запрос `.routy` для
+каждого роута, у которого его ещё нет. Существующие файлы не меняются никогда, поэтому импорт можно
+повторять после добавления эндпоинтов.
 
 ```sh
 cd my-service
-routy init              # один раз: api/env.toml с {{base}}
+routy init              # один раз: api/env.toml с `base`
 routy import go .       # сканировать весь репозиторий
 ```
 
 ```txt
-+ api/users/get.http               GET /users  internal/http/routes.go:24
-+ api/users/get-by-id.http         GET /users/{{id}}  internal/http/routes.go:25
-= api/users/create.http            POST /users  internal/http/routes.go:26
-- api/legacy/get.http              GET {{base}}/legacy  (no such route in code)
++ api/users/get.routy        GET /users  internal/http/routes.go:24
++ api/users/get-by-id.routy  GET /users/{id}  internal/http/routes.go:25
+= api/users/create.routy     POST /users  internal/http/routes.go:26
+- api/legacy/get.routy       GET /legacy  (no such route in code)
 
 14 Go files, 3 routes: 2 new, 1 existing, 1 not in code
 created 2 files
 ```
 
 - `+` — для роута создан новый файл;
-- `=` — запрос для этого роута уже есть (под любым именем);
-- `-` — файл запроса указывает на `{{base}}/…`, но такого роута в коде нет.
+- `=` — запрос для этого роута уже есть (под любым именем, в `.routy` или `.http`);
+- `-` — запрос указывает на `base`, но такого роута в коде нет.
 
 С `--dry-run` план показывается без записи. В приложении то же самое — кнопка синхронизации рядом с
 **Requests** или вкладка **Routes**.
@@ -51,8 +51,8 @@ created 2 files
 
 ## Что создаётся
 
-Параметры пути становятся переменными: `{id}`, `{id:[0-9]+}`, `{path...}`, `:id` и `*path` превращаются
-в `{{id}}` / `{{path}}`.
+Параметры пути остаются в записи роутера: `{id}`, `{id:[0-9]+}`, `{path...}`, `:id` и `*path`
+превращаются в `{id}` / `{path}` — [параметры](/routy/ru/reference/routy-format/#параметры) запроса.
 
 Routy также читает обработчик и показывает, что запрос ожидает:
 
@@ -65,51 +65,76 @@ Routy также читает обработчик и показывает, чт
   и `c.ShouldBindQuery(&q)` (поля из тегов `form`);
 - **заголовки** — `r.Header.Get("X-Tenant-ID")`, `c.GetHeader`.
 
-```http title="api/users/post.http"
-# Создать пользователя
-# Отправляет приветственное письмо.
-# chi internal/http/users.go:42 → h.CreateUser
-#
-# Headers: X-Tenant-ID
-# Body: dto.CreateUser
-#   name          string  required  ФИО
-#   email         string  required
-#   address.city  string
-POST {{base}}/users
+```routy title="api/users/post.routy"
+// Создать пользователя
+// Отправляет приветственное письмо.
+// chi internal/http/users.go:42 → h.CreateUser
+//
+// Headers: X-Tenant-ID
+// Body: dto.CreateUser
+//   name          string  required  ФИО
+//   email         string  required
+//   address.city  string
+POST /users {
+  handler: h.CreateUser
+  body { name: "", email: "", address: { city: "" } }
+}
+```
 
-{
-  "name": "",
-  "email": "",
-  "address": {
-    "city": ""
+```routy title="api/users/get.routy"
+// List users
+// ListUsers returns a page of users.
+// chi internal/http/users.go:22 → h.ListUsers
+//
+// Query:
+//   page   string
+//   limit  string
+GET /users {
+  handler: h.ListUsers
+
+  params {
+    page: null
+    limit: null
+  }
+
+  query {
+    page
+    limit
   }
 }
 ```
 
-Тело — пример с пустыми значениями нужных типов. `POST`, `PUT` и `PATCH`, у которых тело не распознано,
-получают пустое JSON-тело `{}`. Роут на любой метод (`r.Handle`, `Any` в gin)
-создаётся как `GET` с комментарием `# any method`.
+- **Имя** — из doc-комментария: короткий `@Summary` или первая строка и есть имя; комментарий в стиле Go
+  (`ListUsers returns …`) даёт имя функции (`List users`), а сам уходит в описание. Без комментария имя
+  берётся из обработчика (`h.GetUser` → `Get user`).
+- **`handler:`** связывает запрос с кодом: запрос узнаётся и после того, как поменялся путь.
+- **Query-параметры** становятся `params` со значением `null` по умолчанию, так что `ListUsers(page: 2)`
+  отправит `?page=2`, а `ListUsers()` — ничего.
+- **Тело** — пример с пустыми значениями нужных типов. `POST`, `PUT` и `PATCH`, у которых тело не
+  распознано, получают `body {}`. Роут на любой метод (`r.Handle`, `Any` в gin) создаётся как `GET` с
+  комментарием `any method`.
 
 Имена файлов повторяют путь: статические сегменты — папки, параметры в конце — в имени.
 
 | Роут | Файл |
 |------|------|
-| `GET /users` | `users/get.http` |
-| `POST /users` | `users/post.http` |
-| `GET /users/{id}` | `users/get-by-id.http` |
-| `GET /users/{id}/posts` | `users/posts/get.http` |
-| `GET /` | `root/get.http` |
+| `GET /users` | `users/get.routy` |
+| `POST /users` | `users/post.routy` |
+| `GET /users/{id}` | `users/get-by-id.routy` |
+| `GET /users/{id}/posts` | `users/posts/get.routy` |
+| `GET /` | `root/get.routy` |
 
-Если имя занято запросом к другому роуту, добавляется суффикс: `users/get-2.http`.
+Если имя занято файлом другого роута (`.routy` или `.http`), добавляется суффикс: `users/get-2.routy`.
 
-## Сопоставление с существующими файлами
+## Сопоставление с существующими запросами
 
-Файл считается запросом для роута, если совпадают метод и путь URL (query-строка не учитывается).
-Сравниваются только URL, начинающиеся с `{{base}}`; параметры совпадают с любой переменной, так что
-`{{base}}/users/{{user_id}}` подходит для `GET /users/{id}`. Созданные файлы можно свободно
+Запрос считается запросом для роута, если его `handler:` называет обработчик роута. Запросы без
+`handler` сопоставляются по методу и пути (query-строка не учитывается): в `.routy` — пути, начинающиеся
+с `/` (они дописываются к `base`), в `.http` — URL, начинающиеся с `{{base}}`. Параметры совпадают с
+любым именем, так что `/users/{user_id}` подходит для `GET /users/{id}`. Созданные файлы можно свободно
 переименовывать и раскладывать по папкам — следующий импорт их узнает.
 
-Если адрес сервиса в окружениях называется не `base`, укажите `--base <ИМЯ>`.
+Если адрес сервиса в `.http`-файлах называется не `base`, укажите `--base <ИМЯ>`.
 
 ## Другие роутеры
 
@@ -137,7 +162,7 @@ routy import go . --query echo.scm
 | `@route` | Вызов, регистрирующий роут |
 | `@path` | Его путь |
 | `@method` | Метод: `Get`, `GET`, `"GET"` или `http.MethodGet`. Без него метод берётся из шаблона `"GET /path"`, иначе — любой |
-| `@handler` | Обработчик, пишется в комментарий |
+| `@handler` | Обработчик, пишется в `handler:` и в комментарий |
 | `@receiver` | Роутер, на котором вызван метод, — по нему ищется префикс группы |
 | `@group` + `@group.path` | Префикс. С `@group.var` — для этой переменной (`v1 := r.Group("/v1")`), с `@group.body` — для всего внутри блока (`r.Route`) |
 | `@mount` + `@mount.func` | Роуты функции с этим именем получают префикс `@receiver` плюс `@mount.path`; `@mount.pkg` сужает поиск до пакета |

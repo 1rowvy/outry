@@ -37,6 +37,8 @@ pub struct Eval<'h> {
     /// Если `Some`, неизвестные имена собираются сюда (и дают `null`), а не роняют вычисление:
     /// так при подготовке запроса видны сразу все недостающие переменные.
     pub missing: Option<Vec<String>>,
+    /// Каталог файла: от него считаются пути `schema("./x.json")`.
+    pub dir: std::path::PathBuf,
 }
 
 impl<'h> Eval<'h> {
@@ -46,6 +48,7 @@ impl<'h> Eval<'h> {
             src,
             locals: Vec::new(),
             missing: None,
+            dir: std::path::PathBuf::new(),
         }
     }
 
@@ -338,9 +341,13 @@ impl<'h> Eval<'h> {
                 return self.shape_mismatch(v, &shape, path, depth + 1);
             }
             Shape::Schema(p) => {
-                return Err(Error::Run(format!(
-                    "schema(\"{p}\"): JSON Schema is not supported yet"
-                )));
+                let full = self.dir.join(p);
+                let fail = |msg: String| Error::Run(format!("schema(\"{p}\"): {msg}"));
+                let text = std::fs::read_to_string(&full)
+                    .map_err(|e| fail(format!("{}: {e}", full.display())))?;
+                let schema: Value =
+                    serde_json::from_str(&text).map_err(|e| fail(format!("invalid JSON: {e}")))?;
+                return super::schema::mismatch(&schema, v, path).map_err(fail);
             }
         };
         Ok((!ok).then(|| {

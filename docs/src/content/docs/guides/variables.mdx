@@ -5,8 +5,16 @@ description: env.toml environments, shared variables, overrides and where each v
 
 import { Aside } from '@astrojs/starlight/components';
 
-Write `{{name}}` anywhere in a request. Values come from `api/env.toml`, from previous responses, from
-the command line, from environment variables and from the system keychain.
+In `.routy` a variable is a bare name — `customer: user_id` — or `${name}` inside a string and `{name}`
+in a path; in `.http` it is `{{name}}`. Values come from `api/env.toml`, from previous responses, from the
+command line, from environment variables and from the system keychain.
+
+```routy
+GET /users/{id} {
+  query { version }
+  headers { Authorization: "Bearer ${token}" }
+}
+```
 
 ## Environments
 
@@ -34,12 +42,12 @@ Full list of keys: [env.toml reference](/routy/reference/env-toml/).
 
 ## Where a value comes from
 
-When Routy resolves `{{name}}`, it takes the first match, top to bottom:
+When Routy resolves a variable, it takes the first match, top to bottom:
 
 | # | Source | Example |
 |---|--------|---------|
 | 1 | Command line overrides | `routy run api --var id=42` |
-| 2 | Values saved by `> save` | `> save token = body.access_token` |
+| 2 | Values saved by `save` | `save token = body.access_token` |
 | 3 | Process environment variables `ROUTY_<NAME>` | `ROUTY_TOKEN=… routy run api` |
 | 4 | The active environment `[env.<name>]`, then `[vars]` | `base = "http://localhost:8080"` |
 | 5 | The system keychain | `routy secret set token` |
@@ -50,11 +58,20 @@ character other than letters and digits replaced by `_`: `access-token` → `ROU
 If any variables are missing, the request is not sent and all missing names are listed at once:
 
 ```txt
-✗ api/users/get.http
-    api/users/get.http: undefined variable(s): base, id
+✗ api/users/get.routy  GetUser
+    undefined variable(s): base, id
 ```
 
-## Dynamic variables
+In `.routy`, names declared in the request come first: call arguments, [`params`](/routy/reference/routy-format/#parameters)
+and their defaults, then the file's `let`s, then the table above. `routy check --env prod` lists
+variables that are not defined in an environment without sending anything.
+
+## Generated values
+
+In `.routy` these are functions — `uuid()`, `now()`, `nowIso()`, `randomInt(1, 100)`, `randomString(8)`;
+see [built-in functions](/routy/reference/routy-format/#built-in-functions).
+
+### Dynamic variables in .http
 
 Names starting with `$` are generated on every substitution, so each request (and each occurrence)
 gets a fresh value:
@@ -86,7 +103,7 @@ environment. See [`routy vars`](/routy/reference/cli/#routy-vars).
 
 ## Saved values
 
-Values captured with `> save` are available to the following requests in the same run **and** are
+Values captured with `save` (`> save` in `.http`) are available to the following requests in the same run **and** are
 remembered between runs, per project and environment. They are stored outside the repository, in
 `~/.local/share/routy/state/` (Linux), because they are often tokens.
 
@@ -98,6 +115,9 @@ routy run api --fresh
 
 To forget saved values for good, use **Clear saved** on the **Variables** tab in the app.
 
+Responses of requests with [`cache: 30m`](/routy/reference/routy-format/#caching) are kept in the same
+file until they expire; `--fresh` and **Clear saved** skip and forget them too.
+
 ## How the project is found
 
 Routy looks for `env.toml`, or `api/env.toml`, starting from the file you run and going up through
@@ -105,6 +125,6 @@ parent folders, stopping at the repository root (the folder with `.git`). The fo
 `env.toml` is the project root. Use `--project <dir>` to point at it explicitly.
 
 <Aside>
-Without `env.toml` Routy still works, but there are no environments — every `{{variable}}` must come
-from `--var`, `ROUTY_*`, `> save` or the keychain.
+Without `env.toml` Routy still works, but there are no environments — every variable must come from
+`--var`, `ROUTY_*`, `save` or the keychain.
 </Aside>

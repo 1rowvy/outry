@@ -15,9 +15,13 @@
 //! (`routy check`); `exec::Run` — выполнение с кешем вызовов и cookies на прогон.
 
 pub mod ast;
+pub mod convert;
+mod env_check;
 pub mod eval;
 pub mod exec;
+pub mod fmt;
 pub mod parse;
+pub mod schema;
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
@@ -97,6 +101,18 @@ pub struct ItemRef {
     pub item: usize,
 }
 
+fn absolute_schemas(s: &mut Shape, dir: &Path) {
+    match s {
+        Shape::Schema(p) => *p = dir.join(&*p).to_string_lossy().into_owned(),
+        Shape::Union(alts) => alts.iter_mut().for_each(|a| absolute_schemas(a, dir)),
+        Shape::Array(inner) => absolute_schemas(inner, dir),
+        Shape::Object(fields) => fields
+            .iter_mut()
+            .for_each(|f| absolute_schemas(&mut f.shape, dir)),
+        _ => {}
+    }
+}
+
 /// Все `*.routy` проекта: по ним разрешаются имена вызовов и форм.
 #[derive(Debug, Default)]
 pub struct Workspace {
@@ -168,10 +184,17 @@ impl Workspace {
         self.shapes = self
             .sources
             .iter()
-            .flat_map(|s| &s.file.items)
-            .filter_map(|i| match i {
-                Item::Shape(d) => Some((d.name.clone(), d.shape.clone())),
-                _ => None,
+            .flat_map(|s| {
+                // `schema("./x.json")` в именованной форме — относительно её файла, а не вызывающего.
+                let dir = s.full.parent().map(Path::to_path_buf).unwrap_or_default();
+                s.file.items.iter().filter_map(move |i| match i {
+                    Item::Shape(d) => {
+                        let mut shape = d.shape.clone();
+                        absolute_schemas(&mut shape, &dir);
+                        Some((d.name.clone(), shape))
+                    }
+                    _ => None,
+                })
             })
             .collect();
         idx
@@ -183,6 +206,25 @@ impl Workspace {
 
     pub fn item(&self, r: ItemRef) -> &Item {
         &self.sources[r.file].file.items[r.item]
+    }
+
+    /// Запрос или сценарий файла `file` на строке `line` (с 1). Строка между элементами —
+    /// ближайший элемент выше; выше первого — первый.
+    pub fn item_at(&self, file: usize, line: usize) -> Option<ItemRef> {
+        let src = &self.sources[file];
+        let runnable: Vec<(usize, &Item)> = src
+            .file
+            .items
+            .iter()
+            .enumerate()
+            .filter(|(_, i)| matches!(i, Item::Request(_) | Item::Flow(_)))
+            .collect();
+        let at = runnable
+            .iter()
+            .rev()
+            .find(|(_, i)| src.line(i.span().start) <= line)
+            .or(runnable.first())?;
+        Some(ItemRef { file, item: at.0 })
     }
 
     /// Индекс файла по пути относительно корня.
@@ -319,17 +361,34 @@ impl Workspace {
                 let me = ItemRef { file: fi, item: ii };
                 let mut calls = Vec::new();
                 let mut shapes = Vec::new();
+                let mut schemas = Vec::new();
                 visit_item(item, &mut |e| match &e.kind {
                     ExprKind::Call(c) => calls.push((c, e.span)),
-                    ExprKind::Matches(_, Pattern::Shape(sh)) => collect_named(sh, &mut shapes),
+                    ExprKind::Matches(_, Pattern::Shape(sh)) => {
+                        collect_named(sh, &mut shapes);
+                        collect_schemas(sh, e.span, &mut schemas);
+                    }
                     _ => {}
                 });
                 if let Item::Shape(d) = item {
                     collect_named(&d.shape, &mut shapes);
+                    collect_schemas(&d.shape, d.span, &mut schemas);
                 }
                 for (name, span) in shapes {
                     if self.shape(&name).is_none() {
                         errors.push(s.error_at(span.start, format!("unknown shape `{name}`")));
+                    }
+                }
+                let dir = s.full.parent().unwrap_or(Path::new("."));
+                for (path, span) in schemas {
+                    let problem = match std::fs::read_to_string(dir.join(path)) {
+                        Err(e) => Some(e.to_string()),
+                        Ok(text) => serde_json::from_str::<serde_json::Value>(&text)
+                            .err()
+                            .map(|e| format!("invalid JSON: {e}")),
+                    };
+                    if let Some(p) = problem {
+                        errors.push(s.error_at(span.start, format!("schema(\"{path}\"): {p}")));
                     }
                 }
                 for (call, span) in calls {
@@ -442,6 +501,18 @@ fn collect_named(s: &Shape, out: &mut Vec<(String, Span)>) {
     }
 }
 
+fn collect_schemas<'a>(s: &'a Shape, at: Span, out: &mut Vec<(&'a str, Span)>) {
+    match s {
+        Shape::Schema(p) => out.push((p, at)),
+        Shape::Union(alts) => alts.iter().for_each(|a| collect_schemas(a, at, out)),
+        Shape::Array(inner) => collect_schemas(inner, at, out),
+        Shape::Object(fields) => fields
+            .iter()
+            .for_each(|f| collect_schemas(&f.shape, at, out)),
+        _ => {}
+    }
+}
+
 /// Обходит все выражения элемента, включая вложенные.
 pub fn visit_item<'a>(item: &'a Item, f: &mut impl FnMut(&'a Expr)) {
     match item {
@@ -483,7 +554,7 @@ pub fn visit_item<'a>(item: &'a Item, f: &mut impl FnMut(&'a Expr)) {
                 match step {
                     Step::Bind { value, .. } => visit(value, f),
                     Step::Do(e) => visit(e, f),
-                    Step::Expect(es) => es.iter().for_each(|e| visit(e, f)),
+                    Step::Expect(es, _) => es.iter().for_each(|e| visit(e, f)),
                     Step::Save(s) => visit(&s.value, f),
                 }
             }

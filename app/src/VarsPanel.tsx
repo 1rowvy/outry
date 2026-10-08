@@ -14,10 +14,12 @@ interface Props {
   env: string | null;
   vars: VarInfo[];
   onClearSaved: () => void;
+  /** *.routy: новый прогон — забыть кеш вызовов и cookies */
+  onResetRun: () => void;
   onSetSecret: (name: string) => void;
 }
 
-export function VarsPanel({ env, vars, onClearSaved, onSetSecret }: Props) {
+export function VarsPanel({ env, vars, onClearSaved, onResetRun, onSetSecret }: Props) {
   const saved = vars.filter((v) => v.source === "saved").length;
   return (
     <div className="vars">
@@ -26,7 +28,10 @@ export function VarsPanel({ env, vars, onClearSaved, onSetSecret }: Props) {
           Environment <b>{env ?? "default"}</b>
         </span>
         <span className="spacer" />
-        <button className="ghost" onClick={onClearSaved} disabled={saved === 0} title="Forget values captured by > save in this environment">
+        <button className="ghost" onClick={onResetRun} title="Forget responses of called requests (Login() and the like) and cookies — the next .routy run starts fresh">
+          New run
+        </button>
+        <button className="ghost" onClick={onClearSaved} disabled={saved === 0} title="Forget values captured by save in this environment">
           Clear saved{saved > 0 && ` (${saved})`}
         </button>
       </div>

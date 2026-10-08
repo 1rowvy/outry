@@ -11,7 +11,7 @@ use crate::error::{Error, Result};
 use crate::expr::{AssertOutcome, Subject, value_to_var};
 use crate::parser::{Directive, Header, RequestFile};
 use crate::project::Project;
-use crate::state::{State, state_path};
+use crate::state::{CachedCall, State, state_path};
 use crate::template::render;
 use crate::vars::{VarInfo, Vars};
 
@@ -102,6 +102,8 @@ pub struct Runner {
     pub project: Project,
     pub env: String,
     pub vars: Vars,
+    /// Ответы вызовов с `cache:` (`*.routy`) — живут в state-файле рядом с `save`.
+    pub cached_calls: BTreeMap<String, CachedCall>,
 }
 
 impl Runner {
@@ -124,6 +126,7 @@ impl Runner {
             project,
             env,
             vars,
+            cached_calls: BTreeMap::new(),
         })
     }
 
@@ -132,6 +135,8 @@ impl Runner {
         if let Some(path) = state_path(&self.project.root) {
             let mut state = State::load(&path)?;
             self.vars.saved = state.envs.remove(&self.env).unwrap_or_default();
+            self.cached_calls = state.cache.remove(&self.env).unwrap_or_default();
+            self.cached_calls.retain(|_, c| c.fresh());
         }
         Ok(())
     }
@@ -143,6 +148,13 @@ impl Runner {
         let mut state = State::load(&path)?;
         state.root = self.project.root.clone();
         state.envs.insert(self.env.clone(), self.vars.saved.clone());
+        let mut cache = self.cached_calls.clone();
+        cache.retain(|_, c| c.fresh());
+        if cache.is_empty() {
+            state.cache.remove(&self.env);
+        } else {
+            state.cache.insert(self.env.clone(), cache);
+        }
         state.save(&path)
     }
 
@@ -266,9 +278,10 @@ impl Runner {
         self.vars.list(&self.project.config.secrets)
     }
 
-    /// Забыть все значения `> save` этого окружения (и на диске).
+    /// Забыть все значения `> save` и ответы `cache:` этого окружения (и на диске).
     pub fn clear_saved(&mut self) -> Result<()> {
         self.vars.saved.clear();
+        self.cached_calls.clear();
         self.persist_saved()
     }
 }

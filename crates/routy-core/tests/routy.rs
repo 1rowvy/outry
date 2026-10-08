@@ -250,7 +250,10 @@ GET /counter
     let mut run = Run::new(ws, Duration::from_secs(5)).unwrap();
 
     let err = exec(&mut run, &mut r, "Broken").await.unwrap_err();
-    assert_eq!(err.to_string(), "Fail: status == 200 — status is 500");
+    assert_eq!(
+        err.to_string(),
+        "Broken → Fail: status == 200 — status is 500"
+    );
     assert!(matches!(err, Error::Call { .. }));
 
     let Outcome::Request(o) = exec(&mut run, &mut r, "Checked").await.unwrap() else {
@@ -317,7 +320,7 @@ GET /poll { poll body.n > 100 every 10ms for 30ms }
         .unwrap_err()
         .to_string();
     assert!(
-        err.starts_with("ProdOnly: ProdOnly is limited to prod"),
+        err.starts_with("CallsProd → ProdOnly: ProdOnly is limited to prod"),
         "{err}"
     );
 
@@ -389,4 +392,173 @@ shape Order { id: string }
     assert!(has("unknown shape `Missing`"), "{errors:#?}");
     assert!(has("call cycle: A → B → A"), "{errors:#?}");
     assert_eq!(errors.len(), 6, "{errors:#?}");
+}
+
+#[tokio::test]
+async fn cache_between_runs_multipart_and_schema() {
+    let (base, hits) = server();
+    let mut r = runner(&base);
+    let dir = std::env::temp_dir().join(format!("routy-lang-test-{}", std::process::id()));
+    std::fs::create_dir_all(dir.join("schemas")).unwrap();
+    std::fs::write(dir.join("note.txt"), "hello").unwrap();
+    std::fs::write(
+        dir.join("schemas/echo.json"),
+        r#"{ "type": "object", "required": ["method"], "properties": { "method": { "enum": ["GET"] } } }"#,
+    )
+    .unwrap();
+    let ws = Workspace::from_sources(
+        &dir,
+        vec![
+            (
+                "a.routy".into(),
+                r#"
+// Login
+POST /login { cache: 1h }
+
+// Uses login
+GET /x { headers { T: Login().body.token } }
+
+// Upload
+POST /upload {
+  multipart {
+    title: "Note"
+    tags: ["a", "b"]
+    doc: file("./note.txt")
+  }
+  expect {
+    body.headers.content-type.startsWith("multipart/form-data; boundary=")
+    body.body.contains("name=\"doc\"; filename=\"note.txt\"\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nhello\r\n")
+    body.body.contains("name=\"tags\"\r\n\r\nb\r\n")
+    body matches Echo
+    body matches schema("./schemas/echo.json")
+    !(body matches Get)
+  }
+}
+"#
+                .into(),
+            ),
+            (
+                "schemas/shapes.routy".into(),
+                "shape Echo { method: string, path: \"/upload\" }\nshape Get = schema(\"./echo.json\")\n".into(),
+            ),
+        ],
+    );
+    assert!(ws.errors.is_empty(), "{:?}", ws.errors);
+    assert!(ws.check().is_empty(), "{:?}", ws.check());
+    let mut run = Run::new(ws, Duration::from_secs(5)).unwrap();
+
+    let Outcome::Request(o) = exec(&mut run, &mut r, "Upload").await.unwrap() else {
+        panic!()
+    };
+    assert!(!o.asserts[4].passed);
+    assert_eq!(
+        o.asserts[4].detail.as_deref(),
+        Some("body.method: expected one of \"GET\", got \"POST\"")
+    );
+    assert!(
+        o.asserts[..4]
+            .iter()
+            .chain(&o.asserts[5..])
+            .all(|a| a.passed),
+        "{:#?}",
+        o.asserts
+    );
+
+    exec(&mut run, &mut r, "UsesLogin").await.unwrap();
+    assert_eq!(hits.lock().unwrap()["/login"], 1);
+    assert_eq!(r.cached_calls.len(), 1);
+
+    // Новый прогон (кеш прогона пуст), но ответ Login живёт в `cache:` раннера.
+    run.reset().unwrap();
+    let Outcome::Request(o) = exec(&mut run, &mut r, "UsesLogin").await.unwrap() else {
+        panic!()
+    };
+    assert_eq!(hits.lock().unwrap()["/login"], 1, "cached between runs");
+    assert!(o.calls[0].cached);
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn check_env_finds_only_and_missing_vars() {
+    let ws = workspace(&[(
+        "a.routy",
+        r#"
+let shop = "main"
+
+// Login
+POST /login {
+  params { user: "bob", password }
+  body { user, password, shop }
+  save token = body.token
+}
+
+// Seed
+POST /seed { only: [dev, stagin] }
+
+// Order
+POST /orders {
+  headers { A: "${api_key}", B: vars["x-trace"] }
+  body { t: Login().body.token, s: Seed().status, ok: [1].all(i => i > 0) }
+  expect { body.id == token && status == 201 }
+}
+
+// Flow
+flow Buy {
+  params { qty: 1 }
+  o = Order()
+  expect { o.status == qty && missing_one == 1 }
+}
+"#,
+    )]);
+    let envs = vec!["dev".to_string(), "prod".to_string(), "staging".to_string()];
+    let mut has = |n: &str| n == "base";
+    let errors: Vec<String> = ws
+        .check_env("prod", &envs, &mut has)
+        .iter()
+        .map(|e| e.to_string())
+        .collect();
+    let want = [
+        "/nonexistent/a.routy:12:1: `only` names unknown environment `stagin` (did you mean `staging`?)",
+        "/nonexistent/a.routy:16:19: variable `api_key` is not defined in prod",
+        "/nonexistent/a.routy:16:33: variable `x-trace` is not defined in prod",
+        "/nonexistent/a.routy:17:13: `Login` needs password — pass it or define the variable in prod",
+        "/nonexistent/a.routy:17:36: `Seed` is limited to dev, stagin and cannot be called in prod",
+        "/nonexistent/a.routy:25:31: variable `missing_one` is not defined in prod",
+    ];
+    assert_eq!(errors, want);
+
+    let mut none = |_: &str| false;
+    let errors = ws.check_env("dev", &envs, &mut none);
+    assert!(
+        errors
+            .iter()
+            .any(|e| e.msg.contains("`base` is not defined in dev")),
+        "{errors:#?}"
+    );
+}
+
+#[tokio::test]
+async fn editor_workflow_keeps_the_run() {
+    let (base, hits) = server();
+    let mut r = runner(&base);
+    let a = "// Login\nPOST /login\n\n// Me\nGET /me {\n  headers { T: Login().body.token }\n}\n";
+    let ws = workspace(&[("a.routy", a)]);
+    assert_eq!(ws.item_at(0, 1), Some(ItemRef { file: 0, item: 0 }));
+    assert_eq!(ws.item_at(0, 3), Some(ItemRef { file: 0, item: 0 }));
+    assert_eq!(ws.item_at(0, 6), Some(ItemRef { file: 0, item: 1 }));
+    let mut run = Run::new(ws, Duration::from_secs(5)).unwrap();
+    run.run_item(&mut r, ItemRef { file: 0, item: 1 })
+        .await
+        .unwrap();
+
+    // Правка в редакторе: новый текст файла, элементы сдвинулись — Login() всё ещё из кеша.
+    let edited = format!("// Health\nGET /health\n\n{a}");
+    run.set_workspace(workspace(&[("a.routy", &edited)]));
+    let me = run.workspace().item_at(0, 9).unwrap();
+    assert_eq!(me.item, 2);
+    let Outcome::Request(o) = run.run_item(&mut r, me).await.unwrap() else {
+        panic!()
+    };
+    assert!(o.calls[0].cached);
+    assert_eq!(hits.lock().unwrap()["/login"], 1);
 }

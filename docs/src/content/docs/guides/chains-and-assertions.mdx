@@ -1,69 +1,132 @@
 ---
-title: Chaining requests and assertions
-description: Capture values from responses with > save, check responses with > assert.
+title: Calling requests and checks
+description: Check responses with expect, call one request from another, describe scenarios with flow.
 ---
 
-Directives are lines starting with `>` at the end of a request file. They run after the response
-arrives.
+import { Aside } from '@astrojs/starlight/components';
 
-## `> save` — pass values between requests
+## `expect` — check the response
 
-```http title="api/auth/1-login.http"
-POST {{base}}/login
+```routy title="api/users/create.routy"
+// Create user
+POST /users {
+  body { name: "Viktor" }
 
-{"email": "dev@example.com", "password": "{{password}}"}
-
-> save token = body.access_token
-> save user_id = body.user.id
+  expect {
+    status == 201
+    body.name == "Viktor"
+    body.id matches /^u_\d+$/
+    headers.content-type.contains("json")
+    duration < 500
+    body matches { id: string, name: string, tags?: [string] }
+  }
+}
 ```
 
-```http title="api/auth/2-me.http"
-GET {{base}}/users/{{user_id}}
-Authorization: Bearer {{token}}
+One check per line; each must be true. All checks run, even after a failure, and a failed one shows
+why:
 
-> assert status == 200
+```txt
+✗ api/users/create.routy  CreateUser  POST http://localhost:8080/users  201 Created  9ms 211B
+    ✓ status == 201
+    ✗ body.name == "Viktor"  — body.name is "viktor"
+    ✗ body matches { id: string, name: string, tags?: [string] }  — body.id: expected string, got 42
+```
+
+Comparisons don't coerce types (`"1" != 1`), a missing field is `null` instead of an error, and
+`matches` takes a regular expression, an inline shape, a named [shape](/routy/reference/routy-format/#shapes)
+or a JSON Schema file. All operators and methods: [Expressions](/routy/reference/routy-format/#expressions).
+
+## Calling another request
+
+A request is a function: call it by name, and the result is its response.
+
+```routy title="api/auth/login.routy"
+// Login
+POST /auth/login {
+  params {
+    email: "dev@example.com"
+    password
+  }
+
+  body { email, password }
+  expect { status == 200 }
+}
+```
+
+```routy title="api/users/me.routy"
+// Me
+GET /me {
+  headers { Authorization: "Bearer ${Login().body.token}" }
+  expect { status == 200 }
+}
 ```
 
 ```sh
-routy run api/auth     # 1-login, then 2-me with token and user_id filled in
+routy run api/users/me.routy   # logs in first, by itself
 ```
-
-Strings are saved without quotes; numbers, objects and arrays as compact JSON. If the path does not
-exist in the response, the request is marked as failed.
-
-Saved values also survive between runs — run `2-me.http` alone later and it still has the token. See
-[Saved values](/routy/guides/variables/#saved-values).
-
-## `> assert` — check the response
-
-```http
-> assert status == 201
-> assert status < 300
-> assert duration < 500
-> assert body.name == "Viktor"
-> assert body.items[0].id exists
-> assert body.tags contains "admin"
-> assert headers.content-type contains json
-```
-
-Each assertion is `<path> <operator> <value>`, or `<path> exists`. Values are JSON literals (`200`,
-`"text"`, `true`, `null`) or a bare word, which is treated as a string. Full list of paths and
-operators: [Expressions reference](/routy/reference/expressions/).
-
-The output shows every check, and the actual value for failed ones:
 
 ```txt
-✗ api/auth/2-me.http  GET http://localhost:8080/users/7  200 OK  9ms 211B
-    ✓ body.name == "Viktor"
-    ✗ status == 201  (actual: 200)
+✓ api/users/me.routy  Me  GET http://localhost:8080/me  200 OK  8ms 96B
+    ↳ Login  200  31ms
+    ✓ status == 200
 ```
+
+- **No run order to maintain.** `Me` works alone — it calls `Login` when it needs a token.
+- **Sent once per run.** Ten requests calling `Login()` log in once; the rest reuse the response
+  (`↳ Login cached`). `fresh Login()` always sends a new one. `cache: 30m` on `Login` keeps its response
+  between runs.
+- **Arguments** fill the callee's `params` and `{path}` parameters: `GetUser(id: 7)`,
+  `Login(email: "admin@example.com")`.
+- **Failures propagate.** If `Login` fails its `expect`, `Me` fails too, with the chain:
+
+  ```txt
+  ✗ api/users/me.routy  Me
+      Me → Login: status == 200 — status is 401
+  ```
+- **Cookies** from `Set-Cookie` are kept for the whole run, like in a browser.
+
+Request names are unique in the project; when two folders have a `Create`, call `users.Create()`.
+`routy check` reports unknown names, wrong arguments and call cycles.
+
+## `flow` — a scenario
+
+```routy title="api/flows/checkout.routy"
+// Checkout
+flow Checkout {
+  user = CreateUser(name: "Bob")
+  order = CreateOrder(customer: user.body.id)
+  Pay(order: order.body.id)
+
+  expect { GetOrder(id: order.body.id).body.status == "paid" }
+}
+```
+
+Steps run top to bottom and the flow stops at the first failure. In the app the flow shows a trace of
+every request it called. Run it by name: `routy run Checkout`.
+
+## `save` — keep a value
+
+```routy
+save order_id = body.id
+```
+
+A saved value is a variable for later requests in the run **and** is remembered between runs, per
+project and environment — so after one `routy run CreateOrder`, `GetOrder` alone still knows `order_id`.
+Values are stored outside the repository; see [Saved values](/routy/guides/variables/#saved-values).
+Prefer calls for things like tokens: they don't depend on what ran before.
 
 ## Exit codes
 
 `routy run` exits with:
 
-- `0` — every request was sent and every assertion and save succeeded;
-- `1` — at least one request failed (an assertion, a save, a network error, a missing variable);
+- `0` — every request was sent and every check and save succeeded;
+- `1` — at least one request failed (a check, a save, a network error, a missing variable);
 - `2` — Routy could not start: invalid arguments, unknown environment, broken `env.toml`.
 
 Use `--fail-fast` to stop at the first failed request.
+
+<Aside>
+In `.http` files the same is done with `> save` and `> assert` lines at the end of the file — see
+[.http directives](/routy/reference/expressions/).
+</Aside>

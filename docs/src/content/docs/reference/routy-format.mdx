@@ -1,20 +1,16 @@
 ---
 title: .routy format
-description: Specification of the planned .routy request format — syntax, expressions, request calls and flows.
-sidebar:
-  badge:
-    text: In progress
-    variant: caution
+description: Reference of the .routy request format — syntax, expressions, request calls and flows.
 ---
 
 import { Aside } from '@astrojs/starlight/components';
 
-<Aside type="caution" title="In progress">
-This is the next request format. `routy run` and `routy check` already read `*.routy`: requests,
-expressions, checks, shapes, `save`, calls with the run cache, flows, polling and cookies. Not yet:
-`cache:` between runs, `multipart`, `schema()`, `routy fmt`, `routy convert`, the app and
-`routy import`. Today's format is described in [Request file format](/routy/guides/request-format/).
-Discussion happens in [GitHub issues](https://github.com/1rowvy/routy/issues).
+<Aside>
+The CLI (`run`, `check`, `fmt`, `convert`, `import go`) and the desktop app read and write `.routy`.
+Comparing requests with the code — `routy import go --check` / `--fix` and shapes generated from Go
+structs, described in [Keeping in sync with code](#keeping-in-sync-with-code) — is coming next.
+The older format is described in [.http files](/routy/guides/request-format/). Discussion happens in
+[GitHub issues](https://github.com/1rowvy/routy/issues).
 </Aside>
 
 ## Goals
@@ -34,7 +30,6 @@ Discussion happens in [GitHub issues](https://github.com/1rowvy/routy/issues).
 // Creates an order for the current user.
 POST /orders/{shop} {
   only: [dev, staging]
-
   query { page: 1 }
 
   headers {
@@ -340,21 +335,28 @@ expect {
 
 A failure names the first mismatching path: `body.items[2].qty: expected integer, got "2"`.
 
+`schema()` takes a path relative to the `.routy` file where it is written (for a named shape — where the
+shape is declared). Supported JSON Schema keywords (draft 7 / 2020-12, plus OpenAPI 3.0 `nullable`):
+`type`, `enum`, `const`, `properties`, `required`, `additionalProperties`, `items`, `prefixItems`,
+`minItems` / `maxItems`, `minLength` / `maxLength`, `pattern`, `minimum` / `maximum` and their
+`exclusive` forms, `allOf`, `anyOf`, `oneOf`, `not`, and `$ref` inside the same file. Other keywords are
+ignored. `routy check` reports a missing or invalid schema file.
+
+```routy
+shape Order = schema("./schemas/order.json")
+```
+
 Named shapes are declared at the top level and are visible in the whole project:
 
 ```routy title="api/shapes.routy"
-shape Order {
-  id: string,
-  total: number,
-  items: [Item],
-}
+shape Order { id: string, total: number, items: [Item] }
 
 shape Item { sku: string, qty: integer }
 ```
 
-`routy import go` generates shapes from the Go structs a handler returns (`json` tags, `omitempty` →
-optional) into `api/shapes.routy`, and `routy import go --check` fails when they no longer match the
-code — see [Keeping in sync with code](#keeping-in-sync-with-code).
+Planned: `routy import go` generates shapes from the Go structs a handler returns (`json` tags,
+`omitempty` → optional) into `api/shapes.routy`, and `routy import go --check` fails when they no longer
+match the code — see [Keeping in sync with code](#keeping-in-sync-with-code).
 
 ## Saving values
 
@@ -378,11 +380,10 @@ A request can be called with arguments. Its parameters are:
 POST /auth/login {
   params {
     email: "dev@example.com"
-    password                 // no default
+    password // no default
   }
 
   body { email, password }
-
   expect { status == 200 }
 }
 ```
@@ -430,8 +431,8 @@ Within one run a call with the same request and the same arguments is sent **onc
 the same response. Ten requests calling `Login()` log in once.
 
 - `fresh Login()` always sends a new request.
-- A run is one `routy run` in the CLI, and in the app — until the environment is switched or the cache
-  is cleared from the variables panel.
+- A run is one `routy run` in the CLI, and in the app — until the environment is switched or **New run**
+  is clicked on the Variables tab.
 - `cache: 30m` on the callee keeps its response between runs (in the same state file as saved
   values, outside the repo): a login token survives restarts until it expires. A `401` from a request that used a cached
   value does not retry automatically; use `fresh` where that matters.
@@ -478,9 +479,7 @@ flow Checkout {
   order = CreateOrder(shop: "main", customer: user.body.id)
   Pay(order: order.body.id)
 
-  expect {
-    GetOrder(id: order.body.id).body.status == "paid"
-  }
+  expect { GetOrder(id: order.body.id).body.status == "paid" }
 
   save last_order = order.body.id
 }
@@ -507,6 +506,11 @@ A `let` is visible in its file only and sits between parameters and the variable
 resolution. Use `env.toml` for values shared across files.
 
 ## Keeping in sync with code
+
+<Aside type="caution" title="Planned">
+Today `routy import go` writes `handler:` into generated requests and matches existing requests by it;
+the comparison below is the next step.
+</Aside>
 
 `routy import go --check` compares requests with the server code and says not only *that* they differ
 but *what* changed in Go and *how* to fix the `.routy` file.
@@ -583,11 +587,11 @@ routy run api/                      # every file, sorted by path
 routy run CreateOrder               # by name
 routy run Checkout --env staging
 routy run api/orders/create.routy:12  # the request or flow at line 12
-routy check                         # syntax, names, cycles, missing variables, `only`
+routy check api/                    # syntax, names, arguments, shapes, cycles
+routy check api/ --env prod         # + `only` and variables missing in prod
 routy fmt [--check] [paths]         # rewrite files in the canonical style
 routy convert api/                  # *.http → *.routy
-routy import go ./cmd/server --check  # what changed in code, exit code ≠ 0
-routy import go ./cmd/server --fix    # apply the fixable changes
+routy import go .                   # requests for new routes of a Go service
 ```
 
 Running a file or a directory runs every request in it, including ones that mostly exist to be
@@ -598,28 +602,43 @@ once. To run a scenario only, run the flow by name.
 
 `routy fmt` produces one canonical form, like `gofmt`:
 
-- two-space indentation; one field per line; a blank line between top-level items;
-- fields in the order of the [fields table](#fields);
-- double quotes; `key: value` with one space; trailing commas in multi-line `{ }` and `[ ]`;
-- objects and arrays that fit in 80 columns are kept on one line;
-- comments are preserved.
+- two-space indentation; one field per line; a blank line between top-level items (consecutive `let`s
+  and shapes keep their grouping);
+- fields in the order of the [fields table](#fields), with a blank line around multi-line fields;
+- a block with one element that fits stays on one line (`expect { status == 200 }`); `expect` with
+  several checks has one per line;
+- double quotes; `key: value` with one space; `{ email }` for `email: email`; durations in the largest
+  whole unit (`10000ms` → `10s`);
+- objects, arrays and argument lists that fit in 80 columns are kept on one line, otherwise one element
+  per line with a trailing comma;
+- `"""…"""` strings are re-indented to the surrounding block;
+- comments are preserved: above an element, at the end of its line, or at the end of a block. An item
+  that can't be printed with every comment in place (e.g. a comment inside a shape) is left as it is.
+
+```sh
+routy fmt api/            # rewrite, print changed files
+routy fmt --check api/    # CI: exit code 1 if anything is not formatted
+```
 
 ## Compatibility with .http
 
 - `*.http` files are read by the current parser and behave as today; both formats can live in one
   project. `.routy` requests cannot call `.http` ones.
 - `{{var}}` is not valid in `.routy`; `routy check` suggests `${var}`, or `{var}` in a path.
-- `routy convert` rewrites `.http` files into `.routy`:
+- `routy convert` rewrites `.http` files into `.routy` next to them (`--dry-run` prints, `--rm` deletes
+  the `.http` afterwards; an existing `.routy` is never overwritten):
 
 | `.http` | `.routy` |
 |---------|----------|
 | `POST {{base}}/users/{{id}}` | `POST /users/{id}` |
-| `Header: {{token}}` | `Header: "${token}"` |
-| JSON body | `body { … }`, `{{x}}` in values → `x` |
-| other body | `body """…"""` |
+| `Header: Bearer {{token}}` | `Header: "Bearer ${token}"`; a value that is only `{{token}}` → `token` |
+| JSON body | `body { … }`: `"{{x}}"` → `x`, `"a {{x}}"` → `"a ${x}"`, `{{x}}` outside quotes → `number(x)` |
+| other body | `"…"`, or `"""…"""` if multi-line |
 | `> save x = body.id` | `save x = body.id` |
 | `> assert status == 200` | `status == 200` in `expect` |
 | `> assert body.id exists` | `body.id != null` |
 | `> assert body.tags contains "a"` | `body.tags.contains("a")` |
-| `# comment` above the request | `// comment` — the first line becomes the name |
-| `{{$uuid}}`, `{{$timestamp}}`, `{{$randomInt 1 10}}` | `uuid()`, `now()`, `randomInt(1, 10)` |
+| `> assert headers.content-length < 1000` | `number(headers.content-length) < 1000` |
+| `# comment` above the request | `// comment` — the first line becomes the name if it is up to four words, otherwise the name comes from the file name |
+| `{{$uuid}}`, `{{$timestamp}}`, `{{$randomInt 1 10}}` | `uuid()`, `now()`, `randomInt(1, 9)` (the upper bound is inclusive in `.routy`) |
+| `{{x-y}}` | `vars["x-y"]` |

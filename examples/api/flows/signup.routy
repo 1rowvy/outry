@@ -1,0 +1,9 @@
+// Signup
+// A new user is created and then read back.
+flow Signup {
+  user = CreateUser(name: "Ann")
+  expect { user.body.json.name == "Ann" }
+
+  got = GetUser(id: 7)
+  expect { got.body.url.endsWith("/users/7") }
+}

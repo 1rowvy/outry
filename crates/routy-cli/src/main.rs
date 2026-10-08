@@ -62,10 +62,39 @@ enum Cmd {
         #[arg(long)]
         yes: bool,
     },
-    /// Проверить файлы без отправки: синтаксис, а в *.routy — имена вызовов, аргументы, формы, циклы
+    /// Проверить файлы без отправки: синтаксис, а в *.routy — имена вызовов, аргументы, формы, циклы.
+    /// С --env ещё и окружение: вызовы запросов, закрытых `only`, и недостающие переменные.
     Check {
         #[arg(required = true)]
         paths: Vec<PathBuf>,
+        #[command(flatten)]
+        env: EnvArgs,
+        /// Считать переменную заданной: --var token=x (можно несколько раз)
+        #[arg(long = "var", value_name = "NAME=VALUE", value_parser = parse_kv)]
+        vars: Vec<(String, String)>,
+        /// Не обращаться к системному хранилищу паролей (секреты только из ROUTY_*)
+        #[arg(long)]
+        no_keyring: bool,
+    },
+    /// Привести *.routy к одному виду (как gofmt): отступы, порядок полей, кавычки, переносы.
+    /// Комментарии сохраняются
+    Fmt {
+        #[arg(default_value = ".")]
+        paths: Vec<PathBuf>,
+        /// Ничего не менять, только перечислить файлы не в каноническом виде (exit code 1)
+        #[arg(long)]
+        check: bool,
+    },
+    /// Переписать *.http в *.routy рядом (существующие *.routy не трогаются)
+    Convert {
+        #[arg(default_value = ".")]
+        paths: Vec<PathBuf>,
+        /// Только показать результат, ничего не записывать
+        #[arg(long)]
+        dry_run: bool,
+        /// Удалить *.http после успешной записи *.routy
+        #[arg(long)]
+        rm: bool,
     },
     /// Показать итоговые значения переменных и откуда они взялись (секреты замаскированы)
     Vars {
@@ -106,7 +135,7 @@ enum Cmd {
     /// Фоновая проверка новой версии (запускается самим routy)
     #[command(name = notifier::REFRESH_COMMAND, hide = true)]
     RefreshUpdateCache,
-    /// Создать *.http для роутов из кода сервиса (только отсутствующие файлы)
+    /// Создать *.routy для роутов из кода сервиса (только отсутствующие запросы)
     Import {
         #[command(subcommand)]
         cmd: ImportCmd,
@@ -145,7 +174,7 @@ enum ImportCmd {
         /// Только показать, что будет создано
         #[arg(long)]
         dry_run: bool,
-        /// Переменная с адресом сервиса в URL: {{base}}/users
+        /// Переменная с адресом сервиса в старых *.http: {{base}}/users (для сопоставления)
         #[arg(long, default_value = routy_core::import::DEFAULT_BASE)]
         base: String,
         /// Свой шаблон-запрос tree-sitter для роутера (можно несколько раз)
@@ -242,7 +271,12 @@ fn real_main(cmd: Cmd) -> anyhow::Result<ExitCode> {
                 ExitCode::FAILURE
             })
         }
-        Cmd::Check { paths } => {
+        Cmd::Check {
+            paths,
+            env,
+            vars,
+            no_keyring,
+        } => {
             let mut ok = true;
             let targets = expand(&paths)?;
             let mut routy_files = Vec::new();
@@ -263,11 +297,25 @@ fn real_main(cmd: Cmd) -> anyhow::Result<ExitCode> {
                 }
             }
             if !routy_files.is_empty() {
-                let project = Project::discover(&routy_files[0])?;
+                let project = find_project(env.project.as_deref(), &routy_files[0])?;
                 let (ws, files) = workspace_with(&project, &routy_files)?;
                 let wanted: Vec<PathBuf> = files.iter().map(|f| ws.root.join(f)).collect();
                 let cwd = std::env::current_dir().unwrap_or_default();
-                for mut d in ws.check() {
+                let mut diagnostics = ws.check();
+                if let Some(name) = &env.env {
+                    let envs = project.env_names();
+                    let opts = Options {
+                        use_keyring: !no_keyring,
+                        ..Options::default()
+                    };
+                    let mut runner = Runner::new(project, Some(name), opts)?;
+                    runner.vars.overrides.extend(vars);
+                    let mut has = |n: &str| matches!(runner.vars.get(n), Ok(Some(_)));
+                    diagnostics.extend(ws.check_env(name, &envs, &mut has));
+                } else if !vars.is_empty() {
+                    bail!("--var only makes sense with --env");
+                }
+                for mut d in diagnostics {
                     if wanted.contains(&d.path) {
                         if let Ok(rel) = d.path.strip_prefix(&cwd) {
                             d.path = rel.to_path_buf();
@@ -321,6 +369,8 @@ fn real_main(cmd: Cmd) -> anyhow::Result<ExitCode> {
         Cmd::Secret { cmd } => secret(cmd),
         Cmd::Import { cmd } => import(cmd),
         Cmd::Init { dir } => init(&dir),
+        Cmd::Fmt { paths, check } => fmt(&paths, check),
+        Cmd::Convert { paths, dry_run, rm } => convert(&paths, dry_run, rm),
         Cmd::Update { check } => {
             tokio::runtime::Runtime::new()?.block_on(update::run(check))?;
             Ok(ExitCode::SUCCESS)
@@ -345,6 +395,96 @@ fn is_routy(p: &Path) -> bool {
 }
 
 /// Каталоги → все *.http и *.routy внутри; файлы — как есть, в заданном порядке.
+fn fmt(paths: &[PathBuf], check: bool) -> anyhow::Result<ExitCode> {
+    let mut files = Vec::new();
+    for p in paths {
+        if p.is_dir() {
+            let found = discover::routy_files(p).with_context(|| p.display().to_string())?;
+            files.extend(found.into_iter().map(|f| p.join(f)));
+        } else if p.is_file() {
+            files.push(p.clone());
+        } else {
+            bail!("{}: no such file or directory", p.display());
+        }
+    }
+    let mut changed = 0;
+    let mut broken = 0;
+    for f in &files {
+        let src = std::fs::read_to_string(f).with_context(|| f.display().to_string())?;
+        let out = match routy_core::lang::fmt::format(&src) {
+            Ok(out) => out,
+            Err(e) => {
+                eprintln!("{}:{e}", f.display());
+                broken += 1;
+                continue;
+            }
+        };
+        if out == src {
+            continue;
+        }
+        changed += 1;
+        println!("{}", f.display());
+        if !check {
+            std::fs::write(f, out).with_context(|| f.display().to_string())?;
+        }
+    }
+    Ok(if broken > 0 || (check && changed > 0) {
+        ExitCode::FAILURE
+    } else {
+        ExitCode::SUCCESS
+    })
+}
+
+fn convert(paths: &[PathBuf], dry_run: bool, rm: bool) -> anyhow::Result<ExitCode> {
+    let mut files = Vec::new();
+    for p in paths {
+        if p.is_dir() {
+            let found = discover::request_files(p).with_context(|| p.display().to_string())?;
+            files.extend(found.into_iter().map(|f| p.join(f)));
+        } else if p.is_file() {
+            files.push(p.clone());
+        } else {
+            bail!("{}: no such file or directory", p.display());
+        }
+    }
+    if files.is_empty() {
+        bail!("no *.http files");
+    }
+    let mut failed = 0;
+    for f in &files {
+        let to = f.with_extension(discover::ROUTY_EXTENSION);
+        let src = std::fs::read_to_string(f).with_context(|| f.display().to_string())?;
+        let stem = f.file_stem().unwrap_or_default().to_string_lossy();
+        let out = match routy_core::lang::convert::convert(&src, &stem) {
+            Ok(out) => out,
+            Err(e) => {
+                eprintln!("{}: {e}", f.display());
+                failed += 1;
+                continue;
+            }
+        };
+        if dry_run {
+            println!("{} → {}\n{out}", f.display(), to.display());
+            continue;
+        }
+        if to.exists() {
+            eprintln!("{}: {} already exists, skipped", f.display(), to.display());
+            failed += 1;
+            continue;
+        }
+        std::fs::write(&to, out).with_context(|| to.display().to_string())?;
+        if rm {
+            std::fs::remove_file(f).with_context(|| f.display().to_string())?;
+        }
+        println!("{} → {}", f.display(), to.display());
+    }
+    Ok(if failed > 0 {
+        ExitCode::FAILURE
+    } else {
+        ExitCode::SUCCESS
+    })
+}
+
 fn expand(paths: &[PathBuf]) -> anyhow::Result<Vec<Target>> {
     let file = |p: PathBuf| {
         if is_routy(&p) {
@@ -855,7 +995,7 @@ fn import(cmd: ImportCmd) -> anyhow::Result<ExitCode> {
         let mut line = format!(
             "{} {}  {}",
             r.method,
-            r.path,
+            r.path.replace("{{", "{").replace("}}", "}"),
             st.dim(&format!("{}:{}", r.source.display(), r.line))
         );
         if let Some(summary) = &r.info.summary {

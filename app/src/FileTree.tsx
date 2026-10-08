@@ -11,7 +11,7 @@ interface Node {
 }
 
 const METHOD_ORDER = ["GET", "POST", "PUT", "PATCH", "DELETE"];
-const SHORT: Record<string, string> = { DELETE: "DEL", PATCH: "PTCH", OPTIONS: "OPT" };
+const SHORT: Record<string, string> = { DELETE: "DEL", PATCH: "PTCH", OPTIONS: "OPT", FLOW: "FLOW" };
 /** Фильтр показывается, когда файлов больше этого */
 const FILTER_FROM = 8;
 
@@ -34,9 +34,9 @@ function buildTree(files: string[], methods: Record<string, string>): Node[] {
   return compact(root.children, "");
 }
 
-/** `users/get.http` → `users`, `users/get-by-id.http` → `by-id`, `users/create.http` → `create`. */
+/** `users/get.routy` → `users`, `users/get-by-id.routy` → `by-id`, `users/create.http` → `create`. */
 function fileLabel(node: Node, parent: string): string {
-  const base = node.name.replace(/\.http$/, "");
+  const base = node.name.replace(/\.(http|routy)$/, "");
   const m = node.method.toLowerCase();
   if (base === m) return parent || base;
   if (base.startsWith(m + "-")) return base.slice(m.length + 1);
@@ -109,7 +109,7 @@ export function FileTree(props: Props) {
   }, [props.files, props.methods, filter]);
   const tree = useMemo(() => buildTree(shown, props.methods), [shown, props.methods]);
   if (props.files.length === 0) {
-    return <p className="muted pad">No *.http files</p>;
+    return <p className="muted pad">No *.routy or *.http files</p>;
   }
   return (
     <>

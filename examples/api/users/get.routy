@@ -1,0 +1,11 @@
+// Get user
+GET /anything/users/{id} {
+  params { id: 42 }
+  headers { Accept: "application/json" }
+
+  expect {
+    status == 200
+    body.url.endsWith("/users/${id}")
+    body matches Echo
+  }
+}

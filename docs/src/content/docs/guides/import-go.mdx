@@ -1,31 +1,31 @@
 ---
 title: Import routes from Go
-description: Generate request files for every chi, gin and net/http route of a Go service.
+description: Generate .routy requests for every chi, gin and net/http route of a Go service.
 ---
 
-Routy can read your Go service's source code, find the registered routes and create a `.http` file for
-every route that doesn't have one yet. Existing files are never changed, so you can re-run the import
-after adding endpoints.
+Routy can read your Go service's source code, find the registered routes and create a `.routy` request
+for every route that doesn't have one yet. Existing files are never changed, so you can re-run the
+import after adding endpoints.
 
 ```sh
 cd my-service
-routy init              # once: api/env.toml with {{base}}
+routy init              # once: api/env.toml with `base`
 routy import go .       # scan the whole repository
 ```
 
 ```txt
-+ api/users/get.http               GET /users  internal/http/routes.go:24
-+ api/users/get-by-id.http         GET /users/{{id}}  internal/http/routes.go:25
-= api/users/create.http            POST /users  internal/http/routes.go:26
-- api/legacy/get.http              GET {{base}}/legacy  (no such route in code)
++ api/users/get.routy        GET /users  internal/http/routes.go:24
++ api/users/get-by-id.routy  GET /users/{id}  internal/http/routes.go:25
+= api/users/create.routy     POST /users  internal/http/routes.go:26
+- api/legacy/get.routy       GET /legacy  (no such route in code)
 
 14 Go files, 3 routes: 2 new, 1 existing, 1 not in code
 created 2 files
 ```
 
 - `+` — a new file was created for the route;
-- `=` — a request for this route already exists (under any name);
-- `-` — a request file points at `{{base}}/…`, but no such route was found in the code.
+- `=` — a request for this route already exists (under any name, in `.routy` or `.http`);
+- `-` — a request points at `base`, but no such route was found in the code.
 
 Add `--dry-run` to see the plan without writing anything. In the desktop app the same thing is the sync
 button next to **Requests**, or the **Routes** tab.
@@ -51,8 +51,8 @@ preview the file before creating it.
 
 ## Generated files
 
-Path parameters become variables: `{id}`, `{id:[0-9]+}`, `{path...}`, `:id` and `*path` all turn into
-`{{id}}` / `{{path}}`.
+Path parameters keep the router notation: `{id}`, `{id:[0-9]+}`, `{path...}`, `:id` and `*path` all turn
+into `{id}` / `{path}` — [parameters](/routy/reference/routy-format/#parameters) of the request.
 
 Routy also reads the handler to show what the request expects:
 
@@ -65,51 +65,77 @@ Routy also reads the handler to show what the request expects:
   and `c.ShouldBindQuery(&q)` (fields from `form` tags);
 - **headers** — `r.Header.Get("X-Tenant-ID")`, `c.GetHeader`.
 
-```http title="api/users/post.http"
-# Create a user
-# Sends a welcome email.
-# chi internal/http/users.go:42 → h.CreateUser
-#
-# Headers: X-Tenant-ID
-# Body: dto.CreateUser
-#   name          string  required  full name
-#   email         string  required
-#   address.city  string
-POST {{base}}/users
+```routy title="api/users/post.routy"
+// Create a user
+// Sends a welcome email.
+// chi internal/http/users.go:42 → h.CreateUser
+//
+// Headers: X-Tenant-ID
+// Body: dto.CreateUser
+//   name          string  required  full name
+//   email         string  required
+//   address.city  string
+POST /users {
+  handler: h.CreateUser
+  body { name: "", email: "", address: { city: "" } }
+}
+```
 
-{
-  "name": "",
-  "email": "",
-  "address": {
-    "city": ""
+```routy title="api/users/get.routy"
+// List users
+// ListUsers returns a page of users.
+// chi internal/http/users.go:22 → h.ListUsers
+//
+// Query:
+//   page   string
+//   limit  string
+GET /users {
+  handler: h.ListUsers
+
+  params {
+    page: null
+    limit: null
+  }
+
+  query {
+    page
+    limit
   }
 }
 ```
 
-The body is an example with empty values of the right types. `POST`, `PUT` and `PATCH` without a
-recognized body get an empty JSON body `{}`. A route that accepts any method (`r.Handle`,
-gin `Any`) is created as `GET` with a `# any method` comment.
+- **The name** comes from the doc comment: a short `@Summary` or first line is the name itself; a Go-style
+  comment (`ListUsers returns …`) gives the name of the function (`List users`), the comment goes to the
+  description. Without a comment the name is the handler's (`h.GetUser` → `Get user`).
+- **`handler:`** links the request to the code, so the request is recognised after its path changes.
+- **Query parameters** become `params` with a `null` default, so `ListUsers(page: 2)` sends `?page=2`
+  and `ListUsers()` sends none.
+- **The body** is an example with empty values of the right types. `POST`, `PUT` and `PATCH` without a
+  recognized body get `body {}`. A route that accepts any method (`r.Handle`, gin `Any`) is created as
+  `GET` with an `any method` comment.
 
 File names follow the path: static segments become folders, trailing parameters go into the name.
 
 | Route | File |
 |-------|------|
-| `GET /users` | `users/get.http` |
-| `POST /users` | `users/post.http` |
-| `GET /users/{id}` | `users/get-by-id.http` |
-| `GET /users/{id}/posts` | `users/posts/get.http` |
-| `GET /` | `root/get.http` |
+| `GET /users` | `users/get.routy` |
+| `POST /users` | `users/post.routy` |
+| `GET /users/{id}` | `users/get-by-id.routy` |
+| `GET /users/{id}/posts` | `users/posts/get.routy` |
+| `GET /` | `root/get.routy` |
 
-If the name is taken by a request for a different route, a suffix is added: `users/get-2.http`.
+If the name is taken by a file for a different route (`.routy` or `.http`), a suffix is added:
+`users/get-2.routy`.
 
-## Matching existing files
+## Matching existing requests
 
-A file counts as the request for a route when its method and URL path match, ignoring the query string.
-Only URLs that start with `{{base}}` are compared; parameters match any variable, so
-`{{base}}/users/{{user_id}}` covers `GET /users/{id}`. Rename and reorganize the generated files freely —
-the next import still recognizes them.
+A request counts as the request for a route when its `handler:` names the route's handler. Requests
+without `handler` match by method and path, ignoring the query string: in `.routy` paths starting with
+`/` (appended to `base`), in `.http` URLs starting with `{{base}}`. Parameters match any name, so
+`/users/{user_id}` covers `GET /users/{id}`. Rename and reorganize the generated files freely — the next
+import still recognizes them.
 
-Use `--base <NAME>` if your environments call the service address something other than `base`.
+Use `--base <NAME>` if the `.http` files call the service address something other than `base`.
 
 ## Other routers
 
@@ -137,7 +163,7 @@ routy import go . --query echo.scm
 | `@route` | The call that registers a route |
 | `@path` | Its path |
 | `@method` | Method: `Get`, `GET`, `"GET"` or `http.MethodGet`. Without it the method comes from a `"GET /path"` pattern, otherwise any method |
-| `@handler` | Handler, written into the comment |
+| `@handler` | Handler, written into `handler:` and the comment |
 | `@receiver` | The router the method is called on — used to find its group prefix |
 | `@group` + `@group.path` | A prefix. With `@group.var` it applies to that variable (`v1 := r.Group("/v1")`), with `@group.body` to everything inside the block (`r.Route`) |
 | `@mount` + `@mount.func` | Routes of the function with this name get the prefix of `@receiver` plus `@mount.path`; `@mount.pkg` narrows it to a package |

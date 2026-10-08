@@ -1,0 +1,7 @@
+// What httpbin's /anything returns.
+shape Echo {
+  method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE",
+  url: string,
+  headers: { Host: string },
+  json: any,
+}

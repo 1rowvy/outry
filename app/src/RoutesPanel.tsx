@@ -53,6 +53,9 @@ function RouteLine({ method, path, file, route }: { method: string; path: string
   );
 }
 
+/** `/users/{{id}}` (так ядро хранит параметры) → `/users/{id}`, как в роутере и `.routy`. */
+const routePath = (p: string) => p.replaceAll("{{", "{").replaceAll("}}", "}");
+
 export function RoutesPanel({ report, busy, onScan, onPickDir, onCreate, onOpen }: Props) {
   const plan = report?.plan;
   // Раскрытые новые роуты: показываем будущий файл целиком.
@@ -96,7 +99,7 @@ export function RoutesPanel({ report, busy, onScan, onPickDir, onCreate, onOpen 
               <li key={f.file}>
                 <button onClick={() => toggle(f.file)} aria-expanded={open.has(f.file)} title="Show the file that will be created">
                   <span className="r-mark new">+</span>
-                  <RouteLine method={f.route.method} path={f.route.path} file={f.file} route={f.route} />
+                  <RouteLine method={f.route.method} path={routePath(f.route.path)} file={f.file} route={f.route} />
                 </button>
                 {open.has(f.file) && <pre className="r-preview">{f.content}</pre>}
               </li>
@@ -108,7 +111,7 @@ export function RoutesPanel({ report, busy, onScan, onPickDir, onCreate, onOpen 
               <li key={e.route.method + e.route.path}>
                 <button onClick={() => onOpen(slash(e.file))}>
                   <span className="r-mark">=</span>
-                  <RouteLine method={e.route.method} path={e.route.path} file={e.file} route={e.route} />
+                  <RouteLine method={e.route.method} path={routePath(e.route.path)} file={e.file} route={e.route} />
                 </button>
               </li>
             ))}
@@ -116,7 +119,7 @@ export function RoutesPanel({ report, busy, onScan, onPickDir, onCreate, onOpen 
           {plan.stale.length > 0 && <h3>Not in code</h3>}
           <ul className="history-list">
             {plan.stale.map((s) => (
-              <li key={s.file}>
+              <li key={s.file + s.method + s.url}>
                 <button onClick={() => onOpen(slash(s.file))} title="No route with this method and path was found">
                   <span className="r-mark stale">−</span>
                   <RouteLine method={s.method} path={s.url} file={s.file} />
@@ -125,8 +128,9 @@ export function RoutesPanel({ report, busy, onScan, onPickDir, onCreate, onOpen 
             ))}
           </ul>
           <p className="vars-note">
-            Existing files are never changed. A file matches a route by method and the path after{" "}
-            <code>{"{{base}}"}</code>; path parameters match any variable. CLI: <code>routy import go ./</code>
+            Existing files are never changed. A request matches a route by its <code>handler:</code>, or by method
+            and path (after <code>{"{{base}}"}</code> in <code>.http</code>); path parameters match any name. CLI:{" "}
+            <code>routy import go ./</code>
           </p>
         </div>
       )}

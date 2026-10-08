@@ -1,68 +1,131 @@
 ---
-title: Цепочки запросов и проверки
-description: Берите значения из ответов через > save и проверяйте ответы через > assert.
+title: Вызовы запросов и проверки
+description: Проверяйте ответы через expect, вызывайте один запрос из другого, описывайте сценарии через flow.
 ---
 
-Директивы — строки, начинающиеся с `>`, в конце файла запроса. Они выполняются после получения ответа.
+import { Aside } from '@astrojs/starlight/components';
 
-## `> save` — передача значений между запросами
+## `expect` — проверка ответа
 
-```http title="api/auth/1-login.http"
-POST {{base}}/login
+```routy title="api/users/create.routy"
+// Create user
+POST /users {
+  body { name: "Viktor" }
 
-{"email": "dev@example.com", "password": "{{password}}"}
-
-> save token = body.access_token
-> save user_id = body.user.id
+  expect {
+    status == 201
+    body.name == "Viktor"
+    body.id matches /^u_\d+$/
+    headers.content-type.contains("json")
+    duration < 500
+    body matches { id: string, name: string, tags?: [string] }
+  }
+}
 ```
 
-```http title="api/auth/2-me.http"
-GET {{base}}/users/{{user_id}}
-Authorization: Bearer {{token}}
+По проверке на строку; каждая должна быть истинной. Выполняются все проверки, даже после упавшей, и у
+упавшей видно, почему:
 
-> assert status == 200
+```txt
+✗ api/users/create.routy  CreateUser  POST http://localhost:8080/users  201 Created  9ms 211B
+    ✓ status == 201
+    ✗ body.name == "Viktor"  — body.name is "viktor"
+    ✗ body matches { id: string, name: string, tags?: [string] }  — body.id: expected string, got 42
+```
+
+Сравнение не приводит типы (`"1" != 1`), отсутствующее поле — это `null`, а не ошибка, а `matches`
+принимает регулярное выражение, форму прямо в файле, именованную [форму](/routy/ru/reference/routy-format/#формы)
+или файл JSON Schema. Все операторы и методы — в разделе [Выражения](/routy/ru/reference/routy-format/#выражения).
+
+## Вызов другого запроса
+
+Запрос — это функция: вызовите его по имени, результат — его ответ.
+
+```routy title="api/auth/login.routy"
+// Login
+POST /auth/login {
+  params {
+    email: "dev@example.com"
+    password
+  }
+
+  body { email, password }
+  expect { status == 200 }
+}
+```
+
+```routy title="api/users/me.routy"
+// Me
+GET /me {
+  headers { Authorization: "Bearer ${Login().body.token}" }
+  expect { status == 200 }
+}
 ```
 
 ```sh
-routy run api/auth     # сначала 1-login, затем 2-me с подставленными token и user_id
+routy run api/users/me.routy   # сам сначала залогинится
 ```
-
-Строки сохраняются без кавычек, числа, объекты и массивы — компактным JSON. Если такого пути в ответе
-нет, запрос считается упавшим.
-
-Сохранённые значения переживают и перезапуск — если потом запустить только `2-me.http`, токен у него
-будет. См. [Сохранённые значения](/routy/ru/guides/variables/#сохранённые-значения).
-
-## `> assert` — проверка ответа
-
-```http
-> assert status == 201
-> assert status < 300
-> assert duration < 500
-> assert body.name == "Viktor"
-> assert body.items[0].id exists
-> assert body.tags contains "admin"
-> assert headers.content-type contains json
-```
-
-Каждая проверка — это `<путь> <оператор> <значение>` или `<путь> exists`. Значение — JSON-литерал
-(`200`, `"текст"`, `true`, `null`) или голое слово, которое считается строкой. Все пути и операторы — в
-[справочнике выражений](/routy/ru/reference/expressions/).
-
-В выводе видна каждая проверка, а для упавших — фактическое значение:
 
 ```txt
-✗ api/auth/2-me.http  GET http://localhost:8080/users/7  200 OK  9ms 211B
-    ✓ body.name == "Viktor"
-    ✗ status == 201  (actual: 200)
+✓ api/users/me.routy  Me  GET http://localhost:8080/me  200 OK  8ms 96B
+    ↳ Login  200  31ms
+    ✓ status == 200
 ```
+
+- **Не нужно следить за порядком.** `Me` работает сам по себе — он вызывает `Login`, когда нужен токен.
+- **Один раз за прогон.** Десять запросов с `Login()` логинятся один раз, остальные берут тот же ответ
+  (`↳ Login cached`). `fresh Login()` всегда отправляет заново. `cache: 30m` у `Login` хранит его ответ и
+  между запусками.
+- **Аргументы** заполняют `params` и параметры пути `{…}` вызываемого: `GetUser(id: 7)`,
+  `Login(email: "admin@example.com")`.
+- **Ошибки поднимаются наверх.** Если у `Login` упал `expect`, падает и `Me` — с цепочкой:
+
+  ```txt
+  ✗ api/users/me.routy  Me
+      Me → Login: status == 200 — status is 401
+  ```
+- **Cookies** из `Set-Cookie` хранятся весь прогон, как в браузере.
+
+Имена запросов уникальны в проекте; если `Create` есть в двух папках, вызывайте `users.Create()`.
+`routy check` сообщает о неизвестных именах, неверных аргументах и циклах вызовов.
+
+## `flow` — сценарий
+
+```routy title="api/flows/checkout.routy"
+// Checkout
+flow Checkout {
+  user = CreateUser(name: "Bob")
+  order = CreateOrder(customer: user.body.id)
+  Pay(order: order.body.id)
+  expect { GetOrder(id: order.body.id).body.status == "paid" }
+}
+```
+
+Шаги выполняются сверху вниз, сценарий останавливается на первом упавшем. В приложении сценарий
+показывает trace всех вызванных запросов. Запуск по имени: `routy run Checkout`.
+
+## `save` — сохранить значение
+
+```routy
+save order_id = body.id
+```
+
+Сохранённое значение — переменная для следующих запросов прогона **и** запоминается между запусками, для
+каждого проекта и окружения: после одного `routy run CreateOrder` запрос `GetOrder` и сам по себе знает
+`order_id`. Значения хранятся вне репозитория, см. [Сохранённые значения](/routy/ru/guides/variables/#сохранённые-значения).
+Для токенов и подобного лучше вызовы: они не зависят от того, что запускалось раньше.
 
 ## Коды выхода
 
 `routy run` завершается с кодом:
 
 - `0` — все запросы отправлены, все проверки и сохранения прошли;
-- `1` — хотя бы один запрос упал (проверка, сохранение, сетевая ошибка, не хватает переменной);
+- `1` — хотя бы один запрос упал (проверка, сохранение, сетевая ошибка, нет переменной);
 - `2` — Routy не смог запуститься: неверные аргументы, неизвестное окружение, сломанный `env.toml`.
 
-С `--fail-fast` выполнение останавливается на первом упавшем запросе.
+С `--fail-fast` прогон останавливается на первом упавшем запросе.
+
+<Aside>
+В файлах `.http` то же делается строками `> save` и `> assert` в конце файла — см.
+[Директивы .http](/routy/ru/reference/expressions/).
+</Aside>

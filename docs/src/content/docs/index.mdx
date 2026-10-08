@@ -1,6 +1,6 @@
 ---
 title: Routy
-description: API client where requests are plain .http files in your repo. Desktop app and CLI for CI share one core.
+description: API client where requests are plain .routy files in your repo. Desktop app and CLI for CI share one core.
 template: splash
 hero:
   tagline: An API client where requests are plain text files in your repo. One core for the desktop app and the CLI — they can't drift apart.
@@ -22,20 +22,25 @@ import { Card, CardGrid } from '@astrojs/starlight/components';
 curl -fsSL https://raw.githubusercontent.com/1rowvy/routy/master/install.sh | sh
 ```
 
-```http title="api/users/create.http"
-POST {{base}}/users
-Authorization: Bearer {{token}}
+```routy title="api/users/create.routy"
+// Create user
+POST /users {
+  headers { Authorization: "Bearer ${Login().body.token}" }
+  body { name: "Viktor", role: "admin" }
 
-{"name": "Viktor"}
+  expect {
+    status == 201
+    body matches { id: string, name: string }
+  }
 
-> save user_id = body.id
-> assert status == 201
+  save user_id = body.id
+}
 ```
 
 <CardGrid>
 	<Card title="Requests live in git" icon="document">
-		One `.http` file per request. Review them in pull requests, grep them, edit them in any editor —
-		the app picks up changes instantly.
+		Requests are `.routy` files: JSON bodies, checks that read like code. Review them in pull requests,
+		grep them, edit them in any editor — the app picks up changes instantly.
 	</Card>
 	<Card title="Same engine everywhere" icon="laptop">
 		The desktop app and the `routy` CLI call the same Rust core, so a request that works in the GUI
@@ -45,8 +50,8 @@ Authorization: Bearer {{token}}
 		Tokens go to the system keychain, or come from `ROUTY_*` environment variables in CI. Nothing to
 		accidentally commit.
 	</Card>
-	<Card title="Chains and checks" icon="approve-check">
-		`> save` a value from one response, use it in the next request, `> assert` on status, headers and
-		JSON body. Non-zero exit code when something fails.
+	<Card title="Requests call requests" icon="approve-check">
+		`Login().body.token` sends the login once per run and reuses it; `flow` describes a scenario.
+		`expect` checks status, headers and body shape. Non-zero exit code when something fails.
 	</Card>
 </CardGrid>

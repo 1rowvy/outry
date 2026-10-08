@@ -22,6 +22,20 @@ export interface AssertOutcome {
   source: string;
   passed: boolean;
   actual: unknown;
+  /** *.routy: почему не прошла — `body.total is 0` */
+  detail?: string;
+}
+
+/** Запрос, вызванный из *.routy (`Login()`), — для вкладки Trace. */
+export interface CallTrace {
+  name: string;
+  /** 0 — вызван прямо из запущенного */
+  depth: number;
+  args: Record<string, unknown>;
+  /** ответ взят из кеша прогона */
+  cached: boolean;
+  status: number | null;
+  duration_ms: number | null;
 }
 
 export interface RunOutcome {
@@ -37,10 +51,42 @@ export interface RunOutcome {
   saved: Record<string, string>;
   asserts: AssertOutcome[];
   save_misses: string[];
+  /** *.routy: вызванные запросы */
+  calls?: CallTrace[];
+}
+
+export interface FlowOutcome {
+  checks: AssertOutcome[];
+  saved: Record<string, string>;
+  calls: CallTrace[];
+  /** шаг, на котором сценарий остановился */
+  error: string | null;
+}
+
+/** Результат запуска *.routy: ответ запроса или итог сценария. */
+export interface RoutyResult {
+  name: string;
+  entry: Entry | null;
+  flow: FlowOutcome | null;
+}
+
+export interface Callable {
+  /** `Login` или `users.Create` */
+  name: string;
+  kind: "request" | "flow";
+  params: string[];
+  doc: string | null;
+}
+
+export interface Symbols {
+  callables: Callable[];
+  shapes: string[];
 }
 
 export interface ParseError {
   line: number | null;
+  /** с 1; есть у ошибок *.routy */
+  col: number | null;
   message: string;
 }
 
@@ -124,6 +170,14 @@ export const api = {
   writeRequest: (path: string, content: string) => invoke<void>("write_request", { path, content }),
   checkRequest: (content: string) => invoke<ParseError | null>("check_request", { content }),
   checkConfig: (content: string) => invoke<ParseError | null>("check_config", { content }),
+  /** routy check для открытого *.routy (с текстом из редактора) */
+  checkRouty: (path: string, content: string) => invoke<ParseError[]>("check_routy", { path, content }),
+  routySymbols: () => invoke<Symbols>("routy_symbols"),
+  /** Запрос или сценарий на строке line (с 1) */
+  runRouty: (id: number, env: string | null, path: string, content: string, line: number) =>
+    invoke<RoutyResult>("run_routy", { id, env, path, content, line }),
+  /** Забыть кеш вызовов и cookies *.routy */
+  resetRun: () => invoke<void>("reset_run"),
   renamePath: (from: string, to: string) => invoke<void>("rename_path", { from, to }),
   deletePath: (path: string) => invoke<void>("delete_path", { path }),
   /** id — от фронта, для cancelRequest */

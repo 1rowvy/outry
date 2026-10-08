@@ -1,20 +1,16 @@
 ---
 title: Формат .routy
-description: Спецификация будущего формата запросов .routy — синтаксис, выражения, вызовы запросов и сценарии.
-sidebar:
-  badge:
-    text: В работе
-    variant: caution
+description: Справочник формата запросов .routy — синтаксис, выражения, вызовы запросов и сценарии.
 ---
 
 import { Aside } from '@astrojs/starlight/components';
 
-<Aside type="caution" title="В работе">
-Это следующий формат запросов. `routy run` и `routy check` уже читают `*.routy`: запросы,
-выражения, проверки, формы, `save`, вызовы с кешем прогона, сценарии, опрос и cookies. Пока нет:
-`cache:` между прогонами, `multipart`, `schema()`, `routy fmt`, `routy convert`, приложения и
-`routy import`. Текущий формат описан в разделе [Формат файла запроса](/routy/ru/guides/request-format/).
-Обсуждение — в [GitHub issues](https://github.com/1rowvy/routy/issues).
+<Aside>
+CLI (`run`, `check`, `fmt`, `convert`, `import go`) и приложение читают и пишут `.routy`. Сравнение
+запросов с кодом — `routy import go --check` / `--fix` и формы из Go-структур, описанные в разделе
+[Синхронизация с кодом](#синхронизация-с-кодом), — следующий шаг. Прежний формат описан в разделе
+[Файлы .http](/routy/ru/guides/request-format/). Обсуждение — в
+[GitHub issues](https://github.com/1rowvy/routy/issues).
 </Aside>
 
 ## Цели
@@ -34,7 +30,6 @@ import { Aside } from '@astrojs/starlight/components';
 // Creates an order for the current user.
 POST /orders/{shop} {
   only: [dev, staging]
-
   query { page: 1 }
 
   headers {
@@ -339,19 +334,26 @@ expect {
 
 Ошибка называет первый неподходящий путь: `body.items[2].qty: expected integer, got "2"`.
 
+Путь в `schema()` считается от файла `.routy`, где он написан (для именованной формы — от файла, где
+она объявлена). Поддерживаются ключи JSON Schema (draft 7 / 2020-12 и `nullable` из OpenAPI 3.0):
+`type`, `enum`, `const`, `properties`, `required`, `additionalProperties`, `items`, `prefixItems`,
+`minItems` / `maxItems`, `minLength` / `maxLength`, `pattern`, `minimum` / `maximum` и их `exclusive`-формы,
+`allOf`, `anyOf`, `oneOf`, `not` и `$ref` внутри того же файла. Остальные ключи не проверяются.
+`routy check` сообщает об отсутствующем или неверном файле схемы.
+
+```routy
+shape Order = schema("./schemas/order.json")
+```
+
 Именованные формы объявляются на верхнем уровне и видны во всём проекте:
 
 ```routy title="api/shapes.routy"
-shape Order {
-  id: string,
-  total: number,
-  items: [Item],
-}
+shape Order { id: string, total: number, items: [Item] }
 
 shape Item { sku: string, qty: integer }
 ```
 
-`routy import go` генерирует формы из Go-структур, которые возвращает хендлер (теги `json`,
+Запланировано: `routy import go` генерирует формы из Go-структур, которые возвращает хендлер (теги `json`,
 `omitempty` → необязательное поле), в `api/shapes.routy`, а `routy import go --check` падает, когда
 они перестают совпадать с кодом — см. [Синхронизация с кодом](#синхронизация-с-кодом).
 
@@ -377,11 +379,10 @@ save first_sku = body.items[0].sku
 POST /auth/login {
   params {
     email: "dev@example.com"
-    password                 // без значения по умолчанию
+    password // без значения по умолчанию
   }
 
   body { email, password }
-
   expect { status == 200 }
 }
 ```
@@ -429,8 +430,8 @@ expect  { GetOrder(id: body.id).body.status == "new" }
 следующие вызовы получают тот же ответ. Десять запросов, вызывающих `Login()`, логинятся один раз.
 
 - `fresh Login()` всегда отправляет новый запрос.
-- Прогон — это один `routy run` в CLI, а в приложении — пока не переключили окружение или не очистили
-  кеш в панели переменных.
+- Прогон — это один `routy run` в CLI, а в приложении — пока не переключили окружение или не нажали
+  **New run** на вкладке Variables.
 - `cache: 30m` у вызываемого запроса хранит его ответ между прогонами (в том же файле состояния,
   что и сохранённые значения, вне репозитория): токен логина переживает перезапуск, пока не истечёт. `401` у запроса, который
   использовал закешированное значение, сам не повторяется; где это важно, используйте `fresh`.
@@ -478,9 +479,7 @@ flow Checkout {
   order = CreateOrder(shop: "main", customer: user.body.id)
   Pay(order: order.body.id)
 
-  expect {
-    GetOrder(id: order.body.id).body.status == "paid"
-  }
+  expect { GetOrder(id: order.body.id).body.status == "paid" }
 
   save last_order = order.body.id
 }
@@ -507,6 +506,11 @@ let admin = { email: "admin@example.com", role: "admin" }
 Общие для нескольких файлов значения — в `env.toml`.
 
 ## Синхронизация с кодом
+
+<Aside type="caution" title="Запланировано">
+Сейчас `routy import go` пишет `handler:` в создаваемые запросы и сопоставляет по нему существующие;
+сравнение, описанное ниже, — следующий шаг.
+</Aside>
 
 `routy import go --check` сравнивает запросы с кодом сервера и говорит не только *что* они разошлись,
 но и *что* поменялось в Go и *как* поправить файл `.routy`.
@@ -584,11 +588,11 @@ routy run api/                      # все файлы, по пути
 routy run CreateOrder               # по имени
 routy run Checkout --env staging
 routy run api/orders/create.routy:12  # запрос или сценарий на строке 12
-routy check                         # синтаксис, имена, циклы, недостающие переменные, `only`
+routy check api/                    # синтаксис, имена, аргументы, формы, циклы
+routy check api/ --env prod         # + `only` и переменные, которых нет в prod
 routy fmt [--check] [paths]         # привести файлы к каноническому виду
 routy convert api/                  # *.http → *.routy
-routy import go ./cmd/server --check  # что поменялось в коде, код выхода ≠ 0
-routy import go ./cmd/server --fix    # применить исправимые изменения
+routy import go .                   # запросы для новых роутов Go-сервиса
 ```
 
 Запуск файла или каталога выполняет все запросы в нём, в том числе те, что нужны в основном для
@@ -599,28 +603,43 @@ routy import go ./cmd/server --fix    # применить исправимые 
 
 `routy fmt` даёт один канонический вид, как `gofmt`:
 
-- отступ два пробела; одно поле на строку; пустая строка между элементами верхнего уровня;
-- поля в порядке [таблицы полей](#поля);
-- двойные кавычки; `key: value` с одним пробелом; висячие запятые в многострочных `{ }` и `[ ]`;
-- объекты и массивы, которые помещаются в 80 символов, остаются в одну строку;
-- комментарии сохраняются.
+- отступ два пробела; одно поле на строку; пустая строка между элементами верхнего уровня (идущие
+  подряд `let` и формы сохраняют группировку);
+- поля в порядке [таблицы полей](#поля), многострочные поля отделены пустыми строками;
+- блок из одного элемента, который помещается, остаётся в одну строку (`expect { status == 200 }`);
+  `expect` с несколькими проверками — по одной на строку;
+- двойные кавычки; `key: value` с одним пробелом; `{ email }` вместо `email: email`; длительности — в
+  самой крупной целой единице (`10000ms` → `10s`);
+- объекты, массивы и списки аргументов, которые помещаются в 80 символов, остаются в одну строку, иначе
+  — по элементу на строку с висячей запятой;
+- строки `"""…"""` получают отступ окружающего блока;
+- комментарии сохраняются: над элементом, в конце его строки или в конце блока. Элемент, который нельзя
+  напечатать, не сдвинув комментарий (например, комментарий внутри формы), остаётся как был.
+
+```sh
+routy fmt api/            # переписать, напечатать изменённые файлы
+routy fmt --check api/    # CI: код выхода 1, если что-то не отформатировано
+```
 
 ## Совместимость с .http
 
 - Файлы `*.http` читает текущий парсер, они работают как сейчас; оба формата могут жить в одном
   проекте. Запросы `.routy` не могут вызывать запросы `.http`.
 - `{{var}}` в `.routy` недопустим; `routy check` подскажет `${var}` или `{var}` в пути.
-- `routy convert` переписывает `.http` в `.routy`:
+- `routy convert` переписывает `.http` в `.routy` рядом (`--dry-run` печатает, `--rm` потом удаляет
+  `.http`; существующий `.routy` не перезаписывается):
 
 | `.http` | `.routy` |
 |---------|----------|
 | `POST {{base}}/users/{{id}}` | `POST /users/{id}` |
-| `Header: {{token}}` | `Header: "${token}"` |
-| JSON-тело | `body { … }`, `{{x}}` в значениях → `x` |
-| другое тело | `body """…"""` |
+| `Header: Bearer {{token}}` | `Header: "Bearer ${token}"`; значение из одного `{{token}}` → `token` |
+| JSON-тело | `body { … }`: `"{{x}}"` → `x`, `"a {{x}}"` → `"a ${x}"`, `{{x}}` без кавычек → `number(x)` |
+| другое тело | `"…"`, или `"""…"""`, если в несколько строк |
 | `> save x = body.id` | `save x = body.id` |
 | `> assert status == 200` | `status == 200` в `expect` |
 | `> assert body.id exists` | `body.id != null` |
 | `> assert body.tags contains "a"` | `body.tags.contains("a")` |
-| `# комментарий` над запросом | `// комментарий` — первая строка становится именем |
-| `{{$uuid}}`, `{{$timestamp}}`, `{{$randomInt 1 10}}` | `uuid()`, `now()`, `randomInt(1, 10)` |
+| `> assert headers.content-length < 1000` | `number(headers.content-length) < 1000` |
+| `# комментарий` над запросом | `// комментарий` — первая строка становится именем, если в ней до четырёх слов, иначе имя берётся из имени файла |
+| `{{$uuid}}`, `{{$timestamp}}`, `{{$randomInt 1 10}}` | `uuid()`, `now()`, `randomInt(1, 9)` (в `.routy` верхняя граница включается) |
+| `{{x-y}}` | `vars["x-y"]` |

@@ -1,9 +1,0 @@
-POST {{base}}/anything/users
-Authorization: Bearer {{token}}
-
-{"name": "Viktor", "request_id": "{{$uuid}}"}
-
-> assert status == 200
-> assert body.json.name == "Viktor"
-> assert headers.content-type contains json
-> assert duration < 5000

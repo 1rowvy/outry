@@ -14,6 +14,29 @@ pub struct State {
     pub root: PathBuf,
     #[serde(default)]
     pub envs: BTreeMap<String, BTreeMap<String, String>>,
+    /// Ответы вызовов с `cache: 30m` по окружениям, ключ — файл, запрос и аргументы.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub cache: BTreeMap<String, BTreeMap<String, CachedCall>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CachedCall {
+    /// Unix-время, после которого ответ устарел.
+    pub expires: u64,
+    pub value: serde_json::Value,
+}
+
+impl CachedCall {
+    pub fn fresh(&self) -> bool {
+        self.expires > unix_now()
+    }
+}
+
+pub fn unix_now() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or_default()
 }
 
 pub fn state_path(project_root: &Path) -> Option<PathBuf> {

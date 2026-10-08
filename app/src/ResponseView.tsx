@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { save } from "@tauri-apps/plugin-dialog";
-import { api, type Entry, type Header } from "./api";
+import { api, type AssertOutcome, type Entry, type Header } from "./api";
 import { BodyViewer, type BodyLanguage, type BodyViewerHandle } from "./BodyViewer";
+import { Trace } from "./Trace";
 
-type Tab = "body" | "preview" | "headers" | "tests" | "request";
+type Tab = "body" | "preview" | "headers" | "tests" | "trace" | "request";
 
 function contentType(headers: Header[]): string {
   return headers.find((h) => h.name.toLowerCase() === "content-type")?.value.split(";")[0].trim().toLowerCase() ?? "";
@@ -60,7 +61,15 @@ export function ResponseView({ entry, onError }: { entry: Entry; onError: (e: st
 
   const failed = outcome.asserts.filter((a) => !a.passed).length + outcome.save_misses.length;
   const checks = outcome.asserts.length + outcome.save_misses.length;
-  const tabs: Tab[] = isImage || isHtml ? ["body", "preview", "headers", "tests", "request"] : ["body", "headers", "tests", "request"];
+  const calls = outcome.calls ?? [];
+  const tabs: Tab[] = [
+    "body",
+    ...(isImage || isHtml ? (["preview"] as Tab[]) : []),
+    "headers",
+    "tests",
+    ...(calls.length > 0 ? (["trace"] as Tab[]) : []),
+    "request",
+  ];
 
   const [text, language] = useMemo((): [string, BodyLanguage] => {
     const pretty = prettyJson(r.body);
@@ -117,6 +126,7 @@ export function ResponseView({ entry, onError }: { entry: Entry; onError: (e: st
                   {checks - failed}/{checks}
                 </span>
               )}
+              {t === "trace" && <span className="tab-count">{calls.length}</span>}
             </button>
           ))}
         </div>
@@ -149,20 +159,24 @@ export function ResponseView({ entry, onError }: { entry: Entry; onError: (e: st
       {tab === "tests" && (
         <div className="tab-body">
           {checks === 0 ? (
-            <p className="muted">No checks. Add to the end of the file: <code>&gt; assert status == 200</code></p>
+            <p className="muted">
+              No checks. Add{" "}
+              {entry.file.endsWith(".routy") ? (
+                <code>expect {"{ status == 200 }"}</code>
+              ) : (
+                <>
+                  to the end of the file: <code>&gt; assert status == 200</code>
+                </>
+              )}
+            </p>
           ) : (
-            <ul className="tests">
-              {outcome.asserts.map((a, i) => (
-                <li key={i} className={a.passed ? "ok" : "bad"}>
-                  {a.passed ? "✓" : "✗"} {a.source}
-                  {!a.passed && <span className="muted"> — actual: {JSON.stringify(a.actual ?? null)}</span>}
-                </li>
-              ))}
-              {outcome.save_misses.map((m) => (
-                <li key={m} className="bad">✗ save {m} <span className="muted">— no value in the response</span></li>
-              ))}
-            </ul>
+            <Checks asserts={outcome.asserts} misses={outcome.save_misses} />
           )}
+        </div>
+      )}
+      {tab === "trace" && (
+        <div className="tab-body">
+          <Trace calls={calls} />
         </div>
       )}
       {tab === "request" && (
@@ -175,6 +189,25 @@ export function ResponseView({ entry, onError }: { entry: Entry; onError: (e: st
         </div>
       )}
     </div>
+  );
+}
+
+/** Проверки: `✓ status == 201`, у упавших — почему (`body.total is 0`) или фактическое значение. */
+export function Checks({ asserts, misses }: { asserts: AssertOutcome[]; misses: string[] }) {
+  return (
+    <ul className="tests">
+      {asserts.map((a, i) => (
+        <li key={i} className={a.passed ? "ok" : "bad"}>
+          {a.passed ? "✓" : "✗"} {a.source}
+          {!a.passed && <span className="muted"> — {a.detail ?? `actual: ${JSON.stringify(a.actual ?? null)}`}</span>}
+        </li>
+      ))}
+      {misses.map((m) => (
+        <li key={m} className="bad">
+          ✗ save {m} <span className="muted">— no value in the response</span>
+        </li>
+      ))}
+    </ul>
   );
 }
 

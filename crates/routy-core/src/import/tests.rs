@@ -278,6 +278,11 @@ fn plan_creates_only_missing_files() {
     dir.write("users/get.http", "GET {{base}}/old\n");
     // Чужой хост — не считается ни совпадением, ни пропавшим.
     dir.write("ext.http", "GET https://example.com/users\n");
+    // .routy: совпадение по `handler`, даже если путь в коде уже другой; и по пути.
+    dir.write(
+        "orders.routy",
+        "// List\nGET /v1/orders { handler: h.Orders }\n\n// One\nGET /orders/{order_id}\n",
+    );
     let scan = Scan {
         files: 1,
         routes: vec![
@@ -286,6 +291,11 @@ fn plan_creates_only_missing_files() {
             route("POST", "/users"),
             route("ANY", "/"),
             route("DELETE", "/users/{{id}}/posts/{{post}}"),
+            Route {
+                handler: Some("h.Orders".into()),
+                ..route("GET", "/orders")
+            },
+            route("GET", "/orders/{{id}}"),
         ],
         warnings: vec![],
     };
@@ -294,26 +304,30 @@ fn plan_creates_only_missing_files() {
     assert_eq!(
         new,
         [
-            PathBuf::from("users/get-2.http"),
-            PathBuf::from("users/post.http"),
-            PathBuf::from("root/get.http"),
-            PathBuf::from("users/posts/delete-by-post.http"),
+            PathBuf::from("users/get-2.routy"),
+            PathBuf::from("users/post.routy"),
+            PathBuf::from("root/get.routy"),
+            PathBuf::from("users/posts/delete-by-post.routy"),
         ]
     );
-    assert_eq!(plan.existing.len(), 1);
-    assert_eq!(plan.existing[0].file, Path::new("users/one.http"));
+    let existing: Vec<_> = plan.existing.iter().map(|e| e.file.clone()).collect();
+    assert_eq!(
+        existing,
+        ["users/one.http", "orders.routy", "orders.routy"].map(PathBuf::from)
+    );
     assert_eq!(plan.stale.len(), 1);
     assert_eq!(plan.stale[0].file, Path::new("users/get.http"));
 
     let post = &plan.new[1].content;
-    assert_eq!(post, "# chi main.go:7 → h.Get\nPOST {{base}}/users\n\n{}\n");
-    crate::parse(post).unwrap();
-    crate::parse(&plan.new[2].content).unwrap();
-    assert!(
-        plan.new[2]
-            .content
-            .contains("# any method\nGET {{base}}/\n")
+    assert_eq!(
+        post,
+        "// Get\n// chi main.go:7 → h.Get\nPOST /users {\n  handler: h.Get\n  body {}\n}\n"
     );
+    let any = &plan.new[2].content;
+    assert!(any.contains("// any method\nGET / {\n"), "{any}");
+    for f in &plan.new {
+        crate::lang::parse::parse(&f.content, None).unwrap();
+    }
 
     let created = apply(&dir.0, &plan).unwrap();
     assert_eq!(created, new);
@@ -500,20 +514,36 @@ fn describes_handlers() {
         .find(|r| r.method == "POST" && r.path == "/users")
         .unwrap();
     let text = content(route, DEFAULT_BASE);
-    assert!(text.starts_with("# CreateUser creates a user.\n# Sends a welcome email.\n# chi main.go:14 → h.CreateUser\n#\n"), "{text}");
+    assert!(text.starts_with("// Create user\n// CreateUser creates a user.\n// Sends a welcome email.\n// chi main.go:14 → h.CreateUser\n//\n"), "{text}");
     assert!(
-        text.contains("# Headers: X-Tenant-ID\n# Body: dto.CreateUser\n"),
+        text.contains("// Headers: X-Tenant-ID\n// Body: dto.CreateUser\n"),
         "{text}"
     );
     assert!(
-        text.contains("#   name          string             required  ФИО\n"),
+        text.contains("//   name          string             required  ФИО\n"),
         "{text}"
     );
     assert!(
-        text.contains("POST {{base}}/users\n\n{\n  \"note\": \"\","),
+        text.contains("POST /users {\n  handler: h.CreateUser\n\n  body {\n    note: \"\",\n"),
         "{text}"
     );
-    crate::parse(&text).unwrap();
+    let file = crate::lang::parse::parse(&text, None).unwrap();
+    let crate::lang::ast::Item::Request(r) = &file.items[0] else {
+        panic!()
+    };
+    assert_eq!(r.name.as_deref(), Some("CreateUser"));
+
+    let list = s
+        .routes
+        .iter()
+        .find(|r| r.method == "GET" && r.path == "/users")
+        .unwrap();
+    let text = content(list, DEFAULT_BASE);
+    assert!(
+        text.contains("GET /users {\n  handler: h.ListUsers\n\n  params {\n    page: null\n    limit: null\n  }\n\n  query {\n    page\n    limit\n  }\n}\n"),
+        "{text}"
+    );
+    assert!(text.starts_with("// List users\n"), "{text}");
 }
 
 #[test]
