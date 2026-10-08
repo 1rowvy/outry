@@ -121,3 +121,9 @@ button.small { padding: 1px 8px; font-size: 12px; }
 .headers { border-collapse: collapse; font-family: var(--mono); font-size: 12px; }
 .headers td { padding: 2px 12px 2px 0; vertical-align: top; }
 .headers td:first-child { color: var(--muted); white-space: nowrap; }
+
+.init-bar {
+  display: flex; align-items: center; gap: 12px;
+  padding: 8px 12px; border-bottom: 1px solid var(--border); background: var(--panel);
+}
+.init-bar span { flex: 1; }

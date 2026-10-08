@@ -1,3 +1,6 @@
+mod notifier;
+mod update;
+
 use std::io::{IsTerminal, Read};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -64,6 +67,15 @@ enum Cmd {
         #[command(subcommand)]
         cmd: SecretCmd,
     },
+    /// Обновить routy до последнего релиза с GitHub
+    Update {
+        /// Только проверить, есть ли новая версия
+        #[arg(long)]
+        check: bool,
+    },
+    /// Фоновая проверка новой версии (запускается самим routy)
+    #[command(name = notifier::REFRESH_COMMAND, hide = true)]
+    RefreshUpdateCache,
     /// Создать api/env.toml и пример запроса
     Init {
         #[arg(default_value = ".")]
@@ -104,17 +116,23 @@ fn parse_kv(s: &str) -> Result<(String, String), String> {
 }
 
 fn main() -> ExitCode {
-    match real_main() {
+    let cmd = Cli::parse().cmd;
+    let notify = !matches!(cmd, Cmd::Update { .. } | Cmd::RefreshUpdateCache);
+    let code = match real_main(cmd) {
         Ok(code) => code,
         Err(e) => {
             eprintln!("{} {e:#}", Style::stderr().red("error:"));
             ExitCode::from(2)
         }
+    };
+    if notify {
+        notifier::after_command();
     }
+    code
 }
 
-fn real_main() -> anyhow::Result<ExitCode> {
-    match Cli::parse().cmd {
+fn real_main(cmd: Cmd) -> anyhow::Result<ExitCode> {
+    match cmd {
         Cmd::Run {
             paths,
             env,
@@ -181,6 +199,14 @@ fn real_main() -> anyhow::Result<ExitCode> {
         }
         Cmd::Secret { cmd } => secret(cmd),
         Cmd::Init { dir } => init(&dir),
+        Cmd::Update { check } => {
+            tokio::runtime::Runtime::new()?.block_on(update::run(check))?;
+            Ok(ExitCode::SUCCESS)
+        }
+        Cmd::RefreshUpdateCache => {
+            notifier::refresh();
+            Ok(ExitCode::SUCCESS)
+        }
     }
 }
 
@@ -356,21 +382,7 @@ fn secret(cmd: SecretCmd) -> anyhow::Result<ExitCode> {
 }
 
 fn init(dir: &Path) -> anyhow::Result<ExitCode> {
-    let api = dir.join("api");
-    let config = api.join(routy_core::project::CONFIG_FILE);
-    if config.exists() {
-        bail!("{} already exists", config.display());
-    }
-    std::fs::create_dir_all(api.join("health"))?;
-    std::fs::write(
-        &config,
-        "# Окружения Routy. Секреты сюда не пишем: `routy secret set token --env dev`.\n\
-         default = \"dev\"\n\n[env.dev]\nbase = \"http://localhost:8080\"\n\n[env.prod]\nbase = \"https://api.example.com\"\n",
-    )?;
-    std::fs::write(
-        api.join("health/get.http"),
-        "GET {{base}}/health\n\n> assert status == 200\n",
-    )?;
+    let api = routy_core::project::init(dir)?;
     println!("created {}", api.display());
     Ok(ExitCode::SUCCESS)
 }

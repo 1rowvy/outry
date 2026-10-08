@@ -33,6 +33,8 @@ struct ProjectInfo {
     id: String,
     envs: Vec<String>,
     default_env: Option<String>,
+    /// `false` — открыт каталог без env.toml; фронт предлагает его создать.
+    has_config: bool,
     files: Vec<String>,
 }
 
@@ -47,6 +49,7 @@ fn project_info(p: &Project) -> CmdResult<ProjectInfo> {
         id: p.id(),
         envs: p.env_names(),
         default_env: p.resolve_env(None).ok(),
+        has_config: p.has_config(),
         files,
     })
 }
@@ -85,13 +88,8 @@ fn watch(app: tauri::AppHandle, root: &Path) -> Option<notify::RecommendedWatche
     Some(w)
 }
 
-#[tauri::command]
-async fn open_project(
-    app: tauri::AppHandle,
-    state: State<'_, AppState>,
-    dir: PathBuf,
-) -> CmdResult<ProjectInfo> {
-    let project = Project::discover(&dir).map_err(err)?;
+async fn open(app: tauri::AppHandle, state: &AppState, dir: &Path) -> CmdResult<ProjectInfo> {
+    let project = Project::discover(dir).map_err(err)?;
     let info = project_info(&project)?;
     let watcher = watch(app, &project.root);
     *state.0.lock().await = Some(Session {
@@ -100,6 +98,31 @@ async fn open_project(
         _watcher: watcher,
     });
     Ok(info)
+}
+
+#[tauri::command]
+async fn open_project(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    dir: PathBuf,
+) -> CmdResult<ProjectInfo> {
+    open(app, &state, &dir).await
+}
+
+/// `routy init` для открытого каталога без env.toml: создаёт api/env.toml и
+/// переоткрывает проект — корнем становится api/.
+#[tauri::command]
+async fn init_project(app: tauri::AppHandle, state: State<'_, AppState>) -> CmdResult<ProjectInfo> {
+    let root = {
+        let guard = state.0.lock().await;
+        let s = guard.as_ref().ok_or("no project open")?;
+        if s.project.has_config() {
+            return Err("project already has env.toml".into());
+        }
+        s.project.root.clone()
+    };
+    let api = routy_core::project::init(&root).map_err(err)?;
+    open(app, &state, &api).await
 }
 
 /// Перечитать список файлов и env.toml, не пересоздавая слежение.
@@ -206,6 +229,7 @@ pub fn run() {
         .manage(AppState::default())
         .invoke_handler(tauri::generate_handler![
             open_project,
+            init_project,
             refresh_project,
             read_request,
             write_request,

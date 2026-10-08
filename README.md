@@ -3,6 +3,44 @@
 API-клиент, где запросы — текстовые файлы в репозитории. Desktop-приложение (Tauri) и CLI для CI
 работают на одном ядре, поэтому ведут себя одинаково.
 
+## Установка
+
+### CLI (Linux)
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/1rowvy/routy/master/install.sh | sh
+```
+
+Скрипт скачивает статический бинарь из последнего релиза (x86_64 или aarch64, работает на любом дистрибутиве),
+проверяет sha256 и кладёт его в `~/.local/bin/routy`. Настройки через переменные окружения:
+
+```sh
+# конкретная версия
+curl -fsSL https://raw.githubusercontent.com/1rowvy/routy/master/install.sh | ROUTY_VERSION=v0.2.0 sh
+
+# для всех пользователей (обновлять потом тоже через sudo routy update)
+curl -fsSL https://raw.githubusercontent.com/1rowvy/routy/master/install.sh | sudo ROUTY_INSTALL_DIR=/usr/local/bin sh
+```
+
+Обновление и удаление:
+
+```sh
+routy update            # скачать последнюю версию (с проверкой sha256)
+routy update --check    # только узнать, есть ли новая
+rm ~/.local/bin/routy   # удалить
+```
+
+Как npm, routy раз в сутки в фоне проверяет новую версию и после команды напоминает об обновлении
+(команды при этом не ждут сети). Напоминание не показывается в пайпах и CI; отключить — `ROUTY_NO_UPDATE_NOTIFIER=1`.
+
+macOS и Windows: архивы `routy-cli-*` в [релизах](https://github.com/1rowvy/routy/releases/latest).
+
+### Desktop-приложение
+
+Установщики для macOS, Windows и Linux (AppImage, `.deb`, `.rpm`) — в [релизах](https://github.com/1rowvy/routy/releases/latest).
+Приложение обновляется само: при старте проверяет новую версию и предлагает установить.
+На Linux самообновление работает только у AppImage.
+
 ## Формат
 
 `api/users/create.http`:

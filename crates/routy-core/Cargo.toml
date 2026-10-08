@@ -19,7 +19,10 @@ serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 toml.workspace = true
-keyring = { version = "3", optional = true, features = ["apple-native", "windows-native", "sync-secret-service", "crypto-rust"] }
+# Secret Service через zbus (чистый Rust): на Linux не нужны libdbus и pkg-config,
+# поэтому CLI собирается статически (musl) и запускается на любом дистрибутиве.
+# async-io, а не tokio: блокирующий API keyring вызывается изнутри tokio-рантайма.
+keyring = { version = "3", optional = true, features = ["apple-native", "windows-native", "async-secret-service", "async-io", "crypto-rust"] }
 
 [dev-dependencies]
 tokio.workspace = true

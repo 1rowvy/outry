@@ -6,6 +6,8 @@ export interface ProjectInfo {
   id: string;
   envs: string[];
   default_env: string | null;
+  /** false — каталог открыт без env.toml */
+  has_config: boolean;
   files: string[];
 }
 
@@ -42,6 +44,7 @@ export interface ParseError {
 
 export const api = {
   openProject: (dir: string) => invoke<ProjectInfo>("open_project", { dir }),
+  initProject: () => invoke<ProjectInfo>("init_project"),
   refreshProject: () => invoke<ProjectInfo>("refresh_project"),
   readRequest: (path: string) => invoke<string>("read_request", { path }),
   writeRequest: (path: string, content: string) => invoke<void>("write_request", { path, content }),

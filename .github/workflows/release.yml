@@ -130,8 +130,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { os: ubuntu-22.04, target: x86_64-unknown-linux-gnu }
-          - { os: ubuntu-22.04-arm, target: aarch64-unknown-linux-gnu }
+          # Linux — статические musl-сборки: работают на любом дистрибутиве. Их ставит install.sh.
+          - { os: ubuntu-22.04, target: x86_64-unknown-linux-musl }
+          - { os: ubuntu-22.04-arm, target: aarch64-unknown-linux-musl }
           - { os: macos-latest, target: aarch64-apple-darwin }
           - { os: macos-latest, target: x86_64-apple-darwin }
           - { os: windows-latest, target: x86_64-pc-windows-msvc }
@@ -146,10 +147,21 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: cli-${{ matrix.target }}
-      - name: Linux deps
-        if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libdbus-1-dev pkg-config
+      - name: musl toolchain
+        if: contains(matrix.target, 'musl')
+        run: |
+          sudo apt-get update && sudo apt-get install -y musl-tools
+          # ring собирает C/asm-код; cc-rs сам не находит musl-gcc.
+          echo "CC_$(echo '${{ matrix.target }}' | tr '-' '_')=musl-gcc" >> "$GITHUB_ENV"
       - run: cargo build --release --locked -p routy-cli --target ${{ matrix.target }}
+      - name: Смоук-тест
+        # x86_64-бинарь на arm64-раннере macOS требует Rosetta — не рассчитываем на неё.
+        if: matrix.target != 'x86_64-apple-darwin'
+        shell: bash
+        run: |
+          bin="target/${{ matrix.target }}/release/routy"
+          "$bin" --version
+          "$bin" check examples/api
       - name: Упаковать и загрузить
         shell: bash
         env:
@@ -168,7 +180,9 @@ jobs:
             tar -C dist -czf "dist/$name.tar.gz" "$name"
             asset="dist/$name.tar.gz"
           fi
-          gh release upload "$TAG" "$asset" --clobber
+          # Контрольная сумма рядом с архивом: её проверяют install.sh и `routy update`.
+          (cd dist && if command -v sha256sum >/dev/null; then sha256sum "${asset#dist/}"; else shasum -a 256 "${asset#dist/}"; fi) > "$asset.sha256"
+          gh release upload "$TAG" "$asset" "$asset.sha256" --clobber
 
   publish:
     needs: [create-release, app, cli]

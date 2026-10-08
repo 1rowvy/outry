@@ -133,6 +133,52 @@ impl Project {
     }
 }
 
+impl Project {
+    /// Есть ли у проекта `env.toml` (или он открыт «как есть», без окружений).
+    pub fn has_config(&self) -> bool {
+        self.root.join(CONFIG_FILE).is_file()
+    }
+}
+
+const INIT_CONFIG: &str = "\
+# Окружения Routy. Секреты сюда не пишем: `routy secret set token --env dev`.
+default = \"dev\"
+
+[env.dev]
+base = \"http://localhost:8080\"
+
+[env.prod]
+base = \"https://api.example.com\"
+";
+
+const INIT_EXAMPLE: &str = "GET {{base}}/health\n\n> assert status == 200\n";
+
+/// Создаёт `api/env.toml` и пример запроса. Если `dir` сам называется `api`,
+/// файлы кладутся прямо в него. Возвращает каталог проекта (тот, где `env.toml`).
+pub fn init(dir: &Path) -> Result<PathBuf> {
+    let api = if dir.file_name().is_some_and(|n| n == "api") {
+        dir.to_path_buf()
+    } else {
+        dir.join("api")
+    };
+    let config = api.join(CONFIG_FILE);
+    if config.exists() {
+        return Err(Error::from(std::io::Error::new(
+            std::io::ErrorKind::AlreadyExists,
+            "already exists",
+        ))
+        .in_file(config));
+    }
+    std::fs::create_dir_all(&api)?;
+    std::fs::write(&config, INIT_CONFIG)?;
+    let example = api.join("health").join("get.http");
+    if !example.exists() {
+        std::fs::create_dir_all(example.parent().expect("has parent"))?;
+        std::fs::write(example, INIT_EXAMPLE)?;
+    }
+    Ok(api)
+}
+
 fn toml_to_string(v: &toml::Value) -> String {
     match v {
         toml::Value::String(s) => s.clone(),
@@ -181,6 +227,28 @@ mod tests {
         assert_eq!(p.id(), "svc");
         assert_eq!(p.resolve_env(None).unwrap(), "default");
         assert_eq!(p.resolve_env(Some("anything")).unwrap(), "anything");
+    }
+
+    #[test]
+    fn init_creates_loadable_project() {
+        let dir = std::env::temp_dir().join(format!("routy-init-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let api = init(&dir).unwrap();
+        assert_eq!(api, dir.join("api"));
+        let p = Project::discover(&dir).unwrap();
+        assert_eq!(p.root, api);
+        assert!(p.has_config());
+        assert_eq!(p.resolve_env(None).unwrap(), "dev");
+        assert!(api.join("health/get.http").is_file());
+        assert!(init(&dir).is_err(), "second init must not overwrite");
+
+        // Открыли сам каталог api/ без env.toml — не создаём api/api/.
+        std::fs::remove_file(api.join(CONFIG_FILE)).unwrap();
+        assert_eq!(init(&api).unwrap(), api);
+
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

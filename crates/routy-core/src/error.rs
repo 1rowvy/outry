@@ -7,12 +7,9 @@ pub enum Error {
     #[error("line {line}: {msg}")]
     Parse { line: usize, msg: String },
 
-    #[error("{path}: {source}")]
-    InFile {
-        path: PathBuf,
-        #[source]
-        source: Box<Error>,
-    },
+    // Вложенная ошибка уже в тексте, поэтому не `#[source]`: иначе anyhow печатает её дважды.
+    #[error("{path}: {inner}")]
+    InFile { path: PathBuf, inner: Box<Error> },
 
     #[error("undefined variable(s): {}", .0.join(", "))]
     MissingVars(Vec<String>),
@@ -57,7 +54,7 @@ impl Error {
     pub fn in_file(self, path: impl Into<PathBuf>) -> Self {
         Error::InFile {
             path: path.into(),
-            source: Box::new(self),
+            inner: Box::new(self),
         }
     }
 }

@@ -39,21 +39,36 @@ export default function App() {
   const live = useRef({ selected, dirty });
   live.current = { selected, dirty };
 
-  const openProject = useCallback(async (dir: string) => {
+  const applyProject = useCallback((info: ProjectInfo) => {
+    setProject(info);
+    setEnv(info.default_env);
+    setSelected(null);
+    setContent("");
+    setSavedContent("");
+    setOutcome(null);
+    setError(null);
+  }, []);
+
+  const openProject = useCallback(
+    async (dir: string) => {
+      try {
+        applyProject(await api.openProject(dir));
+        storage(LAST_PROJECT_KEY, dir);
+      } catch (e) {
+        setError(String(e));
+      }
+    },
+    [applyProject],
+  );
+
+  const initProject = async () => {
+    if (dirty && !window.confirm("Есть несохранённые изменения. Продолжить?")) return;
     try {
-      const info = await api.openProject(dir);
-      setProject(info);
-      setEnv(info.default_env);
-      setSelected(null);
-      setContent("");
-      setSavedContent("");
-      setOutcome(null);
-      setError(null);
-      storage(LAST_PROJECT_KEY, dir);
+      applyProject(await api.initProject());
     } catch (e) {
       setError(String(e));
     }
-  }, []);
+  };
 
   useEffect(() => {
     const last = storage(LAST_PROJECT_KEY);
@@ -219,52 +234,65 @@ export default function App() {
           <button onClick={pickFolder}>Открыть проект</button>
         </div>
       ) : (
-        <main className="layout">
-          <aside className="sidebar">
-            <div className="sidebar-head">
-              <span className="muted" title={project.root}>api</span>
-              <button className="small" onClick={() => setNewPath(newPath === null ? "" : null)}>+ запрос</button>
+        <>
+          {!project.has_config && (
+            <div className="init-bar">
+              <span>
+                В <code>{project.root}</code> нет <code>env.toml</code> — без него нет окружений и переменных вроде{" "}
+                <code>{"{{base}}"}</code>.
+              </span>
+              <button className="primary" onClick={initProject}>
+                Создать api/env.toml
+              </button>
             </div>
-            {newPath !== null && (
-              <form className="new-request" onSubmit={(e) => (e.preventDefault(), createRequest())}>
-                <input placeholder="users/create" value={newPath} onChange={(e) => setNewPath(e.target.value)} autoFocus />
-              </form>
-            )}
-            <FileTree files={project.files} selected={selected} onSelect={select} />
-          </aside>
+          )}
+          <main className="layout">
+            <aside className="sidebar">
+              <div className="sidebar-head">
+                <span className="muted" title={project.root}>api</span>
+                <button className="small" onClick={() => setNewPath(newPath === null ? "" : null)}>+ запрос</button>
+              </div>
+              {newPath !== null && (
+                <form className="new-request" onSubmit={(e) => (e.preventDefault(), createRequest())}>
+                  <input placeholder="users/create" value={newPath} onChange={(e) => setNewPath(e.target.value)} autoFocus />
+                </form>
+              )}
+              <FileTree files={project.files} selected={selected} onSelect={select} />
+            </aside>
 
-          <section className="editor">
-            {selected ? (
-              <>
-                <div className="editor-head">
-                  <span>
-                    {selected}
-                    {dirty && <span className="dirty"> ●</span>}
-                  </span>
-                  <span className="spacer" />
-                  <button onClick={save} disabled={!dirty} title="Ctrl+S">Сохранить</button>
-                  <button className="primary" onClick={send} disabled={sending || !!parseError} title="Ctrl+Enter">
-                    {sending ? "…" : "Отправить"}
-                  </button>
-                </div>
-                <textarea value={content} onChange={(e) => setContent(e.target.value)} spellCheck={false} />
-                {parseError && (
-                  <div className="parse-error">
-                    {parseError.line !== null && `строка ${parseError.line}: `}
-                    {parseError.message}
+            <section className="editor">
+              {selected ? (
+                <>
+                  <div className="editor-head">
+                    <span>
+                      {selected}
+                      {dirty && <span className="dirty"> ●</span>}
+                    </span>
+                    <span className="spacer" />
+                    <button onClick={save} disabled={!dirty} title="Ctrl+S">Сохранить</button>
+                    <button className="primary" onClick={send} disabled={sending || !!parseError} title="Ctrl+Enter">
+                      {sending ? "…" : "Отправить"}
+                    </button>
                   </div>
-                )}
-              </>
-            ) : (
-              <p className="muted pad">Выберите запрос слева</p>
-            )}
-          </section>
+                  <textarea value={content} onChange={(e) => setContent(e.target.value)} spellCheck={false} />
+                  {parseError && (
+                    <div className="parse-error">
+                      {parseError.line !== null && `строка ${parseError.line}: `}
+                      {parseError.message}
+                    </div>
+                  )}
+                </>
+              ) : (
+                <p className="muted pad">Выберите запрос слева</p>
+              )}
+            </section>
 
-          <section className="result">
-            {sendError && <div className="send-error">{sendError}</div>}
-            {outcome ? <ResponseView outcome={outcome} /> : !sendError && <p className="muted pad">Ответ появится здесь</p>}
-          </section>
-        </main>
+            <section className="result">
+              {sendError && <div className="send-error">{sendError}</div>}
+              {outcome ? <ResponseView outcome={outcome} /> : !sendError && <p className="muted pad">Ответ появится здесь</p>}
+            </section>
+          </main>
+        </>
       )}
     </div>
   );

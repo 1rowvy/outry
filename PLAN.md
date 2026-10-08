@@ -47,12 +47,17 @@ GUI и CLI не могут разъехаться: оба вызывают од�
 ### ✅ 2. CLI
 - [x] `routy run <файлы|каталоги>` — цепочки по порядку, `--env`, `--var`, `--fail-fast`, `-v`, `--json`, `--fresh`, exit code
 - [x] `routy check`, `routy envs`, `routy secret set|rm`, `routy init`
+- [x] Установка `curl … install.sh | sh` (Linux, статическая musl-сборка, проверка sha256)
+- [x] `routy update` / `routy update --check` — самообновление из GitHub Releases с проверкой sha256
+- [x] Напоминание о новой версии после команд (раз в сутки, фоном, как у npm)
+- [ ] install.sh и `routy update` для macOS (архивы уже есть) и Windows (`install.ps1`, zip)
 
 ### 🟡 3. Desktop (Tauri + React) — скелет готов
 - [x] Открытие проекта, дерево файлов, редактор, отправка (Ctrl+Enter), сохранение (Ctrl+S)
 - [x] Вкладки ответа: body (pretty JSON) / headers / tests / request
 - [x] Проверка синтаксиса на лету, live-reload при правке файлов снаружи (`notify`)
 - [x] Выбор окружения, ввод секретов в keyring
+- [x] Каталог без `env.toml` → кнопка «Создать api/env.toml» (та же `project::init`, что и `routy init`)
 - [x] Баннер обновления: скачать → установить → перезапуск
 - [ ] CodeMirror 6 вместо textarea: подсветка `.http`, подчёркивание ошибки на строке, автодополнение `{{var}}`
 - [ ] Переименование / удаление / перемещение файлов, контекстное меню дерева
@@ -88,7 +93,7 @@ GUI и CLI не могут разъехаться: оба вызывают од�
 - Импорт из Postman / Insomnia / OpenAPI
 - GraphQL, WebSocket, multipart, файлы в теле (`< ./payload.json`)
 - Подпись и нотаризация macOS, подпись Windows-установщика
-- Публикация CLI: `cargo install`, Homebrew tap, AUR, winget
+- Пакетные менеджеры для CLI: Homebrew tap, AUR, COPR, Scoop/winget
 
 ## Релизы и автообновление
 
