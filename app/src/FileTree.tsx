@@ -30,6 +30,10 @@ function buildTree(files: string[]): Node[] {
   return root.children;
 }
 
+function countFiles(node: Node): number {
+  return node.isFile ? 1 : node.children.reduce((n, c) => n + countFiles(c), 0);
+}
+
 export function FileTree(props: { files: string[]; selected: string | null; onSelect: (path: string) => void }) {
   const tree = useMemo(() => buildTree(props.files), [props.files]);
   if (props.files.length === 0) {
@@ -56,7 +60,10 @@ function TreeNode(props: { node: Node; selected: string | null; onSelect: (path:
   return (
     <li>
       <details open>
-        <summary>{node.name}</summary>
+        <summary>
+          <span className="ellipsis">{node.name}</span>
+          <span className="count">{countFiles(node)}</span>
+        </summary>
         <ul className="tree">
           {node.children.map((c) => (
             <TreeNode key={c.path} {...props} node={c} />

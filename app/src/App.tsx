@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { getVersion } from "@tauri-apps/api/app";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import { api, type ParseError, type ProjectInfo, type RunOutcome } from "./api";
@@ -33,6 +34,7 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [newPath, setNewPath] = useState<string | null>(null);
   const [secretForm, setSecretForm] = useState<{ name: string; value: string } | null>(null);
+  const [version, setVersion] = useState<string | null>(null);
 
   const dirty = content !== savedContent;
   // Для обработчика событий файловой системы нужны актуальные значения без переподписки.
@@ -69,6 +71,10 @@ export default function App() {
       setError(String(e));
     }
   };
+
+  useEffect(() => {
+    getVersion().then(setVersion, () => {});
+  }, []);
 
   useEffect(() => {
     const last = storage(LAST_PROJECT_KEY);
@@ -196,104 +202,143 @@ export default function App() {
 
   return (
     <div className="app">
-      <header className="topbar">
-        <strong className="logo">Routy</strong>
-        <button onClick={pickFolder}>{project ? project.id : "Открыть проект"}</button>
+      <aside className="sidebar">
+        <div className="brand">
+          <Logo />
+          <strong>routy</strong>
+          {version && <span className="version">v{version}</span>}
+        </div>
+
+        {project && (
+          <button className="primary wide" onClick={() => setNewPath(newPath === null ? "" : null)}>
+            + Новый запрос
+          </button>
+        )}
+        {newPath !== null && (
+          <form className="new-request" onSubmit={(e) => (e.preventDefault(), createRequest())}>
+            <input placeholder="users/create" value={newPath} onChange={(e) => setNewPath(e.target.value)} autoFocus />
+          </form>
+        )}
+
+        {project && (
+          <>
+            <div className="section-title">
+              <span title={project.root}>Запросы</span>
+              <span className="count">{project.files.length}</span>
+            </div>
+            <div className="tree-wrap">
+              <FileTree files={project.files} selected={selected} onSelect={select} />
+            </div>
+          </>
+        )}
+
+        <span className="spacer" />
+        <UpdateBanner />
+
+        <div className="section-title">Проект</div>
+        <button className="nav-item" onClick={pickFolder} title={project?.root}>
+          <span className="nav-icon">▤</span>
+          <span className="ellipsis">{project ? project.id : "Открыть проект"}</span>
+        </button>
         {project && project.envs.length > 0 && (
-          <select value={env ?? ""} onChange={(e) => setEnv(e.target.value)} title="Окружение">
-            {project.envs.map((e) => (
-              <option key={e}>{e}</option>
-            ))}
-          </select>
+          <label className="nav-item">
+            <span className="nav-icon">◎</span>
+            <select value={env ?? ""} onChange={(e) => setEnv(e.target.value)} title="Окружение">
+              {project.envs.map((e) => (
+                <option key={e}>{e}</option>
+              ))}
+            </select>
+          </label>
         )}
         {project && (
-          <button onClick={() => setSecretForm(secretForm ? null : { name: "", value: "" })} title="Секреты хранятся в системном хранилище паролей">
+          <button
+            className={"nav-item" + (secretForm ? " active" : "")}
+            onClick={() => setSecretForm(secretForm ? null : { name: "", value: "" })}
+            title="Секреты хранятся в системном хранилище паролей"
+          >
+            <span className="nav-icon">⚿</span>
             Секрет
           </button>
         )}
         {secretForm && (
-          <form className="inline-form" onSubmit={(e) => (e.preventDefault(), saveSecret())}>
+          <form className="secret-form" onSubmit={(e) => (e.preventDefault(), saveSecret())}>
             <input placeholder="имя" value={secretForm.name} onChange={(e) => setSecretForm({ ...secretForm, name: e.target.value })} autoFocus />
             <input placeholder="значение" type="password" value={secretForm.value} onChange={(e) => setSecretForm({ ...secretForm, value: e.target.value })} />
             <button type="submit">Сохранить для {env ?? "default"}</button>
           </form>
         )}
-        <span className="spacer" />
-        <UpdateBanner />
-      </header>
+      </aside>
 
-      {error && (
-        <div className="error-bar" onClick={() => setError(null)}>
-          {error}
-        </div>
-      )}
+      <main className="main">
+        {error && (
+          <div className="error-bar" onClick={() => setError(null)}>
+            {error}
+          </div>
+        )}
 
-      {!project ? (
-        <div className="empty">
-          <p>Откройте каталог проекта — Routy найдёт <code>api/env.toml</code> и все <code>*.http</code> файлы.</p>
-          <button onClick={pickFolder}>Открыть проект</button>
-        </div>
-      ) : (
-        <>
-          {!project.has_config && (
-            <div className="init-bar">
-              <span>
-                В <code>{project.root}</code> нет <code>env.toml</code> — без него нет окружений и переменных вроде{" "}
-                <code>{"{{base}}"}</code>.
-              </span>
-              <button className="primary" onClick={initProject}>
-                Создать api/env.toml
-              </button>
-            </div>
-          )}
-          <main className="layout">
-            <aside className="sidebar">
-              <div className="sidebar-head">
-                <span className="muted" title={project.root}>api</span>
-                <button className="small" onClick={() => setNewPath(newPath === null ? "" : null)}>+ запрос</button>
+        {!project ? (
+          <div className="card empty">
+            <p>Откройте каталог проекта — Routy найдёт <code>api/env.toml</code> и все <code>*.http</code> файлы.</p>
+            <button className="primary" onClick={pickFolder}>Открыть проект</button>
+          </div>
+        ) : (
+          <>
+            {!project.has_config && (
+              <div className="init-bar">
+                <span>
+                  В <code>{project.root}</code> нет <code>env.toml</code> — без него нет окружений и переменных вроде{" "}
+                  <code>{"{{base}}"}</code>.
+                </span>
+                <button className="primary" onClick={initProject}>
+                  Создать api/env.toml
+                </button>
               </div>
-              {newPath !== null && (
-                <form className="new-request" onSubmit={(e) => (e.preventDefault(), createRequest())}>
-                  <input placeholder="users/create" value={newPath} onChange={(e) => setNewPath(e.target.value)} autoFocus />
-                </form>
-              )}
-              <FileTree files={project.files} selected={selected} onSelect={select} />
-            </aside>
-
-            <section className="editor">
-              {selected ? (
-                <>
-                  <div className="editor-head">
-                    <span>
-                      {selected}
-                      {dirty && <span className="dirty"> ●</span>}
-                    </span>
-                    <span className="spacer" />
-                    <button onClick={save} disabled={!dirty} title="Ctrl+S">Сохранить</button>
-                    <button className="primary" onClick={send} disabled={sending || !!parseError} title="Ctrl+Enter">
-                      {sending ? "…" : "Отправить"}
-                    </button>
-                  </div>
-                  <textarea value={content} onChange={(e) => setContent(e.target.value)} spellCheck={false} />
-                  {parseError && (
-                    <div className="parse-error">
-                      {parseError.line !== null && `строка ${parseError.line}: `}
-                      {parseError.message}
+            )}
+            <div className="card layout">
+              <section className="editor">
+                {selected ? (
+                  <>
+                    <div className="pane-head">
+                      <span className="pane-title ellipsis">
+                        {selected}
+                        {dirty && <span className="dirty"> ●</span>}
+                      </span>
+                      <span className="spacer" />
+                      <button onClick={save} disabled={!dirty} title="Ctrl+S">Сохранить</button>
+                      <button className="primary" onClick={send} disabled={sending || !!parseError} title="Ctrl+Enter">
+                        {sending ? "…" : "Отправить"}
+                      </button>
                     </div>
-                  )}
-                </>
-              ) : (
-                <p className="muted pad">Выберите запрос слева</p>
-              )}
-            </section>
+                    <textarea value={content} onChange={(e) => setContent(e.target.value)} spellCheck={false} />
+                    {parseError && (
+                      <div className="parse-error">
+                        {parseError.line !== null && `строка ${parseError.line}: `}
+                        {parseError.message}
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <p className="muted pad">Выберите запрос слева</p>
+                )}
+              </section>
 
-            <section className="result">
-              {sendError && <div className="send-error">{sendError}</div>}
-              {outcome ? <ResponseView outcome={outcome} /> : !sendError && <p className="muted pad">Ответ появится здесь</p>}
-            </section>
-          </main>
-        </>
-      )}
+              <section className="result">
+                {sendError && <div className="send-error">{sendError}</div>}
+                {outcome ? <ResponseView outcome={outcome} /> : !sendError && <p className="muted pad">Ответ появится здесь</p>}
+              </section>
+            </div>
+          </>
+        )}
+      </main>
     </div>
+  );
+}
+
+function Logo() {
+  return (
+    <svg className="logo" viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M4 5h16l-3 5H7z" fill="currentColor" />
+      <path d="M7 12h10l-5 8z" fill="currentColor" opacity="0.7" />
+    </svg>
   );
 }
