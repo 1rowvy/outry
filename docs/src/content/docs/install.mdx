@@ -1,0 +1,76 @@
+---
+title: Installation
+description: Install the Routy CLI and desktop app, keep them up to date.
+---
+
+import { Tabs, TabItem, Aside } from '@astrojs/starlight/components';
+
+## CLI
+
+<Tabs>
+<TabItem label="Linux">
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/1rowvy/routy/master/install.sh | sh
+```
+
+The script downloads a static binary from the latest release (x86_64 or aarch64 — works on any
+distribution, including Alpine), verifies its SHA-256 checksum and installs it to `~/.local/bin/routy`.
+
+Options are passed as environment variables:
+
+```sh
+# a specific version
+curl -fsSL https://raw.githubusercontent.com/1rowvy/routy/master/install.sh | ROUTY_VERSION=v0.2.0 sh
+
+# for all users (later update with `sudo routy update`)
+curl -fsSL https://raw.githubusercontent.com/1rowvy/routy/master/install.sh | sudo ROUTY_INSTALL_DIR=/usr/local/bin sh
+```
+
+</TabItem>
+<TabItem label="macOS / Windows">
+
+Download `routy-cli-<version>-<target>` from the
+[latest release](https://github.com/1rowvy/routy/releases/latest), unpack it and put `routy`
+(`routy.exe`) somewhere on your `PATH`. Each archive has a `.sha256` file next to it.
+
+An install script for these platforms is planned.
+
+</TabItem>
+</Tabs>
+
+### Updating
+
+```sh
+routy update           # download and install the latest release (SHA-256 verified)
+routy update --check   # only check whether a new version exists
+```
+
+Like npm, Routy checks for a new version in the background once a day and prints a short notice after
+a command when one is available. Commands never wait for the network. The notice is not shown when
+output is piped, in CI, or with `ROUTY_NO_UPDATE_NOTIFIER=1`.
+
+<Aside>
+If `routy` was installed by a package manager (`/usr/bin`, Homebrew, Nix), `routy update` refuses to
+touch it — update it with that package manager instead.
+</Aside>
+
+### Uninstalling
+
+```sh
+rm ~/.local/bin/routy
+```
+
+## Desktop app
+
+Installers for macOS (`.dmg`), Windows (`.exe`, `.msi`) and Linux (AppImage, `.deb`, `.rpm`) are on
+the [releases page](https://github.com/1rowvy/routy/releases/latest).
+
+The app updates itself: on start it checks for a new version and offers to install it and restart.
+Updates are signed and verified. On Linux only the AppImage self-updates; `.deb` and `.rpm` are updated
+by downloading the new package.
+
+<Aside type="caution">
+macOS builds are not notarized yet. On first launch, if macOS says the app is damaged, run
+`xattr -dr com.apple.quarantine /Applications/Routy.app`.
+</Aside>

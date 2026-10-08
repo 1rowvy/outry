@@ -1,0 +1,52 @@
+---
+title: Routy
+description: API-клиент, где запросы — текстовые .http-файлы в репозитории. Приложение и CLI для CI работают на одном ядре.
+template: splash
+hero:
+  tagline: API-клиент, где запросы — обычные текстовые файлы в репозитории. Одно ядро у приложения и CLI — они не могут разъехаться.
+  image:
+    file: ../../../assets/logo.svg
+  actions:
+    - text: Начать
+      link: /routy/ru/getting-started/
+      icon: right-arrow
+    - text: GitHub
+      link: https://github.com/1rowvy/routy
+      icon: external
+      variant: minimal
+---
+
+import { Card, CardGrid } from '@astrojs/starlight/components';
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/1rowvy/routy/master/install.sh | sh
+```
+
+```http title="api/users/create.http"
+POST {{base}}/users
+Authorization: Bearer {{token}}
+
+{"name": "Viktor"}
+
+> save user_id = body.id
+> assert status == 201
+```
+
+<CardGrid>
+	<Card title="Запросы живут в git" icon="document">
+		Один `.http`-файл на запрос. Их можно ревьюить в пулл-реквестах, искать grep'ом и править в любом
+		редакторе — приложение сразу подхватывает изменения.
+	</Card>
+	<Card title="Один движок везде" icon="laptop">
+		Приложение и CLI `routy` вызывают одно и то же ядро на Rust: запрос, который работает в GUI,
+		работает и в CI.
+	</Card>
+	<Card title="Секреты не попадают в репозиторий" icon="padlock">
+		Токены лежат в системном хранилище паролей, а в CI приходят из переменных `ROUTY_*`. Случайно
+		закоммитить нечего.
+	</Card>
+	<Card title="Цепочки и проверки" icon="approve-check">
+		`> save` берёт значение из ответа для следующего запроса, `> assert` проверяет статус, заголовки и
+		JSON. Если что-то упало — ненулевой код выхода.
+	</Card>
+</CardGrid>

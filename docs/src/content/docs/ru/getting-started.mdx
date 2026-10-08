@@ -1,0 +1,73 @@
+---
+title: Начало работы
+description: Установите Routy, создайте проект и отправьте первый запрос за минуту.
+---
+
+import { Steps, Aside } from '@astrojs/starlight/components';
+
+<Steps>
+
+1. Установите CLI (Linux):
+
+   ```sh
+   curl -fsSL https://raw.githubusercontent.com/1rowvy/routy/master/install.sh | sh
+   ```
+
+   Приложение и другие платформы — в разделе [Установка](/routy/ru/install/).
+
+2. Создайте проект в своём репозитории:
+
+   ```sh
+   cd my-service
+   routy init
+   ```
+
+   Появятся `api/env.toml` с окружениями `dev` и `prod` и пример запроса `api/health/get.http`.
+
+3. Укажите адрес API в `api/env.toml`:
+
+   ```toml title="api/env.toml"
+   default = "dev"
+
+   [env.dev]
+   base = "http://localhost:8080"
+
+   [env.prod]
+   base = "https://api.example.com"
+   ```
+
+4. Напишите запрос — по файлу на запрос:
+
+   ```http title="api/users/list.http"
+   GET {{base}}/users
+   Accept: application/json
+
+   > assert status == 200
+   ```
+
+5. Запустите:
+
+   ```sh
+   routy run api/users/list.http
+   routy run api              # все *.http внутри api/ по алфавиту
+   routy run api --env prod   # другое окружение
+   ```
+
+   ```txt
+   ✓ api/users/list.http  GET http://localhost:8080/users  200 OK  12ms 532B
+       ✓ status == 200
+   ```
+
+</Steps>
+
+<Aside type="tip">
+Удобнее мышкой? Откройте ту же папку в [приложении](/routy/ru/guides/desktop-app/) — оно читает те же
+файлы, а правки из редактора появляются сразу.
+</Aside>
+
+## Дальше
+
+- [Формат файла запроса](/routy/ru/guides/request-format/)
+- [Переменные и окружения](/routy/ru/guides/variables/)
+- [Цепочки запросов и проверки](/routy/ru/guides/chains-and-assertions/)
+- [Routy в CI](/routy/ru/guides/ci/)

@@ -1,0 +1,32 @@
+---
+title: env.toml
+description: All keys of the env.toml project file.
+---
+
+`env.toml` marks the project root (usually `api/`) and defines its environments.
+
+```toml title="api/env.toml"
+project = "billing-api"   # optional
+default = "dev"           # optional
+
+[vars]
+version = "v1"
+
+[env.dev]
+base = "http://localhost:8080"
+
+[env.prod]
+base = "https://api.example.com"
+```
+
+| Key | Description |
+|-----|-------------|
+| `project` | Namespace for secrets and saved values. Default: the project folder name, or its parent's name if the folder is called `api` |
+| `default` | Environment used when `--env` is not given. Default: the first environment in alphabetical order |
+| `[vars]` | Variables shared by all environments |
+| `[env.<name>]` | An environment; its variables override `[vars]` |
+
+Values may be strings, numbers or booleans; non-strings are inserted as written (`port = 8080` →
+`8080`). Unknown keys are an error, so typos like `defualt` are caught.
+
+Secrets do not belong here — see [Secrets](/routy/guides/secrets/).

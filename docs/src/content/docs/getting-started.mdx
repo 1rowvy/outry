@@ -1,0 +1,74 @@
+---
+title: Getting started
+description: Install Routy, create a project and send your first request in a minute.
+---
+
+import { Steps, Aside } from '@astrojs/starlight/components';
+
+<Steps>
+
+1. Install the CLI (Linux):
+
+   ```sh
+   curl -fsSL https://raw.githubusercontent.com/1rowvy/routy/master/install.sh | sh
+   ```
+
+   The desktop app and other platforms are covered in [Installation](/routy/install/).
+
+2. Create a project in your repository:
+
+   ```sh
+   cd my-service
+   routy init
+   ```
+
+   This creates `api/env.toml` with `dev` and `prod` environments and an example request
+   `api/health/get.http`.
+
+3. Point `base` at your API in `api/env.toml`:
+
+   ```toml title="api/env.toml"
+   default = "dev"
+
+   [env.dev]
+   base = "http://localhost:8080"
+
+   [env.prod]
+   base = "https://api.example.com"
+   ```
+
+4. Write a request — one file per request:
+
+   ```http title="api/users/list.http"
+   GET {{base}}/users
+   Accept: application/json
+
+   > assert status == 200
+   ```
+
+5. Run it:
+
+   ```sh
+   routy run api/users/list.http
+   routy run api              # every *.http under api/, in alphabetical order
+   routy run api --env prod   # another environment
+   ```
+
+   ```txt
+   ✓ api/users/list.http  GET http://localhost:8080/users  200 OK  12ms 532B
+       ✓ status == 200
+   ```
+
+</Steps>
+
+<Aside type="tip">
+Prefer a GUI? Open the same folder in the [desktop app](/routy/guides/desktop-app/) — it reads the same
+files, and edits made in your editor show up immediately.
+</Aside>
+
+## Next steps
+
+- [Request file format](/routy/guides/request-format/)
+- [Variables and environments](/routy/guides/variables/)
+- [Chaining requests and assertions](/routy/guides/chains-and-assertions/)
+- [Running Routy in CI](/routy/guides/ci/)

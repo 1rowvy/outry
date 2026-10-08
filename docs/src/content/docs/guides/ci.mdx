@@ -1,0 +1,59 @@
+---
+title: Running Routy in CI
+description: Use your request files as API tests in GitHub Actions and other CI systems.
+---
+
+The same `.http` files you click through in the app can run as API tests on every push. Assertions
+decide whether the job passes.
+
+## GitHub Actions
+
+```yaml title=".github/workflows/api-tests.yml"
+name: API tests
+
+on: [push, pull_request]
+
+jobs:
+  api:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Start the service under test here (docker compose, a binary, …)
+
+      - name: Install routy
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/1rowvy/routy/master/install.sh | sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Run API tests
+        run: routy run api --env ci --no-keyring --fail-fast
+        env:
+          ROUTY_TOKEN: ${{ secrets.API_TOKEN }}
+```
+
+- Pin a version for reproducible builds: `ROUTY_VERSION=v0.2.0` before `sh`.
+- Secrets come from `ROUTY_<NAME>` variables — see [Secrets](/routy/guides/secrets/#in-ci-environment-variables).
+- `--no-keyring` skips the keychain lookup, which does not exist on runners anyway.
+- The update notice is disabled automatically when the `CI` variable is set.
+
+## Machine-readable output
+
+`--json` prints one JSON object per request (JSON Lines) instead of the human-readable report:
+
+```sh
+routy run api --json > results.jsonl
+```
+
+```json
+{"file":"api/users/get.http","passed":true,"outcome":{"request":{…},"response":{"status":200,…},"asserts":[…],"saved":{},"save_misses":[]}}
+{"file":"api/users/bad.http","passed":false,"error":"api/users/bad.http: undefined variable(s): id"}
+```
+
+## Check syntax only
+
+`routy check` parses every file without sending requests — a fast lint step:
+
+```sh
+routy check api
+```

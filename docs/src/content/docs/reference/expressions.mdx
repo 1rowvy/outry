@@ -1,0 +1,65 @@
+---
+title: Expressions
+description: Paths and operators available in > save and > assert.
+---
+
+## Paths
+
+A path points at a part of the response.
+
+| Path | Value |
+|------|-------|
+| `status` | HTTP status code, e.g. `200` |
+| `duration` | Time from sending the request to receiving the full body, in milliseconds |
+| `body` | The whole body: parsed JSON, or the raw text if it is not JSON |
+| `body.user.name` | A field of a JSON object |
+| `body.items[0]` | An array element, zero-based |
+| `body["key with spaces"]` | A field whose name is not a plain word |
+| `headers.content-type` | A response header; the name is case-insensitive |
+
+Only `body` can be indexed. If the body is not JSON, only `body` itself is available.
+
+## Operators
+
+```txt
+> assert <path> <operator> <value>
+> assert <path> exists
+```
+
+| Operator | True when |
+|----------|-----------|
+| `==` | equal |
+| `!=` | not equal; also true when the path does not exist |
+| `<` `<=` `>` `>=` | numeric comparison; strings are compared alphabetically |
+| `contains` | a string contains a substring, an array contains an element, an object has a key |
+| `exists` | the path exists in the response (takes no value) |
+
+## Values
+
+The value after the operator is a JSON literal:
+
+```http
+> assert status == 200
+> assert body.name == "Viktor"
+> assert body.active == true
+> assert body.deleted_at == null
+> assert body.tags contains "admin"
+```
+
+If it is not valid JSON, it is treated as a string, so quotes are optional for simple words:
+`> assert body.state == active` is the same as `== "active"`.
+
+Numbers and numeric strings are compared as numbers — handy for headers, which are always strings:
+
+```http
+> assert headers.content-length < 1024
+```
+
+## `> save`
+
+```txt
+> save <name> = <path>
+```
+
+Variable names may contain letters, digits, `_` and `-`. Strings are saved as is, other values as
+compact JSON. If the path does not exist, the request fails.

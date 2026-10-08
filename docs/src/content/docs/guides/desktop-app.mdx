@@ -1,0 +1,56 @@
+---
+title: Desktop app
+description: Browse, edit and send requests in the Routy desktop app.
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+The desktop app works on the same files as the CLI. It does not import or store a collection — it
+opens your project folder.
+
+## Opening a project
+
+Click **Open project** and choose your repository (or the `api/` folder). Routy finds `env.toml` the
+same way the CLI does. If the folder has no `env.toml`, the app offers to create `api/env.toml` with
+example environments.
+
+The app remembers the last project and reopens it on start.
+
+## Working with requests
+
+- The left panel shows every `.http` file in the project; **+ request** creates a new one
+  (`users/create` becomes `users/create.http`).
+- The editor checks syntax as you type and shows the error with its line number.
+- The environment selector in the toolbar switches between environments from `env.toml`.
+- The **Secret** button stores a value in the system keychain for the current environment.
+
+| Shortcut | Action |
+|----------|--------|
+| <kbd>Ctrl</kbd>/<kbd>⌘</kbd> + <kbd>Enter</kbd> | Send the request |
+| <kbd>Ctrl</kbd>/<kbd>⌘</kbd> + <kbd>S</kbd> | Save the file |
+
+The editor's current text is sent, even if it is not saved yet — handy for quick experiments.
+
+## Response
+
+The response panel has four tabs:
+
+- **body** — pretty-printed JSON or the raw body;
+- **headers** — response headers;
+- **tests** — the result of every `> assert` and `> save`;
+- **request** — the request exactly as it was sent, after variable substitution.
+
+## Live reload
+
+Edit files in VS Code, switch branches, pull changes — the file list and the open request update
+immediately. If you have unsaved changes in the app, the open file is not overwritten.
+
+## Updates
+
+On start the app checks for a new version. When one is available, a button in the toolbar downloads
+it, installs it and restarts the app. Updates are signed and verified before installing.
+
+<Aside>
+On Linux only the AppImage build updates itself. For `.deb` and `.rpm`, install the new package from
+the [releases page](https://github.com/1rowvy/routy/releases/latest).
+</Aside>

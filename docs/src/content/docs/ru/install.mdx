@@ -1,0 +1,76 @@
+---
+title: Установка
+description: Установка CLI и приложения Routy и их обновление.
+---
+
+import { Tabs, TabItem, Aside } from '@astrojs/starlight/components';
+
+## CLI
+
+<Tabs>
+<TabItem label="Linux">
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/1rowvy/routy/master/install.sh | sh
+```
+
+Скрипт скачивает статический бинарь из последнего релиза (x86_64 или aarch64 — работает на любом
+дистрибутиве, включая Alpine), проверяет контрольную сумму SHA-256 и кладёт его в `~/.local/bin/routy`.
+
+Настройки передаются переменными окружения:
+
+```sh
+# конкретная версия
+curl -fsSL https://raw.githubusercontent.com/1rowvy/routy/master/install.sh | ROUTY_VERSION=v0.2.0 sh
+
+# для всех пользователей (обновлять потом через `sudo routy update`)
+curl -fsSL https://raw.githubusercontent.com/1rowvy/routy/master/install.sh | sudo ROUTY_INSTALL_DIR=/usr/local/bin sh
+```
+
+</TabItem>
+<TabItem label="macOS / Windows">
+
+Скачайте `routy-cli-<версия>-<платформа>` из
+[последнего релиза](https://github.com/1rowvy/routy/releases/latest), распакуйте и положите `routy`
+(`routy.exe`) в любую папку из `PATH`. Рядом с каждым архивом лежит файл `.sha256`.
+
+Скрипт установки для этих платформ в планах.
+
+</TabItem>
+</Tabs>
+
+### Обновление
+
+```sh
+routy update           # скачать и поставить последний релиз (с проверкой SHA-256)
+routy update --check   # только проверить, есть ли новая версия
+```
+
+Как и npm, Routy раз в сутки в фоне проверяет новую версию и после команды коротко напоминает, если она
+вышла. Команды при этом сеть не ждут. Напоминание не показывается в пайпах, в CI и при
+`ROUTY_NO_UPDATE_NOTIFIER=1`.
+
+<Aside>
+Если `routy` поставлен пакетным менеджером (`/usr/bin`, Homebrew, Nix), `routy update` его не трогает —
+обновляйте тем же пакетным менеджером.
+</Aside>
+
+### Удаление
+
+```sh
+rm ~/.local/bin/routy
+```
+
+## Приложение
+
+Установщики для macOS (`.dmg`), Windows (`.exe`, `.msi`) и Linux (AppImage, `.deb`, `.rpm`) — на
+[странице релизов](https://github.com/1rowvy/routy/releases/latest).
+
+Приложение обновляется само: при запуске проверяет новую версию и предлагает установить её и
+перезапуститься. Обновления подписаны и проверяются перед установкой. На Linux сами обновляются только
+AppImage; `.deb` и `.rpm` обновляются установкой нового пакета.
+
+<Aside type="caution">
+Сборки для macOS пока не нотаризованы. Если при первом запуске macOS пишет, что приложение повреждено,
+выполните `xattr -dr com.apple.quarantine /Applications/Routy.app`.
+</Aside>

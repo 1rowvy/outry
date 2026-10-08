@@ -1,0 +1,16 @@
+/* Акцент — зелёный из иконки Routy. */
+:root {
+	--sl-color-accent-low: #10301f;
+	--sl-color-accent: #2fb874;
+	--sl-color-accent-high: #a8f0c6;
+}
+
+:root[data-theme='light'] {
+	--sl-color-accent-low: #c9f2d9;
+	--sl-color-accent: #1a8a52;
+	--sl-color-accent-high: #0d3d24;
+}
+
+.hero .tagline {
+	max-width: 40ch;
+}

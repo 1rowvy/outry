@@ -1,0 +1,62 @@
+// @ts-check
+import { defineConfig } from 'astro/config';
+import starlight from '@astrojs/starlight';
+import starlightLinksValidator from 'starlight-links-validator';
+
+// GitHub Pages: https://1rowvy.github.io/routy/
+export default defineConfig({
+	site: 'https://1rowvy.github.io',
+	base: '/routy',
+	// Относительные ссылки в Markdown (`../cli/`) работают одинаково на любой странице.
+	trailingSlash: 'always',
+	integrations: [
+		starlight({
+			title: 'Routy',
+			description: 'API client where requests are plain .http files in your repo.',
+			logo: { src: './src/assets/logo.svg' },
+			favicon: '/favicon.svg',
+			defaultLocale: 'root',
+			locales: {
+				root: { label: 'English', lang: 'en' },
+				ru: { label: 'Русский', lang: 'ru' },
+			},
+			social: [{ icon: 'github', label: 'GitHub', href: 'https://github.com/1rowvy/routy' }],
+			editLink: { baseUrl: 'https://github.com/1rowvy/routy/edit/master/docs/' },
+			lastUpdated: true,
+			customCss: ['./src/styles/custom.css'],
+			// Ломаем сборку на битых внутренних ссылках, в том числе между языками.
+			plugins: [starlightLinksValidator()],
+			sidebar: [
+				{
+					label: 'Start here',
+					translations: { ru: 'Начало' },
+					items: [
+						{ slug: 'getting-started' },
+						{ slug: 'install' },
+					],
+				},
+				{
+					label: 'Guides',
+					translations: { ru: 'Руководства' },
+					items: [
+						{ slug: 'guides/request-format' },
+						{ slug: 'guides/variables' },
+						{ slug: 'guides/secrets' },
+						{ slug: 'guides/chains-and-assertions' },
+						{ slug: 'guides/ci' },
+						{ slug: 'guides/desktop-app' },
+					],
+				},
+				{
+					label: 'Reference',
+					translations: { ru: 'Справочник' },
+					items: [
+						{ slug: 'reference/cli' },
+						{ slug: 'reference/expressions' },
+						{ slug: 'reference/env-toml' },
+					],
+				},
+			],
+		}),
+	],
+});

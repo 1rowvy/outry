@@ -1,0 +1,68 @@
+---
+title: Цепочки запросов и проверки
+description: Берите значения из ответов через > save и проверяйте ответы через > assert.
+---
+
+Директивы — строки, начинающиеся с `>`, в конце файла запроса. Они выполняются после получения ответа.
+
+## `> save` — передача значений между запросами
+
+```http title="api/auth/1-login.http"
+POST {{base}}/login
+
+{"email": "dev@example.com", "password": "{{password}}"}
+
+> save token = body.access_token
+> save user_id = body.user.id
+```
+
+```http title="api/auth/2-me.http"
+GET {{base}}/users/{{user_id}}
+Authorization: Bearer {{token}}
+
+> assert status == 200
+```
+
+```sh
+routy run api/auth     # сначала 1-login, затем 2-me с подставленными token и user_id
+```
+
+Строки сохраняются без кавычек, числа, объекты и массивы — компактным JSON. Если такого пути в ответе
+нет, запрос считается упавшим.
+
+Сохранённые значения переживают и перезапуск — если потом запустить только `2-me.http`, токен у него
+будет. См. [Сохранённые значения](/routy/ru/guides/variables/#сохранённые-значения).
+
+## `> assert` — проверка ответа
+
+```http
+> assert status == 201
+> assert status < 300
+> assert duration < 500
+> assert body.name == "Viktor"
+> assert body.items[0].id exists
+> assert body.tags contains "admin"
+> assert headers.content-type contains json
+```
+
+Каждая проверка — это `<путь> <оператор> <значение>` или `<путь> exists`. Значение — JSON-литерал
+(`200`, `"текст"`, `true`, `null`) или голое слово, которое считается строкой. Все пути и операторы — в
+[справочнике выражений](/routy/ru/reference/expressions/).
+
+В выводе видна каждая проверка, а для упавших — фактическое значение:
+
+```txt
+✗ api/auth/2-me.http  GET http://localhost:8080/users/7  200 OK  9ms 211B
+    ✓ body.name == "Viktor"
+    ✗ status == 201  (actual: 200)
+```
+
+## Коды выхода
+
+`routy run` завершается с кодом:
+
+- `0` — все запросы отправлены, все проверки и сохранения прошли;
+- `1` — хотя бы один запрос упал (проверка, сохранение, сетевая ошибка, не хватает переменной);
+- `2` — Routy не смог запуститься: неверные аргументы, неизвестное окружение, сломанный `env.toml`.
+
+С `--fail-fast` выполнение останавливается на первом упавшем запросе.

@@ -1,0 +1,91 @@
+---
+title: CLI
+description: Every routy command and flag.
+---
+
+```txt
+routy <COMMAND>
+```
+
+## `routy run`
+
+Send requests and run their directives.
+
+```sh
+routy run <PATHS>...
+```
+
+Folders expand to every `*.http` file inside them, in alphabetical order. Files given explicitly run in
+the given order. Values captured by `> save` are passed to the following requests.
+
+| Flag | Description |
+|------|-------------|
+| `-e, --env <ENV>` | Environment from `env.toml` (default: `default` in the config) |
+| `--project <DIR>` | Project folder (default: `env.toml` is searched upwards from the first path) |
+| `--var <NAME=VALUE>` | Override a variable; can be repeated |
+| `--fail-fast` | Stop at the first failed request |
+| `-v, --verbose` | Print response headers and body |
+| `--json` | Print one JSON object per request (JSON Lines) |
+| `--timeout <SECONDS>` | Request timeout, default `30` |
+| `--fresh` | Do not read or store values saved by `> save` between runs |
+| `--no-keyring` | Do not look up secrets in the system keychain |
+
+Exit code: `0` — everything passed, `1` — at least one request failed, `2` — Routy could not start.
+
+## `routy check`
+
+Parse files without sending anything. Exit code `1` if any file has an error.
+
+```sh
+routy check <PATHS>...
+```
+
+## `routy envs`
+
+List the project's environments; `*` marks the default.
+
+```sh
+routy envs [--dir <DIR>]
+```
+
+## `routy secret`
+
+Store or remove a secret in the system keychain. `set` reads the value from stdin.
+
+```sh
+routy secret set <NAME> [-e <ENV>] [--project <DIR>]
+routy secret rm <NAME> [-e <ENV>] [--project <DIR>]
+```
+
+```sh
+echo -n "$TOKEN" | routy secret set token --env prod
+```
+
+## `routy init`
+
+Create `api/env.toml` and an example request in the given folder (default: current). Fails if
+`env.toml` already exists.
+
+```sh
+routy init [DIR]
+```
+
+## `routy update`
+
+Update the CLI to the latest GitHub release. The archive's SHA-256 checksum is verified before the
+binary is replaced.
+
+```sh
+routy update [--check]
+```
+
+`--check` only reports whether a newer version exists.
+
+## Environment variables
+
+| Variable | Effect |
+|----------|--------|
+| `ROUTY_<NAME>` | Value for `{{name}}`; see [Variables](/routy/guides/variables/#where-a-value-comes-from) |
+| `ROUTY_NO_UPDATE_NOTIFIER=1` | Disable the new-version notice (`NO_UPDATE_NOTIFIER` works too) |
+| `CI` | When set, the new-version notice is disabled |
+| `NO_COLOR` | Disable colored output |

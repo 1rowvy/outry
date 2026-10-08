@@ -1,0 +1,68 @@
+---
+title: Request file format
+description: How a .http request file is structured — request line, headers, body and directives.
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+Every request is a separate file with the `.http` extension. The layout follows plain HTTP:
+
+```http title="api/users/create.http"
+# Create a user. Comments start with # or //.
+POST {{base}}/users
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "name": "Viktor",
+  "role": "admin"
+}
+
+> save user_id = body.id
+> assert status == 201
+```
+
+1. **Comments** — lines starting with `#` or `//`, before the request line or between headers.
+2. **Request line** — `METHOD URL`. The method may be omitted (then it is `GET`); a trailing
+   `HTTP/1.1` is accepted and ignored. Spaces inside the URL must be encoded.
+3. **Headers** — `Name: value`, one per line, until the first empty line.
+4. **Body** — everything after the empty line. Empty lines inside the body are kept.
+5. **Directives** — lines starting with `>` at the very end of the file:
+   `> save` and `> assert`. See [Chaining requests and assertions](/routy/guides/chains-and-assertions/).
+
+`{{name}}` placeholders work in the URL, header names and values, and the body — see
+[Variables and environments](/routy/guides/variables/).
+
+## Details
+
+- If the body starts with `{` or `[` and there is no `Content-Type` header, Routy adds
+  `Content-Type: application/json`.
+- After substitution the URL must be absolute (`http://` or `https://`). A relative URL almost always
+  means a missing `{{base}}`.
+- Windows line endings (CRLF) are fine.
+- Every request has a 30 second timeout (`routy run --timeout` changes it) and the
+  `User-Agent: routy/<version>` header unless you set your own.
+
+<Aside type="tip">
+`routy check api` validates every file without sending anything and reports errors with line numbers,
+including mistakes in `> assert` expressions.
+</Aside>
+
+## Organizing files
+
+Folders are just folders. A typical layout groups requests by resource:
+
+```txt
+api/
+├── env.toml
+├── auth/
+│   ├── 1-login.http
+│   └── 2-refresh.http
+└── users/
+    ├── create.http
+    ├── get.http
+    └── list.http
+```
+
+`routy run api` runs files in alphabetical order of their paths, so numeric prefixes are a simple way
+to order a chain. Hidden folders and `node_modules`, `target`, `vendor`, `dist` are skipped.

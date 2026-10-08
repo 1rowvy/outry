@@ -1,0 +1,69 @@
+---
+title: Chaining requests and assertions
+description: Capture values from responses with > save, check responses with > assert.
+---
+
+Directives are lines starting with `>` at the end of a request file. They run after the response
+arrives.
+
+## `> save` — pass values between requests
+
+```http title="api/auth/1-login.http"
+POST {{base}}/login
+
+{"email": "dev@example.com", "password": "{{password}}"}
+
+> save token = body.access_token
+> save user_id = body.user.id
+```
+
+```http title="api/auth/2-me.http"
+GET {{base}}/users/{{user_id}}
+Authorization: Bearer {{token}}
+
+> assert status == 200
+```
+
+```sh
+routy run api/auth     # 1-login, then 2-me with token and user_id filled in
+```
+
+Strings are saved without quotes; numbers, objects and arrays as compact JSON. If the path does not
+exist in the response, the request is marked as failed.
+
+Saved values also survive between runs — run `2-me.http` alone later and it still has the token. See
+[Saved values](/routy/guides/variables/#saved-values).
+
+## `> assert` — check the response
+
+```http
+> assert status == 201
+> assert status < 300
+> assert duration < 500
+> assert body.name == "Viktor"
+> assert body.items[0].id exists
+> assert body.tags contains "admin"
+> assert headers.content-type contains json
+```
+
+Each assertion is `<path> <operator> <value>`, or `<path> exists`. Values are JSON literals (`200`,
+`"text"`, `true`, `null`) or a bare word, which is treated as a string. Full list of paths and
+operators: [Expressions reference](/routy/reference/expressions/).
+
+The output shows every check, and the actual value for failed ones:
+
+```txt
+✗ api/auth/2-me.http  GET http://localhost:8080/users/7  200 OK  9ms 211B
+    ✓ body.name == "Viktor"
+    ✗ status == 201  (actual: 200)
+```
+
+## Exit codes
+
+`routy run` exits with:
+
+- `0` — every request was sent and every assertion and save succeeded;
+- `1` — at least one request failed (an assertion, a save, a network error, a missing variable);
+- `2` — Routy could not start: invalid arguments, unknown environment, broken `env.toml`.
+
+Use `--fail-fast` to stop at the first failed request.

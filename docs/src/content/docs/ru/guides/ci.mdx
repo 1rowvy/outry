@@ -1,0 +1,59 @@
+---
+title: Routy в CI
+description: Используйте файлы запросов как API-тесты в GitHub Actions и других CI.
+---
+
+Те же `.http`-файлы, что вы гоняете в приложении, могут запускаться как API-тесты на каждый пуш. Пройдёт
+ли джоба, решают проверки.
+
+## GitHub Actions
+
+```yaml title=".github/workflows/api-tests.yml"
+name: API tests
+
+on: [push, pull_request]
+
+jobs:
+  api:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Здесь поднимите тестируемый сервис (docker compose, бинарь, …)
+
+      - name: Install routy
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/1rowvy/routy/master/install.sh | sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Run API tests
+        run: routy run api --env ci --no-keyring --fail-fast
+        env:
+          ROUTY_TOKEN: ${{ secrets.API_TOKEN }}
+```
+
+- Для воспроизводимых сборок зафиксируйте версию: `ROUTY_VERSION=v0.2.0` перед `sh`.
+- Секреты приходят из переменных `ROUTY_<ИМЯ>` — см. [Секреты](/routy/ru/guides/secrets/#в-ci-переменные-окружения).
+- `--no-keyring` отключает обращение к хранилищу паролей — на раннерах его всё равно нет.
+- Напоминание о новой версии отключается само, когда задана переменная `CI`.
+
+## Вывод для машин
+
+`--json` печатает по JSON-объекту на запрос (JSON Lines) вместо отчёта для человека:
+
+```sh
+routy run api --json > results.jsonl
+```
+
+```json
+{"file":"api/users/get.http","passed":true,"outcome":{"request":{…},"response":{"status":200,…},"asserts":[…],"saved":{},"save_misses":[]}}
+{"file":"api/users/bad.http","passed":false,"error":"api/users/bad.http: undefined variable(s): id"}
+```
+
+## Только синтаксис
+
+`routy check` разбирает все файлы без отправки запросов — быстрый шаг линтинга:
+
+```sh
+routy check api
+```

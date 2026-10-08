@@ -1,0 +1,55 @@
+# Сайт документации (docs/, Starlight) → GitHub Pages: https://1rowvy.github.io/routy/
+# Включить один раз: Settings → Pages → Source: GitHub Actions.
+
+name: Docs
+
+on:
+  push:
+    branches: [master]
+    paths: ["docs/**", ".github/workflows/docs.yml"]
+  pull_request:
+    paths: ["docs/**", ".github/workflows/docs.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: docs-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Полная история нужна для «Последнее обновление» на страницах.
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: docs/package-lock.json
+      - run: npm ci
+        working-directory: docs
+      # Сборка падает на битых внутренних ссылках (starlight-links-validator).
+      - run: npm run build
+        working-directory: docs
+      - uses: actions/upload-pages-artifact@v3
+        if: github.event_name != 'pull_request'
+        with:
+          path: docs/dist
+
+  deploy:
+    needs: build
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
