@@ -1,0 +1,143 @@
+{
+  "name": "routy",
+  "scopeName": "source.routy",
+  "fileTypes": ["routy"],
+  "patterns": [{ "include": "#main" }],
+  "repository": {
+    "main": {
+      "patterns": [
+        { "include": "#comments" },
+        { "include": "#request-line" },
+        { "include": "#declarations" },
+        { "include": "#strings" },
+        { "include": "#regex" },
+        { "include": "#durations" },
+        { "include": "#numbers" },
+        { "include": "#keywords" },
+        { "include": "#builtins" },
+        { "include": "#types" },
+        { "include": "#fields" },
+        { "include": "#calls" },
+        { "include": "#operators" }
+      ]
+    },
+    "comments": {
+      "patterns": [
+        { "name": "comment.line.double-slash.routy", "match": "//.*$" },
+        { "name": "comment.block.routy", "begin": "/\\*", "end": "\\*/" }
+      ]
+    },
+    "request-line": {
+      "match": "^\\s*([A-Z][A-Z]+)\\s+(\\S+)",
+      "captures": {
+        "1": { "name": "keyword.other.method.routy" },
+        "2": {
+          "name": "string.unquoted.target.routy",
+          "patterns": [
+            { "name": "variable.parameter.path.routy", "match": "\\{[^}]+\\}" }
+          ]
+        }
+      }
+    },
+    "declarations": {
+      "match": "\\b(flow|shape|let)\\s+([\\p{L}_][\\p{L}\\p{N}_]*)",
+      "captures": {
+        "1": { "name": "storage.type.routy" },
+        "2": { "name": "entity.name.function.routy" }
+      }
+    },
+    "strings": {
+      "patterns": [
+        {
+          "name": "string.quoted.triple.routy",
+          "begin": "\"\"\"",
+          "end": "\"\"\"",
+          "patterns": [{ "include": "#interpolation" }]
+        },
+        {
+          "name": "string.quoted.double.routy",
+          "begin": "\"",
+          "end": "\"",
+          "patterns": [
+            { "name": "constant.character.escape.routy", "match": "\\\\." },
+            { "include": "#interpolation" }
+          ]
+        },
+        {
+          "name": "string.quoted.single.routy",
+          "begin": "'",
+          "end": "'",
+          "patterns": [
+            { "name": "constant.character.escape.routy", "match": "\\\\." },
+            { "include": "#interpolation" }
+          ]
+        }
+      ]
+    },
+    "interpolation": {
+      "name": "meta.interpolation.routy",
+      "begin": "\\$\\{",
+      "end": "\\}",
+      "beginCaptures": { "0": { "name": "punctuation.section.interpolation.begin.routy" } },
+      "endCaptures": { "0": { "name": "punctuation.section.interpolation.end.routy" } },
+      "patterns": [{ "include": "#main" }]
+    },
+    "regex": {
+      "match": "(?<=matches\\s)(/(?:[^/\\\\\\n]|\\\\.)+/[a-z]*)",
+      "captures": { "1": { "name": "string.regexp.routy" } }
+    },
+    "durations": {
+      "name": "constant.numeric.duration.routy",
+      "match": "\\b\\d+(?:ms|s|m|h)\\b"
+    },
+    "numbers": {
+      "name": "constant.numeric.routy",
+      "match": "-?\\b\\d+(?:\\.\\d+)?(?:[eE][+-]?\\d+)?\\b"
+    },
+    "keywords": {
+      "patterns": [
+        {
+          "name": "keyword.control.routy",
+          "match": "\\b(save|expect|poll|every|for|fresh|matches|in|typeof|params|query|headers|body|form|multipart)\\b"
+        },
+        { "name": "constant.language.routy", "match": "\\b(true|false|null)\\b" },
+        { "name": "variable.language.routy", "match": "\\b(status|duration|env|vars)\\b" }
+      ]
+    },
+    "builtins": {
+      "name": "support.function.builtin.routy",
+      "match": "\\b(uuid|now|nowIso|randomInt|randomString|number|string|json|base64|unbase64|file|schema)(?=\\()"
+    },
+    "types": {
+      "name": "support.type.routy",
+      "match": "\\b(string|number|integer|boolean|any)\\b(?!\\()"
+    },
+    "fields": {
+      "match": "([\\p{L}_][\\p{L}\\p{N}_-]*)(\\??)(?=\\s*:(?!:))",
+      "captures": {
+        "1": { "name": "variable.other.property.routy" },
+        "2": { "name": "keyword.operator.optional.routy" }
+      }
+    },
+    "calls": {
+      "patterns": [
+        {
+          "match": "\\.([\\p{L}_][\\p{L}\\p{N}_]*)(?=\\()",
+          "captures": { "1": { "name": "entity.name.function.method.routy" } }
+        },
+        {
+          "match": "\\b(\\p{Lu}[\\p{L}\\p{N}_]*)(?=\\s*\\()",
+          "captures": { "1": { "name": "entity.name.function.routy" } }
+        },
+        {
+          "match": "\\b(\\p{Lu}[\\p{L}\\p{N}_]*)\\b",
+          "captures": { "1": { "name": "entity.name.type.routy" } }
+        }
+      ]
+    },
+    "operators": {
+      "name": "keyword.operator.routy",
+      "match": "=>|==|!=|<=|>=|&&|\\|\\||[!<>=+\\-*/%|]"
+    }
+  }
+}

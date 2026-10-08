@@ -1,0 +1,607 @@
+---
+title: .routy format (draft)
+description: Specification of the planned .routy request format — syntax, expressions, request calls and flows.
+sidebar:
+  badge:
+    text: Draft
+    variant: caution
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+<Aside type="caution" title="Not implemented yet">
+This is the design of the next request format. Routy does not read `*.routy` files yet — today's
+format is described in [Request file format](/routy/guides/request-format/). The spec may change;
+discussion happens in [GitHub issues](https://github.com/1rowvy/routy/issues).
+</Aside>
+
+## Goals
+
+- **Readable without docs.** C-like syntax: the body is JSON, checks look like JS, Java or C#
+  expressions. Nothing Go-specific.
+- **Grows with the task.** The smallest file is one line; blocks are added only when needed.
+- **Declarative.** A request may call other requests, but there are no `if`s, loops or user functions.
+  Files stay readable in code review.
+- **Close to the code.** Paths are written like router paths (`/orders/{id}`), response shapes can come
+  from the server's own types, so `routy import --check` can tell when requests and code diverge.
+
+## At a glance
+
+```routy title="api/orders/create.routy"
+// Create order
+// Creates an order for the current user.
+POST /orders/{shop} {
+  only: [dev, staging]
+
+  query { page: 1 }
+
+  headers {
+    Authorization: "Bearer ${Login().body.token}"
+    Idempotency-Key: uuid()
+  }
+
+  body {
+    customer: CreateUser(name: "Bob").body.id,
+    items: [{ sku: "A-1", qty: 2 }],
+  }
+
+  expect {
+    status == 201
+    body.items.length == 1
+    headers.Location.startsWith("/orders/")
+    body matches Order
+    GetOrder(id: body.id).body.status == "new"
+  }
+
+  save order_id = body.id
+}
+```
+
+The minimal file:
+
+```routy title="api/health.routy"
+GET /health
+```
+
+## Files
+
+- Extension `.routy`, UTF-8, LF or CRLF line endings.
+- A file holds any number of requests, flows, shapes and `let`s, in any order.
+- Project discovery, `env.toml` and environments are unchanged.
+- `*.http` files keep working in a compatibility mode — see [Compatibility with .http](#compatibility-with-http).
+
+## Lexical rules
+
+| Element | Syntax |
+|---------|--------|
+| Comments | `// to end of line` and `/* block */` |
+| Identifiers | Unicode letters, digits and `_`, not starting with a digit: `order_id`, `CreateOrder` |
+| Strings | `"..."` or `'...'` — the same thing. Escapes `\" \' \\ \n \t \r \u{1F600}`. Interpolation `${expr}`; `\$` for a literal `$` |
+| Multi-line strings | `"""..."""`; the common leading indentation is removed, interpolation works |
+| Numbers | JSON numbers: `42`, `-1.5`, `1e3` |
+| Literals | `true`, `false`, `null` |
+| Durations | `500ms`, `1s`, `2m`, `1h` — used in `timeout`, `cache`, `poll` |
+| Regular expressions | `/^\d+$/i` — only on the right of `matches` |
+
+Inside `{ }` and `[ ]` elements are separated by commas or new lines; a trailing comma is allowed.
+
+Reserved words: `let`, `shape`, `flow`, `fresh`, `save`, `expect`, `poll`, `every`, `for`, `matches`,
+`in`, `typeof`, `true`, `false`, `null`, plus the names of [built-in functions](#built-in-functions).
+They cannot be used as variable or request names.
+
+## Requests
+
+```txt
+[doc comment]
+METHOD target [{ fields }]
+```
+
+### Method
+
+`GET`, `POST`, `PUT`, `PATCH`, `DELETE`, `HEAD`, `OPTIONS`, or any other upper-case word for custom
+methods.
+
+### Target
+
+- **A path starting with `/`** is appended to the `base` variable. `GET /users` is what
+  `GET {{base}}/users` was. If `base` is not defined, `routy check` reports it.
+- **An absolute URL** `https://…` or `http://…` is used as is.
+- **A string** `"…"` for anything else, e.g. a URL built from variables: `GET "${auth_url}/token"`.
+
+The target is a single token without spaces. Inside it:
+
+- `{name}` is a path parameter: the value of `name` (an argument, a [parameter](#parameters) or a
+  variable), percent-encoded. This is the same notation as chi, gorilla/mux, Go 1.22 `net/http` and
+  OpenAPI, so `routy import` writes router paths as is.
+- `${expr}` inserts any expression, percent-encoded.
+- A literal query string is allowed: `GET /users?active=true`. The [`query`](#query) block is appended
+  to it.
+
+The block `{` must be separated from the target by a space: `/orders/{shop} {`.
+
+### Name and description
+
+The doc comment is the run of `//` lines right above the request.
+
+- The **first line** is the request's name: words are joined in PascalCase, so `// Create order`
+  becomes `CreateOrder`. It is used to [call the request](#calling-requests), in `routy run`, in the
+  app's tree and in reports.
+- **The rest** is the description, shown in the app and in `routy run -v`.
+- Without a doc comment the request is named after the file (`create-order.routy` → `CreateOrder`) if
+  it is the only request in the file; otherwise it is unnamed and cannot be called.
+
+### Fields
+
+All fields are optional; each may appear once. `routy fmt` sorts them in the order of this table.
+
+| Field | Meaning |
+|-------|---------|
+| `handler: users.GetUser` | The server handler this request is for; written by `routy import` — see [Keeping in sync with code](#keeping-in-sync-with-code) |
+| `params { … }` | [Parameters](#parameters) of the request when it is called |
+| `only: [dev, staging]` | Environments the request may be sent in — also when called by another request |
+| `confirm: true` | Ask before sending (the app shows a dialog, the CLI asks in a TTY and refuses otherwise unless `--yes`) |
+| `timeout: 10s` | Request timeout. Default: 30s |
+| `redirects: false` | Do not follow redirects. Default: follow up to 10 |
+| `cache: 30m` | Keep the response of a call between runs — see [Caching](#caching) |
+| `query { … }` | Query parameters |
+| `headers { … }` | Request headers |
+| `body …` / `form { … }` / `multipart { … }` | The [body](#body), at most one of them |
+| `poll …` | Repeat the request until a condition holds — see [Polling](#polling) |
+| `expect { … }` | [Checks](#checks) of the response |
+| `save name = expr` | [Save](#saving-values) a value; may repeat |
+
+### Query
+
+```routy
+query {
+  page: 1
+  tags: ["new", "gift"]   // tags=new&tags=gift
+  q: search               // value of the variable `search`
+  debug: null             // omitted
+}
+```
+
+Keys are identifiers or strings (`"page[size]": 10`). Values are expressions; arrays repeat the key,
+`null` omits it.
+
+### Headers
+
+```routy
+headers {
+  Authorization: "Bearer ${token}"
+  X-Request-Id: uuid()
+  "X-Weird Header": "ok"
+}
+```
+
+Keys are header names: letters, digits and `-`, or a string. Values are expressions converted to
+strings.
+
+### Body
+
+| Form | Sent as | Default `Content-Type` |
+|------|---------|------------------------|
+| `body { … }` / `body [ … ]` | JSON | `application/json` |
+| `body "text"` / `body """…"""` | The string as is | `text/plain; charset=utf-8` |
+| `body file("./payload.json")` | File contents, path relative to the `.routy` file | By extension, else `application/octet-stream` |
+| `form { … }` | `application/x-www-form-urlencoded` | same |
+| `multipart { … }` | `multipart/form-data`; `file(…)` values become file parts | same, with a boundary |
+
+A `Content-Type` in `headers` always wins.
+
+The JSON body is JSON5 with expressions:
+
+```routy
+body {
+  "name": "Viktor",          // plain JSON pasted from anywhere works
+  role: "admin",             // keys without quotes
+  manager: manager_id,       // a variable
+  email,                     // shorthand for email: email
+  tags: ["a", "b"],
+  greeting: "Hi, ${name}!",  // interpolation
+}
+```
+
+In value position an identifier is a variable; `true`, `false` and `null` are literals.
+
+## Expressions
+
+Expressions appear in field values, `expect`, `save`, `poll` and interpolation.
+
+### Values and names
+
+- Literals: strings, numbers, `true`, `false`, `null`, arrays `[…]`, objects `{…}`.
+- An identifier is resolved in this order: call [arguments](#parameters) → parameter defaults →
+  file `let`s → the [variable chain](/routy/guides/variables/) (`--var`, saved values, `ROUTY_*`,
+  `env.toml`, keychain).
+- `vars["name-with-dashes"]` reaches variables whose names are not identifiers.
+- `env` is the name of the current environment.
+
+After the response arrives (in `expect`, `save`, `poll`) these are also defined:
+
+| Name | Value |
+|------|-------|
+| `status` | Status code, a number |
+| `headers` | Response headers; names are case-insensitive: `headers.content-type`, `headers["X-Id"]` |
+| `body` | Parsed JSON, or the text if the body is not JSON |
+| `duration` | Time to the full response, milliseconds |
+
+### Access
+
+`a.b`, `a["b"]`, `a[0]`, `a[-1]` (from the end). Reading a missing field or index gives `null`
+instead of an error, so `body.user.address.city == null` is safe and `body.id != null` means "exists".
+
+### Operators
+
+From highest to lowest precedence:
+
+| Operators | Meaning |
+|-----------|---------|
+| `!x`, `-x`, `typeof x` | not, negation, type name |
+| `*` `/` `%` | arithmetic |
+| `+` `-` | arithmetic; `+` on strings concatenates |
+| `<` `<=` `>` `>=` | numbers, or strings alphabetically |
+| `==` `!=` | deep equality, no type coercion: `"1" != 1` |
+| `in`, `matches` | membership, pattern |
+| `&&` | and |
+| `\|\|` | or |
+
+- `typeof x` is one of `"string"`, `"number"`, `"boolean"`, `"null"`, `"array"`, `"object"`.
+- `x in [1, 2, 3]` — element of an array; `"id" in body` — key of an object; `"ab" in "cab"` — substring.
+- `x matches /re/` — regular expression; `x matches Order` or `x matches { … }` — [shape](#shapes).
+- Header values are strings: compare them as numbers with `number(headers.content-length) < 1024`.
+
+### Methods
+
+| On | Methods |
+|----|---------|
+| strings | `.length`, `.startsWith(s)`, `.endsWith(s)`, `.contains(s)`, `.lower()`, `.upper()`, `.trim()`, `.split(sep)` |
+| arrays | `.length`, `.contains(x)`, `.first`, `.last`, `.any(x => …)`, `.all(x => …)`, `.map(x => …)`, `.filter(x => …)` |
+| objects | `.keys`, `.values`, `.has(key)` |
+
+The arrow `x => expr` is allowed only as an argument of these methods:
+
+```routy
+expect {
+  body.items.all(i => i.qty > 0)
+  body.items.map(i => i.sku).contains("A-1")
+}
+```
+
+### Built-in functions
+
+| Function | Result |
+|----------|--------|
+| `uuid()` | Random UUID v4 |
+| `now()` | Unix time, seconds; `now() + 3600` is an hour later |
+| `nowIso()` | Current time, RFC 3339 |
+| `randomInt(min, max)` | Random integer, both ends included |
+| `randomString(n)` | `n` random letters and digits |
+| `number(x)`, `string(x)` | Conversion; `number("abc")` is an error |
+| `json(x)` | `x` as compact JSON text |
+| `base64(x)`, `unbase64(x)` | Base64 encoding |
+| `file(path)` | A file, for `body` and `multipart` |
+| `schema(path)` | A JSON Schema, for `matches` |
+
+Each call returns a new value: two `uuid()`s are different.
+
+## Checks
+
+```routy
+expect {
+  status == 201
+  body.total > 0
+  body.items.length == 1
+  headers.content-type.contains("json")
+  duration < 500
+}
+```
+
+Every line is a separate check and must be a boolean. All checks run, even after a failure. A failed
+check prints the expression and the values of its sides:
+
+```txt
+✗ body.total > 0 — body.total is 0
+✗ body.items.length == 1 — body.items.length is 3
+```
+
+## Shapes
+
+`matches` checks the structure of a value:
+
+```routy
+expect {
+  body matches {
+    id: string,
+    total: number,
+    status: "new" | "paid",
+    items: [{ sku: string, qty: integer }],
+    note?: string,          // optional
+    deleted_at: string | null,
+  }
+}
+```
+
+| Shape | Matches |
+|-------|---------|
+| `string`, `number`, `integer`, `boolean`, `null`, `any` | A value of that type |
+| `"paid"`, `42`, `true` | Exactly that value |
+| `A \| B` | Either |
+| `[T]` | An array whose every element matches `T` |
+| `{ a: T, b?: U }` | An object with field `a`, optional `b`; extra fields are allowed |
+| `Name` | A named shape |
+| `schema("./order.schema.json")` | A JSON Schema |
+
+A failure names the first mismatching path: `body.items[2].qty: expected integer, got "2"`.
+
+Named shapes are declared at the top level and are visible in the whole project:
+
+```routy title="api/shapes.routy"
+shape Order {
+  id: string,
+  total: number,
+  items: [Item],
+}
+
+shape Item { sku: string, qty: integer }
+```
+
+`routy import go` generates shapes from the Go structs a handler returns (`json` tags, `omitempty` →
+optional) into `api/shapes.routy`, and `routy import go --check` fails when they no longer match the
+code — see [Keeping in sync with code](#keeping-in-sync-with-code).
+
+## Saving values
+
+```routy
+save order_id = body.id
+save first_sku = body.items[0].sku
+```
+
+`save` runs after a successful response; the value is available to later requests as a variable and
+survives between runs, as `> save` does today. Saving `null` (a missing field) is an error.
+
+## Parameters
+
+A request can be called with arguments. Its parameters are:
+
+- **path parameters** — every `{name}` in the target;
+- **declared parameters** — in `params`, with or without a default.
+
+```routy
+// Login
+POST /auth/login {
+  params {
+    email: "dev@example.com"
+    password                 // no default
+  }
+
+  body { email, password }
+
+  expect { status == 200 }
+}
+```
+
+For each parameter the value is: the call argument → the default → the variable chain. A parameter
+without a value anywhere is an error listing all missing names, like missing variables today.
+
+## Calling requests
+
+A request is called like a function, with named arguments only:
+
+```routy
+headers { Authorization: "Bearer ${Login(email: "admin@example.com").body.token}" }
+body    { customer: CreateUser(name: "Bob").body.id }
+expect  { GetOrder(id: body.id).body.status == "new" }
+```
+
+The result is the callee's response: `status`, `headers`, `body`, `duration`.
+
+**Where.** Calls are expressions and may appear anywhere expressions do: `query`, `headers`, `body`,
+`expect`, `save`, `poll` and flows. They run when the expression is evaluated: fields before the
+request is sent are evaluated in source order, `expect` after the response.
+
+**Names.** Request names are unique in the project, no imports needed. When two folders have a
+`Create`, call them by folder: `users.Create()`, `orders.Create()` (path from the project root, `/`
+→ `.`). `routy check` reports ambiguous and unknown names.
+
+**Failures.** If the callee fails — network error, a failed `expect`, a missing variable — the caller
+fails too, with the call chain:
+
+```txt
+✗ CreateOrder → Login: status == 200 — status is 401
+```
+
+**Environments.** A callee's `only` applies: a request limited to `[dev]` cannot be called in `prod`,
+directly or indirectly. `routy check --env prod` finds such calls without sending anything.
+
+**Cycles.** `A` calling `B` calling `A` is reported by `routy check`, whatever the arguments.
+
+**Side effects.** A callee's `save`s are applied as if it ran on its own.
+
+### Caching
+
+Within one run a call with the same request and the same arguments is sent **once**; later calls get
+the same response. Ten requests calling `Login()` log in once.
+
+- `fresh Login()` always sends a new request.
+- A run is one `routy run` in the CLI, and in the app — until the environment is switched or the cache
+  is cleared from the variables panel.
+- `cache: 30m` on the callee keeps its response between runs (in the state directory, outside the
+  repo): a login token survives restarts until it expires. A `401` from a request that used a cached
+  value does not retry automatically; use `fresh` where that matters.
+
+## Polling
+
+```routy
+// Wait until paid
+GET /orders/{id} {
+  poll body.status == "paid" every 1s for 30s
+  expect { body.paid_at != null }
+}
+```
+
+The request is repeated every `every` until the condition is true, then `expect` and `save` run on the
+last response. If the condition is still false after `for`, the request fails with the last values.
+
+## Flows
+
+A flow is a named scenario: steps run top to bottom.
+
+```routy title="api/flows/checkout.routy"
+// Checkout
+// A user buys one item and pays.
+flow Checkout {
+  user = CreateUser(name: "Bob")
+  order = CreateOrder(shop: "main", customer: user.body.id)
+  Pay(order: order.body.id)
+
+  expect {
+    GetOrder(id: order.body.id).body.status == "paid"
+  }
+
+  save last_order = order.body.id
+}
+```
+
+A step is one of:
+
+- `name = expr` — a local binding, visible in later steps of this flow;
+- a call `Name(…)` — a request or another flow;
+- `expect { … }` and `save name = expr`.
+
+The flow stops at the first failed step. Flows take `params` like requests and may call other flows;
+a flow's call result is `null`. The app shows a trace of every request a flow (or a request) called,
+with their responses and timings.
+
+## File-level `let`
+
+```routy
+let shop = "main"
+let admin = { email: "admin@example.com", role: "admin" }
+```
+
+A `let` is visible in its file only and sits between parameters and the variable chain in name
+resolution. Use `env.toml` for values shared across files.
+
+## Keeping in sync with code
+
+`routy import go --check` compares requests with the server code and says not only *that* they differ
+but *what* changed in Go and *how* to fix the `.routy` file.
+
+### Linking a request to its handler
+
+`routy import` writes the handler into each generated request:
+
+```routy
+// Get user
+GET /users/{id} {
+  handler: users.GetUser
+}
+```
+
+Requests are matched to routes by `handler`, so a request is still recognised after its path or
+method changed in code. Requests without `handler` are matched by method and path, with parameters
+compared as "any value" (`/users/{id}` ~ `/users/{user_id}`).
+
+### What is compared
+
+| Change in code | Reported as | `--fix` |
+|----------------|-------------|---------|
+| Path or method of the handler's route | `~ path GET /users/{id} → GET /v2/users/{id}` | Rewrites the request line |
+| Path parameter renamed | `~ param {id} → {user_id}` | Renames it in the target |
+| New `required` field in the body struct | `+ body.email required string, missing in body` | Adds the field with an empty value |
+| Field removed from the body struct | `- body.nickname no longer in CreateUser` | Removes it |
+| Field type changed | `~ body.age int in code, "25" in file` | Converts the literal when it can (`"25"` → `25`) |
+| New query parameter or header the handler reads | `+ query.page` | Adds it with an empty value |
+| Response type changed | `~ shape Order` | Regenerates the shape in `api/shapes.routy` |
+| Route removed | `✗ route removed (handler orders.Legacy not found)` | Deletes the file only with `--prune` |
+| New route | `+ api/orders/refund.routy` | Creates the file |
+
+Only generated parts are compared: values you filled in, extra headers, `expect`, `save` and comments
+are never touched. Edits keep the file's formatting and comments.
+
+### Output
+
+```txt
+api/users/get.routy
+  ~ path      GET /users/{id} → GET /v2/users/{id}      internal/users/routes.go:14
+api/users/create.routy
+  + body.email     required string, missing in body     internal/users/dto.go:8
+  - body.nickname  no longer in CreateUser
+  ~ body.age       int in code, "25" in file
+api/orders/legacy.routy
+  ✗ route removed (handler orders.Legacy not found)
++ api/orders/refund.routy   new route POST /orders/{id}/refund
+
+5 changes, 4 fixable — run `routy import go --fix`
+```
+
+Every line points to the place in Go that changed. The exit code is non-zero when anything differs.
+
+| Flag | Effect |
+|------|--------|
+| `--fix` | Applies the fixable changes and prints a diff |
+| `--fix --dry-run` | Prints the diff only |
+| `--prune` | With `--fix`, also deletes files of removed routes |
+| `--format github` | GitHub Actions annotations on the `.routy` and Go lines of the pull request |
+| `--json` | Machine-readable report |
+
+The same report is shown in the app (Routes tab: a "changed" badge, the diff and an Apply button per
+change) and in editors through `routy lsp` (a diagnostic on the affected line with a quick fix).
+
+For `.http` files only the path and the method are compared and fixed, and the body if it is valid
+JSON.
+
+## Running
+
+```sh
+routy run api/orders/create.routy   # every request and flow in the file, top to bottom
+routy run api/                      # every file, sorted by path
+routy run CreateOrder               # by name
+routy run Checkout --env staging
+routy run api/orders/create.routy:12  # the request or flow at line 12
+routy check                         # syntax, names, cycles, missing variables, `only`
+routy fmt [--check] [paths]         # rewrite files in the canonical style
+routy convert api/                  # *.http → *.routy
+routy import go ./cmd/server --check  # what changed in code, exit code ≠ 0
+routy import go ./cmd/server --fix    # apply the fixable changes
+```
+
+## Formatting
+
+`routy fmt` produces one canonical form, like `gofmt`:
+
+- two-space indentation; one field per line; a blank line between top-level items;
+- fields in the order of the [fields table](#fields);
+- double quotes; `key: value` with one space; trailing commas in multi-line `{ }` and `[ ]`;
+- objects and arrays that fit in 80 columns are kept on one line;
+- comments are preserved.
+
+## Compatibility with .http
+
+- `*.http` files are read by the current parser and behave as today; both formats can live in one
+  project. `.routy` requests cannot call `.http` ones.
+- `{{var}}` is not valid in `.routy`; `routy check` suggests `${var}`, or `{var}` in a path.
+- `routy convert` rewrites `.http` files into `.routy`:
+
+| `.http` | `.routy` |
+|---------|----------|
+| `POST {{base}}/users/{{id}}` | `POST /users/{id}` |
+| `Header: {{token}}` | `Header: "${token}"` |
+| JSON body | `body { … }`, `{{x}}` in values → `x` |
+| other body | `body """…"""` |
+| `> save x = body.id` | `save x = body.id` |
+| `> assert status == 200` | `status == 200` in `expect` |
+| `> assert body.id exists` | `body.id != null` |
+| `> assert body.tags contains "a"` | `body.tags.contains("a")` |
+| `# comment` above the request | `// comment` — the first line becomes the name |
+| `{{$uuid}}`, `{{$timestamp}}`, `{{$randomInt 1 10}}` | `uuid()`, `now()`, `randomInt(1, 10)` |
+
+## Open questions
+
+- Should `routy run <dir>` skip requests that exist only to be called (e.g. `CreateUser`)? Options: a
+  field like `standalone: false`, or running only flows when a directory has any.
+- Cookies: an automatic cookie jar per run, a `cookies` name in expressions, or both.
+- Persisting cached calls that carry secrets: the same state file as saved values, or the keychain.
+- A tree-sitter grammar for editors. The TextMate grammar that highlights the examples on this page
+  (`docs/src/routy.tmLanguage.json`) can seed the VS Code extension.

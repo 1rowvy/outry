@@ -2,6 +2,10 @@
 import { defineConfig } from 'astro/config';
 import starlight from '@astrojs/starlight';
 import starlightLinksValidator from 'starlight-links-validator';
+import { readFileSync } from 'node:fs';
+
+// Подсветка блоков ```routy (черновик формата, reference/routy-format).
+const routyGrammar = JSON.parse(readFileSync(new URL('./src/routy.tmLanguage.json', import.meta.url), 'utf8'));
 
 // GitHub Pages: https://1rowvy.github.io/routy/
 export default defineConfig({
@@ -24,6 +28,7 @@ export default defineConfig({
 			editLink: { baseUrl: 'https://github.com/1rowvy/routy/edit/master/docs/' },
 			lastUpdated: true,
 			customCss: ['./src/styles/custom.css'],
+			expressiveCode: { shiki: { langs: [routyGrammar] } },
 			// Ломаем сборку на битых внутренних ссылках, в том числе между языками.
 			plugins: [starlightLinksValidator()],
 			sidebar: [
@@ -55,6 +60,7 @@ export default defineConfig({
 						{ slug: 'reference/cli' },
 						{ slug: 'reference/expressions' },
 						{ slug: 'reference/env-toml' },
+						{ slug: 'reference/routy-format' },
 					],
 				},
 			],
