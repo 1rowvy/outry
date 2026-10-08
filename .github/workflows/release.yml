@@ -50,7 +50,15 @@ jobs:
           if ! gh release view "$TAG" >/dev/null 2>&1; then
             gh release create "$TAG" --draft --title "Routy ${TAG#v}" --generate-notes --verify-tag
           fi
-          echo "id=$(gh api repos/${{ github.repository }}/releases --jq ".[] | select(.tag_name == \"$TAG\") | .id")" >> "$GITHUB_OUTPUT"
+          # Черновик не находится поиском по tag_name в списке релизов — берём ID напрямую.
+          # Сразу после создания API может его ещё не отдавать — несколько попыток.
+          for i in 1 2 3 4 5; do
+            id=$(gh release view "$TAG" --json databaseId -q .databaseId 2>/dev/null || true)
+            [ -n "$id" ] && break
+            sleep 3
+          done
+          [ -n "$id" ] || { echo "::error::release id for $TAG not found"; exit 1; }
+          echo "id=$id" >> "$GITHUB_OUTPUT"
 
   app:
     needs: create-release
@@ -109,6 +117,7 @@ jobs:
         with:
           projectPath: app
           releaseId: ${{ needs.create-release.outputs.release_id }}
+          tagName: ${{ env.TAG }}
           args: --target ${{ matrix.target }}
           # latest.json собирается из всех платформ матрицы — по нему работает автообновление.
           includeUpdaterJson: true
