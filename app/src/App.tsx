@@ -363,6 +363,30 @@ export default function App() {
     }
   };
 
+  /** Исправить расхождения с кодом (ids — выбранные, null — все) или удалить файлы без роутов. */
+  const fixRoutes = async (ids: string[] | null, prune = false) => {
+    if (!project || !routes) return;
+    const plan = routes.plan;
+    const files = prune
+      ? plan.prunable
+      : [...plan.existing.flatMap((e) => e.changes), ...plan.shape_changes]
+          .filter((c) => c.fixable && (!ids || ids.includes(c.id)))
+          .map((c) => c.file);
+    if (prune && !window.confirm(`Delete ${files.join(", ")}?`)) return;
+    if (dirty && selected && files.map((f) => f.replace(/\\/g, "/")).includes(selected)) {
+      if (!window.confirm("You have unsaved changes in this file. Change it on disk anyway?")) return;
+    }
+    setRoutesBusy(true);
+    try {
+      setRoutes(await api.importFix(storage(IMPORT_DIR_KEY + project.root), prune ? [] : ids, prune));
+      await refresh();
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setRoutesBusy(false);
+    }
+  };
+
   const pickRoutesDir = async () => {
     const dir = await open({ directory: true, title: "Folder with the service's Go code", defaultPath: routes?.dir });
     if (typeof dir === "string") syncRoutes(false, dir);
@@ -730,6 +754,8 @@ export default function App() {
                     onPickDir={pickRoutesDir}
                     onCreate={() => syncRoutes(true)}
                     onOpen={select}
+                    onFix={(ids) => fixRoutes(ids)}
+                    onPrune={() => fixRoutes(null, true)}
                   />
                 ) : view === "vars" ? (
                   <VarsPanel

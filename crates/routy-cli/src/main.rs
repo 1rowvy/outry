@@ -166,14 +166,25 @@ enum SecretCmd {
 #[derive(Subcommand)]
 enum ImportCmd {
     /// Роуты из Go: chi, gin, net/http. Сканируется весь каталог — роуты из других пакетов
-    /// (r.Mount, users.Register(v1)) получают свои префиксы.
+    /// (r.Mount, users.Register(v1)) получают свои префиксы. Создаёт запросы для новых роутов,
+    /// shape для типов ответов и показывает, чем существующие запросы расходятся с кодом.
     Go {
         /// Каталог с исходниками (рекурсивно, без vendor/ и *_test.go)
         #[arg(default_value = ".")]
         dir: PathBuf,
-        /// Только показать, что будет создано
+        /// Только показать, что будет создано, исправлено и удалено
         #[arg(long)]
         dry_run: bool,
+        /// Проверка для CI: ничего не пишет, отчёт по файлам; код выхода 1, если запросы
+        /// разошлись с кодом (новые и пропавшие роуты, ошибки в запросах и shape)
+        #[arg(long, conflicts_with_all = ["fix", "prune", "dry_run"])]
+        check: bool,
+        /// Исправить расхождения, которые правятся без потери смысла (с --dry-run — показать diff)
+        #[arg(long)]
+        fix: bool,
+        /// Удалить файлы, в которых все запросы — к роутам, которых в коде больше нет
+        #[arg(long)]
+        prune: bool,
         /// Переменная с адресом сервиса в старых *.http: {{base}}/users (для сопоставления)
         #[arg(long, default_value = routy_core::import::DEFAULT_BASE)]
         base: String,
@@ -183,10 +194,20 @@ enum ImportCmd {
         /// Каталог проекта с env.toml (по умолчанию ищется вверх от текущего)
         #[arg(long)]
         project: Option<PathBuf>,
-        /// Вывод плана в JSON
+        /// Формат вывода: text, github (аннотации GitHub Actions), json
+        #[arg(long, value_enum, default_value_t = ImportFormat::Text)]
+        format: ImportFormat,
+        /// То же, что --format json
         #[arg(long)]
         json: bool,
     },
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+enum ImportFormat {
+    Text,
+    Github,
+    Json,
 }
 
 #[derive(clap::Args)]
@@ -944,11 +965,16 @@ fn import(cmd: ImportCmd) -> anyhow::Result<ExitCode> {
     let ImportCmd::Go {
         dir,
         dry_run,
+        check,
+        fix,
+        prune,
         base,
         queries,
         project,
+        format,
         json,
     } = cmd;
+    let format = if json { ImportFormat::Json } else { format };
     let project = find_project(project.as_deref(), Path::new("."))?;
     if !project.has_config() {
         bail!(
@@ -963,26 +989,59 @@ fn import(cmd: ImportCmd) -> anyhow::Result<ExitCode> {
             Ok((q.display().to_string(), src))
         })
         .collect::<anyhow::Result<Vec<_>>>()?;
-    let plan = routy_core::import::plan_go(&dir, &project.root, &extra, &base)?;
-    let created = if dry_run {
-        Vec::new()
-    } else {
-        routy_core::import::apply(&project.root, &plan)?
-    };
-    if json {
-        println!("{}", serde_json::to_string_pretty(&plan)?);
-        return Ok(ExitCode::SUCCESS);
-    }
-
-    let st = Style::stdout();
-    let shown = |p: &Path| {
-        let full = project.root.join(p);
-        full.strip_prefix(std::env::current_dir().unwrap_or_default())
+    use routy_core::import;
+    let plan = import::plan_go(&dir, &project.root, &extra, &base)?;
+    let cwd = std::env::current_dir().unwrap_or_default();
+    let rel = |full: PathBuf| {
+        full.strip_prefix(&cwd)
             .map(Path::to_path_buf)
             .unwrap_or(full)
             .display()
             .to_string()
+            .replace('\\', "/")
     };
+    // Файл проекта и файл Go — как их видно из текущего каталога.
+    let shown = |p: &Path| rel(project.root.join(p));
+    let go = |p: &Path| rel(dir.join(p));
+
+    if check {
+        let diags = import_diagnostics(&plan, &shown, &go);
+        match format {
+            ImportFormat::Json => println!("{}", serde_json::to_string_pretty(&plan)?),
+            ImportFormat::Github => print_github(&diags),
+            ImportFormat::Text => print_check(&plan, &diags),
+        }
+        return Ok(if plan.has_errors() {
+            ExitCode::FAILURE
+        } else {
+            ExitCode::SUCCESS
+        });
+    }
+
+    let fixes = if fix {
+        import::fixes(&plan, |_| true)?
+    } else {
+        Vec::new()
+    };
+    let (mut created, mut removed) = (Vec::new(), Vec::new());
+    if !dry_run {
+        // Сначала правки, потом новые файлы: новые shape дописываются к уже исправленному файлу.
+        import::write_fixes(&project.root, &fixes)?;
+        created = import::apply(&project.root, &plan)?;
+        if prune {
+            removed = import::prune(&project.root, &plan)?;
+        }
+    }
+    if format == ImportFormat::Json {
+        println!("{}", serde_json::to_string_pretty(&plan)?);
+        return Ok(ExitCode::SUCCESS);
+    }
+    if format == ImportFormat::Github {
+        print_github(&import_diagnostics(&plan, &shown, &go));
+        return Ok(ExitCode::SUCCESS);
+    }
+
+    let st = Style::stdout();
     let width = plan
         .new
         .iter()
@@ -991,60 +1050,276 @@ fn import(cmd: ImportCmd) -> anyhow::Result<ExitCode> {
         .chain(plan.stale.iter().map(|s| shown(&s.file).len()))
         .max()
         .unwrap_or(0);
-    let route = |r: &routy_core::import::Route| {
+    let route = |r: &import::Route| {
         let mut line = format!(
             "{} {}  {}",
             r.method,
             r.path.replace("{{", "{").replace("}}", "}"),
-            st.dim(&format!("{}:{}", r.source.display(), r.line))
+            st.dim(&format!("{}:{}", go(&r.source), r.line))
         );
         if let Some(summary) = &r.info.summary {
             line.push_str(&format!("  {summary}"));
         }
         line
     };
+    let change = |c: &import::Change| {
+        let at = format!("{}:{}:{}", shown(&c.file), c.line, c.col);
+        let sev = match c.severity {
+            import::Severity::Error => st.red("error  "),
+            import::Severity::Warning => st.yellow("warning"),
+        };
+        println!("    {}  {sev}  {}", st.dim(&at), c.message);
+    };
     for f in &plan.new {
         let file = format!("{:width$}", shown(&f.file));
         println!("{} {}  {}", st.green("+"), st.green(&file), route(&f.route));
     }
     for e in &plan.existing {
+        if e.changes.is_empty() {
+            println!(
+                "{} {}  {}",
+                st.dim("="),
+                st.dim(&format!("{:width$}", shown(&e.file))),
+                route(&e.route)
+            );
+            continue;
+        }
+        let file = format!("{:width$}", shown(&e.file));
         println!(
             "{} {}  {}",
-            st.dim("="),
-            st.dim(&format!("{:width$}", shown(&e.file))),
+            st.yellow("~"),
+            st.yellow(&file),
             route(&e.route)
         );
+        e.changes.iter().for_each(change);
     }
     for s in &plan.stale {
+        let mark = if plan.prunable.contains(&s.file) {
+            "(no such route in code; --prune removes the file)"
+        } else {
+            "(no such route in code)"
+        };
         println!(
             "{} {:width$}  {} {}  {}",
             st.red("-"),
             shown(&s.file),
             s.method,
             s.url,
-            st.red("(no such route in code)")
+            st.red(mark)
         );
+    }
+    if !plan.new_shapes.is_empty() || !plan.shape_changes.is_empty() {
+        println!();
+        for d in &plan.new_shapes {
+            println!(
+                "{} {}  shape {}  {}",
+                st.green("+"),
+                st.green(&shown(&plan.shapes_file)),
+                d.name,
+                st.dim(&format!("{} {}:{}", d.go_type, go(&d.source), d.line))
+            );
+        }
+        plan.shape_changes.iter().for_each(change);
     }
     for w in &plan.warnings {
         eprintln!("{} {w}", Style::stderr().red("warning:"));
     }
+    for f in &fixes {
+        println!();
+        print_diff(&st, &f.diff);
+    }
+
     let routes = plan.new.len() + plan.existing.len();
-    let summary = format!(
-        "{} Go files, {routes} routes: {} new, {} existing, {} not in code",
+    let changed = plan
+        .existing
+        .iter()
+        .filter(|e| !e.changes.is_empty())
+        .count();
+    println!(
+        "\n{} Go files, {routes} routes: {} new, {} existing ({changed} changed), {} not in code",
         plan.files,
         plan.new.len(),
         plan.existing.len(),
         plan.stale.len()
     );
-    println!("\n{summary}");
+    let fixable = plan.changes().filter(|c| c.fixable).count();
+    let fixed: usize = fixes.iter().map(|f| f.changes.len()).sum();
     if dry_run {
-        if !plan.new.is_empty() {
+        if !plan.new.is_empty() || !plan.new_shapes.is_empty() || fixed > 0 {
             println!("dry run: nothing written");
         }
-    } else if !created.is_empty() {
-        println!("created {} files", created.len());
+        if prune && !plan.prunable.is_empty() {
+            println!("would remove {} files", plan.prunable.len());
+        }
+    } else {
+        if !created.is_empty() {
+            println!("created {} files", created.len());
+        }
+        if fixed > 0 {
+            println!("fixed {fixed} differences in {} files", fixes.len());
+        }
+        if !removed.is_empty() {
+            println!("removed {} files", removed.len());
+        }
+    }
+    if !fix && fixable > 0 {
+        println!("{fixable} differences can be fixed with --fix (preview: --fix --dry-run)");
+    }
+    if !prune && !plan.prunable.is_empty() {
+        println!(
+            "{} files have no routes in code: --prune removes them",
+            plan.prunable.len()
+        );
     }
     Ok(ExitCode::SUCCESS)
+}
+
+/// Одна строка отчёта `--check`: место, важность, текст и где это в Go.
+struct ImportDiag {
+    file: String,
+    line: usize,
+    col: usize,
+    error: bool,
+    message: String,
+    go: Option<String>,
+}
+
+fn import_diagnostics(
+    plan: &routy_core::import::Plan,
+    shown: &dyn Fn(&Path) -> String,
+    go: &dyn Fn(&Path) -> String,
+) -> Vec<ImportDiag> {
+    use routy_core::import::Severity;
+    let mut out: Vec<ImportDiag> = plan
+        .changes()
+        .map(|c| ImportDiag {
+            file: shown(&c.file),
+            line: c.line,
+            col: c.col,
+            error: c.severity == Severity::Error,
+            message: c.message.clone(),
+            go: Some(format!("{}:{}", go(&c.go.file), c.go.line)),
+        })
+        .collect();
+    // Нового роута в проекте ещё нет — отмечаем строку в Go.
+    out.extend(plan.new.iter().map(|f| ImportDiag {
+        file: go(&f.route.source),
+        line: f.route.line,
+        col: 1,
+        error: true,
+        message: format!(
+            "route {} {} has no request (`routy import go` creates {})",
+            f.route.method,
+            f.route.path.replace("{{", "{").replace("}}", "}"),
+            shown(&f.file)
+        ),
+        go: None,
+    }));
+    out.extend(plan.new_shapes.iter().map(|d| ImportDiag {
+        file: go(&d.source),
+        line: d.line,
+        col: 1,
+        error: true,
+        message: format!(
+            "response type {} has no shape (`routy import go` adds `shape {}` to {})",
+            d.go_type,
+            d.name,
+            shown(&plan.shapes_file)
+        ),
+        go: None,
+    }));
+    out.extend(plan.stale.iter().map(|s| ImportDiag {
+        file: shown(&s.file),
+        line: s.line,
+        col: 1,
+        error: true,
+        message: format!("{} {}: no such route in code", s.method, s.url),
+        go: None,
+    }));
+    out.sort_by(|a, b| (&a.file, a.line, a.col).cmp(&(&b.file, b.line, b.col)));
+    out
+}
+
+/// Отчёт `--check` по файлам.
+fn print_check(plan: &routy_core::import::Plan, diags: &[ImportDiag]) {
+    let st = Style::stdout();
+    let mut file = None;
+    for d in diags {
+        if file != Some(&d.file) {
+            if file.is_some() {
+                println!();
+            }
+            println!("{}", d.file);
+            file = Some(&d.file);
+        }
+        let sev = if d.error {
+            st.red("error  ")
+        } else {
+            st.yellow("warning")
+        };
+        let at = format!("{}:{}", d.line, d.col);
+        let mut line = format!("  {:7} {sev}  {}", st.dim(&at), d.message);
+        if let Some(go) = &d.go {
+            line.push_str(&format!("  {}", st.dim(&format!("← {go}"))));
+        }
+        println!("{line}");
+    }
+    let errors = diags.iter().filter(|d| d.error).count();
+    let warnings = diags.len() - errors;
+    if !diags.is_empty() {
+        println!();
+    }
+    let fixable = plan.changes().filter(|c| c.fixable).count();
+    let mut summary = format!(
+        "{} routes checked: {errors} errors, {warnings} warnings",
+        plan.new.len() + plan.existing.len()
+    );
+    if fixable > 0 {
+        summary.push_str(&format!("; {fixable} fixable with `routy import go --fix`"));
+    }
+    println!("{summary}");
+}
+
+/// Аннотации GitHub Actions: `::error file=…,line=…::текст`.
+fn print_github(diags: &[ImportDiag]) {
+    fn data(s: &str) -> String {
+        s.replace('%', "%25")
+            .replace('\r', "%0D")
+            .replace('\n', "%0A")
+    }
+    fn prop(s: &str) -> String {
+        data(s).replace(':', "%3A").replace(',', "%2C")
+    }
+    for d in diags {
+        let mut message = d.message.clone();
+        if let Some(go) = &d.go {
+            message.push_str(&format!(" ({go})"));
+        }
+        println!(
+            "::{} file={},line={},col={},title=routy import go::{}",
+            if d.error { "error" } else { "warning" },
+            prop(&d.file),
+            d.line,
+            d.col,
+            data(&message)
+        );
+    }
+}
+
+fn print_diff(st: &Style, diff: &str) {
+    for l in diff.lines() {
+        if l.starts_with("+++") || l.starts_with("---") {
+            println!("{}", st.dim(l));
+        } else if l.starts_with('+') {
+            println!("{}", st.green(l));
+        } else if l.starts_with('-') {
+            println!("{}", st.red(l));
+        } else if l.starts_with("@@") {
+            println!("{}", st.dim(l));
+        } else {
+            println!("{l}");
+        }
+    }
 }
 
 fn init(dir: &Path) -> anyhow::Result<ExitCode> {
@@ -1075,6 +1350,9 @@ impl Style {
     }
     fn green(&self, s: &str) -> String {
         self.paint("32", s)
+    }
+    fn yellow(&self, s: &str) -> String {
+        self.paint("33", s)
     }
     fn dim(&self, s: &str) -> String {
         self.paint("2", s)

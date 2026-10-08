@@ -4,8 +4,9 @@ description: Generate .routy requests for every chi, gin and net/http route of a
 ---
 
 Routy can read your Go service's source code, find the registered routes and create a `.routy` request
-for every route that doesn't have one yet. Existing files are never changed, so you can re-run the
-import after adding endpoints.
+for every route that doesn't have one yet. Existing requests are compared with the code, so the
+collection doesn't drift from the service: `routy import go --check` fails CI when it does, and
+`--fix` updates the requests. Existing files change only with `--fix`.
 
 ```sh
 cd my-service
@@ -17,14 +18,19 @@ routy import go .       # scan the whole repository
 + api/users/get.routy        GET /users  internal/http/routes.go:24
 + api/users/get-by-id.routy  GET /users/{id}  internal/http/routes.go:25
 = api/users/create.routy     POST /users  internal/http/routes.go:26
+~ api/users/update.routy     PUT /users/{id}  internal/http/routes.go:27
+    api/users/update.routy:4:9  error    body field `age` is a string, code expects int
 - api/legacy/get.routy       GET /legacy  (no such route in code)
 
-14 Go files, 3 routes: 2 new, 1 existing, 1 not in code
+14 Go files, 4 routes: 2 new, 2 existing (1 changed), 1 not in code
 created 2 files
+1 differences can be fixed with --fix (preview: --fix --dry-run)
 ```
 
 - `+` — a new file was created for the route;
 - `=` — a request for this route already exists (under any name, in `.routy` or `.http`);
+- `~` — the request exists, but differs from the code: the
+  [differences](#differences-from-the-code) are listed under it;
 - `-` — a request points at `base`, but no such route was found in the code.
 
 Add `--dry-run` to see the plan without writing anything. In the desktop app the same thing is the sync
@@ -63,7 +69,11 @@ Routy also reads the handler to show what the request expects:
   required ones, nested structs are listed with dots (`user.email`), and a comment after a field is kept;
 - **query** — `r.URL.Query().Get("page")`, `c.Query`, `c.DefaultQuery`, `c.QueryParam`, `r.FormValue`
   and `c.ShouldBindQuery(&q)` (fields from `form` tags);
-- **headers** — `r.Header.Get("X-Tenant-ID")`, `c.GetHeader`.
+- **headers** — `r.Header.Get("X-Tenant-ID")`, `c.GetHeader`;
+- **response** — the value of the first successful `json.NewEncoder(w).Encode(v)`, `c.JSON(200, v)`,
+  `render.JSON(w, r, v)` or your own `writeJSON(w, http.StatusOK, v)`; responses with an error status
+  and `gin.H` / maps are skipped. The request gets `expect { body matches Order }`, and the struct
+  becomes a [shape](#response-shapes).
 
 ```routy title="api/users/post.routy"
 // Create a user
@@ -136,6 +146,112 @@ without `handler` match by method and path, ignoring the query string: in `.rout
 import still recognizes them.
 
 Use `--base <NAME>` if the `.http` files call the service address something other than `base`.
+
+## Differences from the code
+
+Every matched request is checked against its handler. Each difference has the line in the request
+file and the place in the Go code; **errors** fail `--check`, **warnings** don't. Differences marked
+*fix* are corrected by `--fix`.
+
+| Difference | Example | |
+|------------|---------|-|
+| Method changed (request found by `handler:`) | `method changed in code: PUT → PATCH` | error, fix |
+| Path changed (request found by `handler:`) | `path changed in code: /users/{id} → /v2/users/{id}` | error, fix |
+| Path parameter renamed | `path parameter renamed in code: {id} → {user_id}` | warning |
+| The handler reads a body, the request sends none | `handler reads a dto.CreateUser body, the request sends none` | error, fix |
+| A required field is missing from `body` | `` required field `email` (string) is missing from body `` | error, fix |
+| A field in `body` is not in the struct | `` body field `nmae` is not in dto.CreateUser `` | error, fix |
+| A literal of the wrong type | `` body field `age` is a string, code expects int `` | error, fix |
+| The handler reads a query parameter the request doesn't send | `` handler reads query parameter `page`, the request doesn't send it `` | warning (error if `required`) |
+| The handler reads a header the request doesn't send | `` handler reads header `X-Tenant-ID`, the request doesn't send it `` | warning |
+| The response isn't checked | `` handler responds with Order, the request doesn't check `body matches Order` `` | warning, fix |
+
+Only a literal object `body { … }` is compared with the struct: nested objects and arrays by their
+`json` names (`address.city`, `items[].sku`), types only for literal values — named types are resolved
+(`type Status string` expects a string). A body taken from a variable, a file, a form or a string is
+left alone.
+
+A request that expects a client error — `status == 400`, `status >= 400`, `status in [401, 403]` — is
+a negative test: its body, query and headers are wrong on purpose, so only its method and path are
+checked.
+
+Requests in `.http` files are compared in a limited way: the body only if it is valid JSON, plus query
+parameters and headers, without fixes. Their method and path are what they were matched by.
+
+### What `--fix` changes
+
+A fix changes only the spot it is about, and the request it touches is reprinted the way `routy fmt`
+does; the rest of the file stays as it was.
+
+- a new method or path; path parameters keep the request's names (`{user_id}` stays even if the code
+  says `{id}`), because calls and variables refer to them;
+- a missing body or required field is added with an empty value of the right type, an unknown field
+  is removed;
+- a literal of the wrong type is converted when it can be (`"25"` → `25`, `1` → `"1"`), otherwise
+  replaced with an empty value;
+- `body matches Order` is added to `expect`.
+
+Parameter renames, query parameters and headers are left to you — Routy doesn't know their values.
+
+## Response shapes
+
+A struct the handler responds with becomes a [shape](/routy/reference/routy-format/#shapes), and the
+generated request checks the response with `body matches`. Shapes go to `shapes.routy` in the project
+(or the file that already has shapes), one per Go type, with its location in a comment:
+
+```routy title="api/shapes.routy"
+// dto.Order — internal/dto/order.go:12
+shape Order {
+  id: integer,
+  total: number,
+  note?: string,
+  parent: Order | null,
+  customer: Customer,
+  items: [Item],
+  created: string,
+}
+```
+
+`json` tags give the names, `omitempty` makes a field optional, a pointer without it may be `null`,
+nested structs become shapes of their own, `time.Time` is a string, maps and interfaces are `{}` and
+`any`.
+
+The next imports compare the shapes with the code. A shape may be stricter than the code — literals
+instead of `string` (`status: "new" | "paid"`), `integer` instead of `number`, no `null` — that is not
+a difference. A field that is not in the struct, or a type that contradicts it, is an error; a field
+missing from the shape is a warning. `--fix` rewrites the shape by the code and keeps your compatible
+fields as they are. Shapes for new types are added by `routy import go` like new requests.
+
+## Checking in CI and fixing
+
+```sh
+routy import go . --check                  # report by file, exit code 1 on errors
+routy import go . --check --format github  # the same as GitHub Actions annotations
+routy import go . --fix --dry-run          # diff of all fixes
+routy import go . --fix                    # apply them (and create new files)
+routy import go . --prune                  # delete files whose routes are all gone
+```
+
+`--check` writes nothing. It fails on new routes without a request, requests whose route is gone,
+response types without a shape and on differences that are errors:
+
+```txt
+api/users/update.routy
+  4:9     error    body field `age` is a string, code expects int  ← internal/http/routes.go:27
+
+internal/http/routes.go
+  24:1    error    route GET /users has no request (`routy import go` creates api/users/get.routy)
+
+2 routes checked: 2 errors, 0 warnings; 1 fixable with `routy import go --fix`
+```
+
+With `--format github` each line becomes an annotation on the `.routy` file — or on the Go line, for a
+new route — so it shows up in the pull request. `--format json` (or `--json`) prints the whole plan:
+`existing[].changes` with `severity`, `go`, `fixable` and the `diff` of each fix, `shape_changes`,
+`new_shapes`, `stale` and `prunable`.
+
+`--prune` deletes only whole files where every request points at a route that's gone and there is
+nothing else (flows, shapes, `let`). Other stale requests are listed for you to remove by hand.
 
 ## Other routers
 

@@ -783,7 +783,7 @@ struct ImportReport {
     /// Каталог, который сканировался
     dir: PathBuf,
     plan: routy_core::import::Plan,
-    /// Созданные файлы (при `apply`), относительно проекта
+    /// Созданные (при `apply`), исправленные и удалённые файлы, относительно проекта
     created: Vec<String>,
 }
 
@@ -832,6 +832,53 @@ async fn import_go(
     .map_err(err)?
 }
 
+/// Исправить расхождения с кодом (`routy import go --fix`): `ids` — выбранные (`Change::id`),
+/// без них — все исправимые; `prune` — удалить файлы, где все запросы — к пропавшим роутам.
+/// Возвращает новый план.
+#[tauri::command]
+async fn import_fix(
+    state: State<'_, AppState>,
+    dir: Option<PathBuf>,
+    ids: Option<Vec<String>>,
+    prune: bool,
+) -> CmdResult<ImportReport> {
+    let root = {
+        let guard = state.session.lock().await;
+        let s = guard.as_ref().ok_or("no project open")?;
+        s.project.root.clone()
+    };
+    let dir = dir.unwrap_or_else(|| default_source_dir(&root));
+    tauri::async_runtime::spawn_blocking(move || {
+        use routy_core::import;
+        let plan = import::plan_go(&dir, &root, &[], import::DEFAULT_BASE).map_err(err)?;
+        let fixes = import::fixes(&plan, |c| {
+            ids.as_ref().is_none_or(|ids| ids.contains(&c.id))
+        })
+        .map_err(err)?;
+        import::write_fixes(&root, &fixes).map_err(err)?;
+        let mut changed: Vec<String> = fixes
+            .iter()
+            .map(|f| f.file.to_string_lossy().replace('\\', "/"))
+            .collect();
+        if prune {
+            changed.extend(
+                import::prune(&root, &plan)
+                    .map_err(err)?
+                    .iter()
+                    .map(|p| p.to_string_lossy().replace('\\', "/")),
+            );
+        }
+        let plan = import::plan_go(&dir, &root, &[], import::DEFAULT_BASE).map_err(err)?;
+        Ok(ImportReport {
+            dir,
+            plan,
+            created: changed,
+        })
+    })
+    .await
+    .map_err(err)?
+}
+
 pub fn run() {
     let mut builder = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -868,6 +915,7 @@ pub fn run() {
             var_names,
             set_secret,
             import_go,
+            import_fix,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Routy");

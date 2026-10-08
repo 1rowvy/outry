@@ -507,22 +507,13 @@ resolution. Use `env.toml` for values shared across files.
 
 ## Keeping in sync with code
 
-<Aside type="caution" title="Planned">
-Today `routy import go` writes `handler:` into generated requests and matches existing requests by it;
-the comparison below is the next step.
-</Aside>
-
-`routy import go --check` compares requests with the server code and says not only *that* they differ
-but *what* changed in Go and *how* to fix the `.routy` file.
-
-### Linking a request to its handler
-
 `routy import` writes the handler into each generated request:
 
 ```routy
 // Get user
 GET /users/{id} {
   handler: users.GetUser
+  expect { body matches User }
 }
 ```
 
@@ -530,54 +521,11 @@ Requests are matched to routes by `handler`, so a request is still recognised af
 method changed in code. Requests without `handler` are matched by method and path, with parameters
 compared as "any value" (`/users/{id}` ~ `/users/{user_id}`).
 
-### What is compared
-
-| Change in code | Reported as | `--fix` |
-|----------------|-------------|---------|
-| Path or method of the handler's route | `~ path GET /users/{id} → GET /v2/users/{id}` | Rewrites the request line |
-| Path parameter renamed | `~ param {id} → {user_id}` | Renames it in the target |
-| New `required` field in the body struct | `+ body.email required string, missing in body` | Adds the field with an empty value |
-| Field removed from the body struct | `- body.nickname no longer in CreateUser` | Removes it |
-| Field type changed | `~ body.age int in code, "25" in file` | Converts the literal when it can (`"25"` → `25`) |
-| New query parameter or header the handler reads | `+ query.page` | Adds it with an empty value |
-| Response type changed | `~ shape Order` | Regenerates the shape in `api/shapes.routy` |
-| Route removed | `✗ route removed (handler orders.Legacy not found)` | Deletes the file only with `--prune` |
-| New route | `+ api/orders/refund.routy` | Creates the file |
-
-Only generated parts are compared: values you filled in, extra headers, `expect`, `save` and comments
-are never touched. Edits keep the file's formatting and comments.
-
-### Output
-
-```txt
-api/users/get.routy
-  ~ path      GET /users/{id} → GET /v2/users/{id}      internal/users/routes.go:14
-api/users/create.routy
-  + body.email     required string, missing in body     internal/users/dto.go:8
-  - body.nickname  no longer in CreateUser
-  ~ body.age       int in code, "25" in file
-api/orders/legacy.routy
-  ✗ route removed (handler orders.Legacy not found)
-+ api/orders/refund.routy   new route POST /orders/{id}/refund
-
-5 changes, 4 fixable — run `routy import go --fix`
-```
-
-Every line points to the place in Go that changed. The exit code is non-zero when anything differs.
-
-| Flag | Effect |
-|------|--------|
-| `--fix` | Applies the fixable changes and prints a diff |
-| `--fix --dry-run` | Prints the diff only |
-| `--prune` | With `--fix`, also deletes files of removed routes |
-| `--format github` | GitHub Actions annotations on the `.routy` and Go lines of the pull request |
-| `--json` | Machine-readable report |
-
-The same report is shown in the app (Routes tab: a "changed" badge, the diff and an Apply button per
-change) and in editors through `routy lsp` (a diagnostic on the affected line with a quick fix).
-
-For `.http` files only the path and the method are compared and fixed, and the body if it is valid
-JSON.
+`routy import go --check` then compares every matched request with its handler — method and path,
+body fields and their types, query parameters, headers, the response shape — and fails when they
+drift apart; `--fix` corrects what can be corrected without guessing, `--prune` deletes files of
+removed routes. The app shows the same in the Routes tab. See
+[Import routes from Go](/routy/guides/import-go/#differences-from-the-code).
 
 ## Running
 

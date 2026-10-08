@@ -138,6 +138,8 @@ export interface Field {
   ty: string;
   required: boolean;
   comment: string | null;
+  /** тип в JSON, если известен */
+  json: "string" | "number" | "boolean" | "array" | "object" | null;
 }
 
 export interface RouteInfo {
@@ -146,13 +148,46 @@ export interface RouteInfo {
   query: Field[];
   headers: string[];
   body: { type_name: string; fields: Field[]; example: string } | null;
+  /** что обработчик отвечает: тип Go и shape для `body matches` */
+  response: { type_name: string; shape: string } | null;
+}
+
+/** Расхождение запроса или shape с кодом; `kind` и его поля — как `ChangeKind` в ядре */
+export interface RouteChange {
+  /** ключ для `importFix` */
+  id: string;
+  kind: string;
+  file: string;
+  line: number;
+  col: number;
+  severity: "error" | "warning";
+  message: string;
+  /** место в Go-коде, относительно сканируемого каталога */
+  go: { file: string; line: number };
+  /** исправляется автоматически; `diff` — что поменяется */
+  fixable: boolean;
+  diff?: string;
+}
+
+/** Shape для структуры Go из ответа */
+export interface ShapeDef {
+  name: string;
+  go_type: string;
+  source: string;
+  line: number;
+  shape: string;
 }
 
 export interface ImportPlan {
   files: number;
   new: { route: Route; file: string; content: string }[];
-  existing: { route: Route; file: string }[];
-  stale: { file: string; method: string; url: string }[];
+  existing: { route: Route; file: string; changes: RouteChange[] }[];
+  stale: { file: string; line: number; method: string; url: string }[];
+  /** файлы, где все запросы — к пропавшим роутам */
+  prunable: string[];
+  new_shapes: ShapeDef[];
+  shape_changes: RouteChange[];
+  shapes_file: string;
   warnings: string[];
 }
 
@@ -195,4 +230,7 @@ export const api = {
   setSecret: (env: string | null, name: string, value: string) => invoke<void>("set_secret", { env, name, value }),
   /** dir: null — каталог над api/; apply — создать недостающие файлы */
   importGo: (dir: string | null, apply: boolean) => invoke<ImportReport>("import_go", { dir, apply }),
+  /** routy import go --fix [--prune]; ids — выбранные расхождения, null — все исправимые */
+  importFix: (dir: string | null, ids: string[] | null, prune: boolean) =>
+    invoke<ImportReport>("import_fix", { dir, ids, prune }),
 };

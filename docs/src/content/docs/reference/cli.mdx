@@ -140,7 +140,9 @@ routy init [DIR]
 ## `routy import go`
 
 Create a `.routy` request for every route of a Go service (chi, gin, `net/http`) that doesn't have one
-yet. Existing files are never changed. See [Import routes from Go](/routy/guides/import-go/).
+yet. [Differences from the code](/routy/guides/import-go/#differences-from-the-code) of existing requests
+are listed under the route; files change only with `--fix`. See
+[Import routes from Go](/routy/guides/import-go/).
 
 ```sh
 routy import go [DIR]
@@ -151,11 +153,15 @@ project found from the current folder; it must have an `env.toml`.
 
 | Flag | Description |
 |------|-------------|
-| `--dry-run` | Only print the plan |
+| `--dry-run` | Only print the plan (with `--fix` — the diff of the fixes) |
+| `--check` | For CI: write nothing, report differences by file, exit with 1 on errors |
+| `--fix` | Fix the differences that can be fixed safely |
+| `--prune` | Delete files whose requests all point at removed routes |
+| `--format <F>` | `text` (default), `github` (GitHub Actions annotations), `json` |
 | `--base <NAME>` | Variable with the service address in existing `.http` URLs (for matching), default `base` |
 | `--query <FILE.scm>` | An extra tree-sitter query for another router; can be repeated |
 | `--project <DIR>` | Project folder with `env.toml` |
-| `--json` | Print the plan as JSON |
+| `--json` | Same as `--format json` |
 
 ## `routy update`
 

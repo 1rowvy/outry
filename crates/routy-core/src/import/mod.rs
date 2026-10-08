@@ -1,18 +1,27 @@
 //! Импорт роутов из кода сервиса: находим роуты, сравниваем с запросами проекта (`*.routy` и
-//! `*.http`) и создаём `*.routy` только для отсутствующих. Существующие файлы не трогаем никогда.
+//! `*.http`) и создаём `*.routy` для отсутствующих. Существующие файлы меняются только правками
+//! (`fixes` + `write_fixes`, `--fix`) и удаляются только `prune` (`--prune`).
 //!
 //! Роут и запрос совпадают по `handler:`, а без него — по методу и пути после `base`
 //! (параметры сравниваются как «любое значение»: `/users/{id}` ~ `{{base}}/users/{{user_id}}`).
+//! Совпавшие сравниваются по полям (`diff.rs`), shape ответов — со структурами Go (`shapes.rs`).
 
+mod diff;
 pub mod go;
+mod shapes;
+mod udiff;
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 
 use serde::Serialize;
 
 use crate::discover;
 use crate::error::{Error, Result};
+
+pub use diff::{Change, ChangeKind, Edit, GoRef, Severity};
+pub use udiff::unified as unified_diff;
 
 /// Метод «любой» (`r.Handle`, gin `Any`): файл создаётся с GET, совпадает с любым методом.
 pub const ANY: &str = "ANY";
@@ -48,6 +57,29 @@ pub struct RouteInfo {
     pub headers: Vec<String>,
     /// JSON-тело, в которое декодируется запрос
     pub body: Option<Body>,
+    /// Что обработчик отвечает (`json.Encode`, `c.JSON`)
+    pub response: Option<Response>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Response {
+    /// Тип в Go: `dto.Order`, `[]dto.Order`
+    pub type_name: String,
+    /// Shape для `body matches`: `Order`, `[Order]`, `{ id: integer }`
+    pub shape: String,
+}
+
+/// Shape для структуры Go из ответа: `shape Order { … }` в `shapes.routy`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ShapeDef {
+    pub name: String,
+    /// `пакет.Тип`
+    pub go_type: String,
+    /// Файл с типом, относительно каталога сканирования
+    pub source: PathBuf,
+    pub line: usize,
+    /// `{ id: integer, note?: string }`
+    pub shape: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -69,6 +101,18 @@ pub struct Field {
     pub required: bool,
     /// Комментарий к полю в структуре
     pub comment: Option<String>,
+    /// Тип в JSON, если известен (именованные типы раскрыты: `type Status string` → строка)
+    pub json: Option<JsonType>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum JsonType {
+    String,
+    Number,
+    Boolean,
+    Array,
+    Object,
 }
 
 #[derive(Debug, Default, Serialize)]
@@ -76,6 +120,8 @@ pub struct Scan {
     /// Сколько файлов разобрано
     pub files: usize,
     pub routes: Vec<Route>,
+    /// Shape для типов ответов
+    pub shapes: Vec<ShapeDef>,
     pub warnings: Vec<String>,
 }
 
@@ -88,7 +134,37 @@ pub struct Plan {
     pub existing: Vec<Existing>,
     /// Запросы к `base`, которым нет роута в коде
     pub stale: Vec<Stale>,
+    /// Файлы, где все запросы — из `stale` (и больше ничего): `--prune` их удаляет
+    pub prunable: Vec<PathBuf>,
+    /// Shape для типов ответов, которых в проекте нет — будут дописаны в `shapes_file`
+    pub new_shapes: Vec<ShapeDef>,
+    /// Расхождения объявленных shape со структурами Go
+    pub shape_changes: Vec<Change>,
+    /// Куда дописываются новые shape
+    pub shapes_file: PathBuf,
     pub warnings: Vec<String>,
+    /// Тексты файлов, по которым считались правки
+    #[serde(skip)]
+    sources: HashMap<PathBuf, String>,
+}
+
+impl Plan {
+    /// Все расхождения: в запросах и в shape.
+    pub fn changes(&self) -> impl Iterator<Item = &Change> {
+        self.existing
+            .iter()
+            .flat_map(|e| &e.changes)
+            .chain(&self.shape_changes)
+    }
+
+    /// Есть ли что-то, из-за чего `--check` падает: новый роут, пропавший роут, новый shape,
+    /// расхождение-ошибка.
+    pub fn has_errors(&self) -> bool {
+        !self.new.is_empty()
+            || !self.stale.is_empty()
+            || !self.new_shapes.is_empty()
+            || self.changes().any(|c| c.severity == Severity::Error)
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -103,11 +179,14 @@ pub struct NewFile {
 pub struct Existing {
     pub route: Route,
     pub file: PathBuf,
+    /// Расхождения с кодом во всех запросах этого роута
+    pub changes: Vec<Change>,
 }
 
 #[derive(Debug, Serialize)]
 pub struct Stale {
     pub file: PathBuf,
+    pub line: usize,
     pub method: String,
     pub url: String,
 }
@@ -115,28 +194,45 @@ pub struct Stale {
 /// Запрос проекта, с которым сравниваются роуты.
 struct Known {
     file: PathBuf,
+    line: usize,
     method: String,
     url: String,
     key: String,
     handler: Option<String>,
+    parsed: Parsed,
 }
 
-/// Запросы из `*.http` (`{{base}}/…`) и `*.routy` (`/…`) проекта.
-fn known_requests(
-    project_root: &Path,
-    base: &str,
-    taken: &mut HashSet<PathBuf>,
-) -> Result<Vec<Known>> {
+enum Parsed {
+    Routy(Box<crate::lang::ast::Request>, Rc<str>),
+    Http(crate::RequestFile, Rc<str>),
+}
+
+/// Что есть в проекте: запросы, объявления shape, сколько элементов в каждом файле.
+#[derive(Default)]
+struct Project {
+    known: Vec<Known>,
+    shapes: Vec<(PathBuf, Rc<str>, crate::lang::ast::ShapeDecl)>,
+    /// Файл → (запросов, всего элементов)
+    items: HashMap<PathBuf, (usize, usize)>,
+    taken: HashSet<PathBuf>,
+    sources: HashMap<PathBuf, String>,
+}
+
+/// Запросы из `*.http` (`{{base}}/…`) и `*.routy` (`/…`) проекта, объявления shape.
+fn scan_project(project_root: &Path, base: &str) -> Result<Project> {
     let prefix = format!("{{{{{base}}}}}");
-    let mut known = Vec::new();
+    let mut p = Project::default();
     let exts = [discover::EXTENSION, discover::ROUTY_EXTENSION];
     for rel in discover::files(project_root, &exts)? {
         // `get.http` занимает и `get.routy`: два файла с одним именем в дереве путают.
-        taken.insert(rel.with_extension(discover::ROUTY_EXTENSION));
-        taken.insert(rel.clone());
+        p.taken
+            .insert(rel.with_extension(discover::ROUTY_EXTENSION));
+        p.taken.insert(rel.clone());
         let Ok(src) = std::fs::read_to_string(project_root.join(&rel)) else {
             continue;
         };
+        p.sources.insert(rel.clone(), src.clone());
+        let src: Rc<str> = src.into();
         if rel
             .extension()
             .is_some_and(|e| e == discover::ROUTY_EXTENSION)
@@ -144,17 +240,25 @@ fn known_requests(
             let Ok(file) = crate::lang::parse::parse(&src, None) else {
                 continue;
             };
-            for item in &file.items {
-                let crate::lang::ast::Item::Request(r) = item else {
-                    continue;
+            let total = file.items.len();
+            let mut requests = 0;
+            for item in file.items {
+                use crate::lang::ast::{Item, TargetKind, TargetPart};
+                let r = match item {
+                    Item::Request(r) => r,
+                    Item::Shape(d) => {
+                        p.shapes.push((rel.clone(), src.clone(), d));
+                        continue;
+                    }
+                    _ => continue,
                 };
-                use crate::lang::ast::{TargetKind, TargetPart};
                 if r.target.kind != TargetKind::Path {
                     continue;
                 }
+                requests += 1;
                 let mut path = String::new();
-                for p in &r.target.parts {
-                    match p {
+                for part in &r.target.parts {
+                    match part {
                         TargetPart::Lit(l) => path.push_str(l),
                         _ => path.push_str("{{x}}"),
                     }
@@ -164,14 +268,17 @@ fn known_requests(
                     .next()
                     .unwrap_or_default()
                     .to_string();
-                known.push(Known {
+                p.known.push(Known {
                     file: rel.clone(),
+                    line: crate::lang::parse::line_col(&src, r.span.start).0,
                     method: r.method.clone(),
                     url: r.target.span.text(&src).to_string(),
                     key: key(&path),
                     handler: r.fields.handler.clone(),
+                    parsed: Parsed::Routy(Box::new(r), src.clone()),
                 });
             }
+            p.items.insert(rel, (requests, total));
             continue;
         }
         let Ok(req) = crate::parse(&src) else {
@@ -184,15 +291,21 @@ fn known_requests(
         if !path.is_empty() && !path.starts_with('/') {
             continue; // {{base}}x — не наш случай
         }
-        known.push(Known {
+        let line = src
+            .find(&format!("{} ", req.method))
+            .map_or(1, |at| crate::lang::parse::line_col(&src, at).0);
+        p.items.insert(rel.clone(), (1, 1));
+        p.known.push(Known {
             file: rel,
-            method: req.method,
+            line,
+            method: req.method.clone(),
             url: req.url.clone(),
             key: key(path),
             handler: None,
+            parsed: Parsed::Http(req, src.clone()),
         });
     }
-    Ok(known)
+    Ok(p)
 }
 
 /// Сканирует Go-код в `src_dir` встроенными шаблонами и `extra` (имя, текст `.scm`)
@@ -211,14 +324,24 @@ pub fn plan_go(
     plan(project_root, scan, base)
 }
 
-/// Раскладывает найденные роуты на новые и уже существующие, находит файлы без роутов.
+/// Раскладывает найденные роуты на новые и уже существующие, сравнивает существующие с кодом,
+/// находит файлы без роутов и shape, которых не хватает.
 pub fn plan(project_root: &Path, scan: Scan, base: &str) -> Result<Plan> {
-    let mut taken: HashSet<PathBuf> = HashSet::new();
-    let known = known_requests(project_root, base, &mut taken)?;
+    let Project {
+        known,
+        shapes,
+        items,
+        mut taken,
+        sources,
+    } = scan_project(project_root, base)?;
 
+    let shapes_file = shapes
+        .first()
+        .map_or_else(|| PathBuf::from(SHAPES_FILE), |(f, _, _)| f.clone());
     let mut out = Plan {
         files: scan.files,
         warnings: scan.warnings,
+        shapes_file,
         ..Plan::default()
     };
     let mut matched = HashSet::new();
@@ -246,9 +369,21 @@ pub fn plan(project_root: &Path, scan: Scan, base: &str) -> Result<Plan> {
         };
         if let Some(&first) = hit.first() {
             matched.extend(hit.iter().copied());
+            let mut changes: Vec<Change> = hit
+                .iter()
+                .flat_map(|&i| {
+                    let k = &known[i];
+                    match &k.parsed {
+                        Parsed::Routy(req, src) => diff::compare(&route, req, src, &k.file),
+                        Parsed::Http(req, src) => diff::compare_http(&route, req, src, &k.file),
+                    }
+                })
+                .collect();
+            changes.sort_by(|a, b| (&a.file, a.line, a.col).cmp(&(&b.file, b.line, b.col)));
             out.existing.push(Existing {
                 file: known[first].file.clone(),
                 route,
+                changes,
             });
             continue;
         }
@@ -260,20 +395,75 @@ pub fn plan(project_root: &Path, scan: Scan, base: &str) -> Result<Plan> {
             route,
         });
     }
+
+    for def in scan.shapes {
+        match shapes.iter().find(|(_, _, d)| d.name == def.name) {
+            Some((file, src, decl)) => out
+                .shape_changes
+                .extend(shapes::compare(&def, decl, src, file)),
+            None => out.new_shapes.push(def),
+        }
+    }
+
+    let mut stale_per_file: HashMap<&Path, usize> = HashMap::new();
+    for (i, k) in known.iter().enumerate() {
+        if !matched.contains(&i) {
+            *stale_per_file.entry(&k.file).or_default() += 1;
+        }
+    }
+    out.prunable = stale_per_file
+        .iter()
+        .filter(|(f, n)| {
+            items
+                .get(**f)
+                .is_some_and(|&(reqs, total)| reqs == **n && total == **n)
+        })
+        .map(|(f, _)| f.to_path_buf())
+        .collect();
+    out.prunable.sort();
     out.stale = known
         .into_iter()
         .enumerate()
         .filter(|(i, _)| !matched.contains(i))
         .map(|(_, k)| Stale {
             file: k.file,
+            line: k.line,
             method: k.method,
             url: k.url,
         })
         .collect();
+    out.sources = sources;
+
+    // Diff каждой правки по отдельности — для предпросмотра.
+    let previews: Vec<Option<String>> = out
+        .changes()
+        .map(|c| {
+            let fix = c.fix.as_ref()?;
+            let src = out.sources.get(&c.file)?;
+            let after = fixed_text(src, &[fix]).ok()?;
+            Some(udiff::unified(&slash(&c.file), src, &after))
+        })
+        .collect();
+    let mut previews = previews.into_iter();
+    for c in out
+        .existing
+        .iter_mut()
+        .flat_map(|e| &mut e.changes)
+        .chain(&mut out.shape_changes)
+    {
+        c.diff = previews.next().flatten();
+        if c.diff.is_none() {
+            c.fixable = false;
+        }
+    }
     Ok(out)
 }
 
-/// Создаёт файлы из `plan.new`. Уже существующие пропускает. Возвращает созданные пути.
+/// Файл с shape, если в проекте их ещё нет.
+pub const SHAPES_FILE: &str = "shapes.routy";
+
+/// Создаёт файлы из `plan.new` и дописывает `plan.new_shapes`. Уже существующие файлы
+/// пропускает. Возвращает созданные и изменённые пути.
 pub fn apply(project_root: &Path, plan: &Plan) -> Result<Vec<PathBuf>> {
     let mut created = Vec::new();
     for f in &plan.new {
@@ -296,7 +486,184 @@ pub fn apply(project_root: &Path, plan: &Plan) -> Result<Vec<PathBuf>> {
             Err(e) => return Err(Error::from(e).in_file(&path)),
         }
     }
+    if let Some((file, text)) = shapes_text(project_root, plan)? {
+        let path = project_root.join(&file);
+        std::fs::write(&path, text).map_err(|e| Error::from(e).in_file(&path))?;
+        created.push(file);
+    }
     Ok(created)
+}
+
+/// Новый текст файла с shape после `apply`, если есть что дописать.
+pub fn shapes_text(project_root: &Path, plan: &Plan) -> Result<Option<(PathBuf, String)>> {
+    if plan.new_shapes.is_empty() {
+        return Ok(None);
+    }
+    let path = project_root.join(&plan.shapes_file);
+    let before = match std::fs::read_to_string(&path) {
+        Ok(s) => s,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(e) => return Err(Error::from(e).in_file(&path)),
+    };
+    let added = shapes::declarations(&plan.new_shapes);
+    let text = if before.trim().is_empty() {
+        added.trim_start().to_string()
+    } else {
+        format!("{}\n{added}", before.trim_end())
+    };
+    let formatted =
+        before.trim().is_empty() || crate::lang::fmt::format(&before).ok() == Some(before);
+    let text = if formatted {
+        crate::lang::fmt::format(&text).unwrap_or(text)
+    } else {
+        text
+    };
+    Ok(Some((plan.shapes_file.clone(), text)))
+}
+
+/// Исправленный файл: что было, что станет и diff.
+#[derive(Debug, Serialize)]
+pub struct FileFix {
+    pub file: PathBuf,
+    #[serde(skip)]
+    pub before: String,
+    #[serde(skip)]
+    pub after: String,
+    pub diff: String,
+    /// `id` исправленных расхождений
+    pub changes: Vec<String>,
+}
+
+/// Правки для выбранных расхождений (`select`), по файлам. Ничего не пишет — см. [`write_fixes`].
+pub fn fixes(plan: &Plan, select: impl Fn(&Change) -> bool) -> Result<Vec<FileFix>> {
+    let mut by_file: Vec<(&PathBuf, Vec<&Change>)> = Vec::new();
+    for c in plan.changes().filter(|c| c.fix.is_some() && select(c)) {
+        match by_file.iter_mut().find(|(f, _)| *f == &c.file) {
+            Some((_, list)) => list.push(c),
+            None => by_file.push((&c.file, vec![c])),
+        }
+    }
+    let mut out = Vec::new();
+    for (file, changes) in by_file {
+        let Some(before) = plan.sources.get(file) else {
+            continue;
+        };
+        let edits: Vec<&Edit> = changes.iter().filter_map(|c| c.fix.as_ref()).collect();
+        let after = fixed_text(before, &edits)
+            .map_err(|e| Error::Import(format!("{}: {e}", slash(file))))?;
+        out.push(FileFix {
+            file: file.clone(),
+            diff: udiff::unified(&slash(file), before, &after),
+            before: before.clone(),
+            after,
+            changes: changes.iter().map(|c| c.id.clone()).collect(),
+        });
+    }
+    out.sort_by(|a, b| a.file.cmp(&b.file));
+    Ok(out)
+}
+
+/// Пишет исправленные файлы. Файл, изменённый с момента сканирования, не трогает — ошибка.
+pub fn write_fixes(project_root: &Path, fixes: &[FileFix]) -> Result<()> {
+    for f in fixes {
+        let path = project_root.join(&f.file);
+        let now = std::fs::read_to_string(&path).map_err(|e| Error::from(e).in_file(&path))?;
+        if now != f.before {
+            return Err(Error::Import(format!(
+                "{} changed since the scan; run again",
+                slash(&f.file)
+            )));
+        }
+    }
+    for f in fixes {
+        let path = project_root.join(&f.file);
+        std::fs::write(&path, &f.after).map_err(|e| Error::from(e).in_file(&path))?;
+    }
+    Ok(())
+}
+
+/// Удаляет файлы из `plan.prunable`. Возвращает удалённые.
+pub fn prune(project_root: &Path, plan: &Plan) -> Result<Vec<PathBuf>> {
+    let mut removed = Vec::new();
+    for f in &plan.prunable {
+        let path = project_root.join(f);
+        match std::fs::remove_file(&path) {
+            Ok(()) => removed.push(f.clone()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(Error::from(e).in_file(&path)),
+        }
+    }
+    Ok(removed)
+}
+
+/// Текст после правок. Одинаковые правки применяются один раз, пересекающиеся — первая.
+/// Затронутые элементы файла печатаются заново (`routy fmt`), остальные остаются как были;
+/// результат должен разбираться.
+fn fixed_text(src: &str, edits: &[&Edit]) -> std::result::Result<String, String> {
+    let mut edits: Vec<&Edit> = edits.to_vec();
+    edits.sort_by_key(|e| (e.start, e.end));
+    edits.dedup();
+    let mut out = String::new();
+    // Где в новом тексте правки — чтобы найти затронутые элементы.
+    let mut touched: Vec<(usize, usize)> = Vec::new();
+    let mut pos = 0;
+    let mut i = 0;
+    while i < edits.len() {
+        let e = edits[i];
+        i += 1;
+        if e.start < pos {
+            continue;
+        }
+        out.push_str(&src[pos..e.start]);
+        let at = out.len();
+        if e.block {
+            // Вставки полей в запрос без блока — один новый блок.
+            out.push_str(" {\n");
+            out.push_str(&format!("  {}\n", e.text));
+            while i < edits.len() && edits[i].block && edits[i].start == e.start {
+                out.push_str(&format!("  {}\n", edits[i].text));
+                i += 1;
+            }
+            out.push('}');
+        } else {
+            out.push_str(&e.text);
+        }
+        touched.push((at, out.len()));
+        pos = e.end;
+    }
+    out.push_str(&src[pos..]);
+    let file =
+        crate::lang::parse::parse(&out, None).map_err(|e| format!("fix doesn't parse: {e}"))?;
+    let Ok(pretty) = crate::lang::fmt::format(&out) else {
+        return Ok(out);
+    };
+    let Ok(pretty_file) = crate::lang::parse::parse(&pretty, None) else {
+        return Ok(out);
+    };
+    if pretty_file.items.len() != file.items.len() {
+        return Ok(out);
+    }
+    let mut result = String::new();
+    let mut pos = 0;
+    for (item, printed) in file.items.iter().zip(&pretty_file.items) {
+        let span = item.span();
+        if !touched
+            .iter()
+            .any(|&(a, b)| a <= span.end && b >= span.start)
+        {
+            continue;
+        }
+        result.push_str(&out[pos..span.start]);
+        result.push_str(printed.span().text(&pretty));
+        pos = span.end;
+    }
+    result.push_str(&out[pos..]);
+    crate::lang::parse::parse(&result, None).map_err(|e| format!("fix doesn't parse: {e}"))?;
+    Ok(result)
+}
+
+fn slash(p: &Path) -> String {
+    p.to_string_lossy().replace('\\', "/")
 }
 
 /// Путь роутера → путь с переменными: `{id}`, `{id:[0-9]+}`, `{path...}`, `:id`, `*path` → `{{id}}`.
@@ -480,6 +847,9 @@ fn content(route: &Route, _base: &str) -> String {
         params.push(format!("Body: {}", b.type_name));
         params.extend(field_lines(&b.fields));
     }
+    if let Some(r) = &info.response {
+        params.push(format!("Response: {}", r.type_name));
+    }
 
     let mut s = format!("// {title}\n");
     for l in &doc {
@@ -519,6 +889,9 @@ fn content(route: &Route, _base: &str) -> String {
         Some(b) => fields.push(format!("body {}", b.example)),
         None if matches!(method, "POST" | "PUT" | "PATCH") => fields.push("body {}".into()),
         None => {}
+    }
+    if let Some(r) = &info.response {
+        fields.push(format!("expect {{\n  body matches {}\n}}", r.shape));
     }
     if fields.is_empty() {
         s.push_str(&format!("{method} {path}\n"));

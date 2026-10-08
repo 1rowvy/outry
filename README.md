@@ -114,10 +114,12 @@ routy run CreateUser       # or one, by name
 
 Or open the folder in the desktop app. It offers to create `api/env.toml` if there isn't one.
 
-Have a Go service? Generate a request for every route (chi, gin, `net/http`); existing files are left alone:
+Have a Go service? Generate a request for every route (chi, gin, `net/http`) and keep them in sync with the code:
 
 ```sh
 routy import go .          # + api/users/get-by-id.routy  GET /users/{id}
+routy import go . --check  # in CI: fails when requests drift from the handlers
+routy import go . --fix    # update the requests (method, path, body fields, response shapes)
 ```
 
 See [Import routes from Go](https://1rowvy.github.io/routy/guides/import-go/).
@@ -256,7 +258,7 @@ routy fmt [PATHS]... [--check]         # canonical style for *.routy, like gofmt
 routy convert [PATHS]... [--rm]        # *.http → *.routy
 routy vars [-e ENV] [--reveal]         # final variable values and their sources
 routy envs                             # list environments (* = default)
-routy import go [DIR] [--dry-run]      # create requests for Go routes that have no file yet
+routy import go [DIR] [--check|--fix]  # create requests for Go routes, compare and fix existing ones
 routy secret set|rm <NAME> [-e ENV]    # manage keychain secrets
 routy update [--check]                 # self-update from GitHub releases
 ```

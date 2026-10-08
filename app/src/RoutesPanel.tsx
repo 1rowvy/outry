@@ -1,6 +1,6 @@
 // Синхронизация с кодом: роуты из Go (как `routy import go`) против файлов проекта.
 import { useState } from "react";
-import type { Field, ImportReport, Route } from "./api";
+import type { Field, ImportReport, Route, RouteChange } from "./api";
 
 interface Props {
   report: ImportReport | null;
@@ -9,6 +9,10 @@ interface Props {
   onPickDir: () => void;
   onCreate: () => void;
   onOpen: (file: string) => void;
+  /** Исправить выбранные расхождения (`null` — все исправимые) */
+  onFix: (ids: string[] | null) => void;
+  /** Удалить файлы без роутов в коде */
+  onPrune: () => void;
 }
 
 const slash = (p: string) => p.replace(/\\/g, "/");
@@ -22,6 +26,7 @@ function needs(route: Route): string[] {
   if (info.body) out.push(`body ${info.body.type_name}: ${names(info.body.fields)}`);
   if (info.query.length) out.push(`query: ${names(info.query)}`);
   if (info.headers.length) out.push(`headers: ${info.headers.join(", ")}`);
+  if (info.response) out.push(`response: ${info.response.shape}`);
   return out;
 }
 
@@ -56,7 +61,66 @@ function RouteLine({ method, path, file, route }: { method: string; path: string
 /** `/users/{{id}}` (так ядро хранит параметры) → `/users/{id}`, как в роутере и `.routy`. */
 const routePath = (p: string) => p.replaceAll("{{", "{").replaceAll("}}", "}");
 
-export function RoutesPanel({ report, busy, onScan, onPickDir, onCreate, onOpen }: Props) {
+const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
+
+/** Расхождения с кодом: место, текст, где в Go; у исправимых — diff и «Apply». */
+function Changes({ changes, busy, onFix }: { changes: RouteChange[]; busy: boolean; onFix: Props["onFix"] }) {
+  const [shown, setShown] = useState<Set<string>>(new Set());
+  const toggle = (id: string) =>
+    setShown((prev) => {
+      const next = new Set(prev);
+      if (!next.delete(id)) next.add(id);
+      return next;
+    });
+  return (
+    <ul className="r-changes">
+      {changes.map((c) => (
+        <li key={c.id}>
+          <div className="r-change">
+            <span className={"r-sev " + c.severity} title={c.severity} />
+            <span className="r-msg">
+              <span className="r-at">
+                {slash(c.file)}:{c.line}
+              </span>{" "}
+              {c.message}{" "}
+              <span className="r-at" title="Where it is in the Go code">
+                ← {slash(c.go.file)}:{c.go.line}
+              </span>
+            </span>
+            {c.fixable && (
+              <span className="r-actions">
+                <button className="link" onClick={() => toggle(c.id)} aria-expanded={shown.has(c.id)}>
+                  Diff
+                </button>
+                <button className="link" onClick={() => onFix([c.id])} disabled={busy}>
+                  Apply
+                </button>
+              </span>
+            )}
+          </div>
+          {shown.has(c.id) && c.diff && <Diff text={c.diff} />}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function Diff({ text }: { text: string }) {
+  return (
+    <pre className="r-preview r-diff">
+      {text
+        .split("\n")
+        .filter((l) => !l.startsWith("---") && !l.startsWith("+++"))
+        .map((l, i) => (
+          <div key={i} className={l.startsWith("+") ? "add" : l.startsWith("-") ? "del" : l.startsWith("@@") ? "hunk" : ""}>
+            {l || " "}
+          </div>
+        ))}
+    </pre>
+  );
+}
+
+export function RoutesPanel({ report, busy, onScan, onPickDir, onCreate, onOpen, onFix, onPrune }: Props) {
   const plan = report?.plan;
   // Раскрытые новые роуты: показываем будущий файл целиком.
   const [open, setOpen] = useState<Set<string>>(new Set());
@@ -66,6 +130,10 @@ export function RoutesPanel({ report, busy, onScan, onPickDir, onCreate, onOpen 
       if (!next.delete(file)) next.add(file);
       return next;
     });
+  const changes = plan ? [...plan.existing.flatMap((e) => e.changes), ...plan.shape_changes] : [];
+  const fixable = changes.filter((c) => c.fixable).length;
+  const toCreate = plan ? plan.new.length + (plan.new_shapes.length > 0 ? 1 : 0) : 0;
+  const changed = plan ? plan.existing.filter((e) => e.changes.length > 0).length : 0;
   return (
     <div className="vars routes">
       <div className="history-bar">
@@ -76,8 +144,18 @@ export function RoutesPanel({ report, busy, onScan, onPickDir, onCreate, onOpen 
         <button className="ghost" onClick={onScan} disabled={busy}>
           {busy ? "Scanning…" : "Rescan"}
         </button>
-        <button className="primary" onClick={onCreate} disabled={busy || !plan || plan.new.length === 0}>
-          {plan && plan.new.length > 0 ? `Create ${plan.new.length} file${plan.new.length === 1 ? "" : "s"}` : "Create files"}
+        {fixable > 0 && (
+          <button className="ghost" onClick={() => onFix(null)} disabled={busy} title="routy import go --fix">
+            Fix {fixable}
+          </button>
+        )}
+        <button
+          className="primary"
+          onClick={onCreate}
+          disabled={busy || toCreate === 0}
+          title={plan && plan.new_shapes.length > 0 ? `New shapes go to ${plan.shapes_file}` : undefined}
+        >
+          {toCreate > 0 ? `Create ${plural(toCreate, "file")}` : "Create files"}
         </button>
       </div>
       {!plan ? (
@@ -86,7 +164,7 @@ export function RoutesPanel({ report, busy, onScan, onPickDir, onCreate, onOpen 
         <div className="routes-body">
           <p className="routes-summary muted">
             {plan.files} Go files · {plan.new.length + plan.existing.length} routes · {plan.new.length} new ·{" "}
-            {plan.existing.length} existing · {plan.stale.length} not in code
+            {plan.existing.length} existing ({changed} changed) · {plan.stale.length} not in code
           </p>
           {plan.warnings.map((w) => (
             <p key={w} className="routes-warning">
@@ -110,13 +188,57 @@ export function RoutesPanel({ report, busy, onScan, onPickDir, onCreate, onOpen 
             {plan.existing.map((e) => (
               <li key={e.route.method + e.route.path}>
                 <button onClick={() => onOpen(slash(e.file))}>
-                  <span className="r-mark">=</span>
+                  <span className={"r-mark" + (e.changes.length ? " changed" : "")}>{e.changes.length ? "~" : "="}</span>
                   <RouteLine method={e.route.method} path={routePath(e.route.path)} file={e.file} route={e.route} />
                 </button>
+                {e.changes.length > 0 && (
+                  <>
+                    <span className="badge r-badge" title="The request differs from the code">
+                      changed · {e.changes.length}
+                    </span>
+                    <Changes changes={e.changes} busy={busy} onFix={onFix} />
+                  </>
+                )}
               </li>
             ))}
           </ul>
-          {plan.stale.length > 0 && <h3>Not in code</h3>}
+          {(plan.new_shapes.length > 0 || plan.shape_changes.length > 0) && <h3>Response shapes</h3>}
+          <ul className="history-list">
+            {plan.new_shapes.map((d) => (
+              <li key={d.name}>
+                <button onClick={() => toggle("shape:" + d.name)} aria-expanded={open.has("shape:" + d.name)}>
+                  <span className="r-mark new">+</span>
+                  <span className="r-path r-shape">shape {d.name}</span>
+                  <span className="r-sub ellipsis">
+                    <span className="r-file">{slash(plan.shapes_file)}</span>
+                    {"  ←  "}
+                    {slash(d.source)}:{d.line} {d.go_type}
+                  </span>
+                </button>
+                {open.has("shape:" + d.name) && (
+                  <pre className="r-preview">
+                    shape {d.name} {d.shape}
+                  </pre>
+                )}
+              </li>
+            ))}
+          </ul>
+          {plan.shape_changes.length > 0 && <Changes changes={plan.shape_changes} busy={busy} onFix={onFix} />}
+          {plan.stale.length > 0 && (
+            <h3 className="r-stale-head">
+              Not in code
+              {plan.prunable.length > 0 && (
+                <button
+                  className="link"
+                  onClick={onPrune}
+                  disabled={busy}
+                  title={`Delete ${plan.prunable.map(slash).join(", ")}`}
+                >
+                  Remove {plural(plan.prunable.length, "file")}
+                </button>
+              )}
+            </h3>
+          )}
           <ul className="history-list">
             {plan.stale.map((s) => (
               <li key={s.file + s.method + s.url}>
@@ -128,9 +250,10 @@ export function RoutesPanel({ report, busy, onScan, onPickDir, onCreate, onOpen 
             ))}
           </ul>
           <p className="vars-note">
-            Existing files are never changed. A request matches a route by its <code>handler:</code>, or by method
-            and path (after <code>{"{{base}}"}</code> in <code>.http</code>); path parameters match any name. CLI:{" "}
-            <code>routy import go ./</code>
+            A request matches a route by its <code>handler:</code>, or by method and path (after{" "}
+            <code>{"{{base}}"}</code> in <code>.http</code>); path parameters match any name. Matched requests are
+            compared with the handler; <b>Apply</b> changes only that spot of the file. CLI:{" "}
+            <code>routy import go --check</code>, <code>--fix</code>
           </p>
         </div>
       )}

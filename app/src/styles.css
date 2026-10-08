@@ -423,6 +423,25 @@ label.check small { display: block; color: var(--faint); font-size: 11.5px; }
 .r-mark { flex: none; width: 10px; font: 700 12px var(--mono); color: var(--faint); }
 .r-mark.new { color: var(--m-get); }
 .r-mark.stale { color: var(--bad); }
+.r-mark.changed { color: var(--m-post); }
+.r-changes { list-style: none; margin: 0 8px 6px 26px; padding: 0; font-size: 11.5px; color: var(--text); }
+.r-changes li { padding: 2px 0; }
+.r-change { display: flex; align-items: baseline; gap: 6px; }
+.r-msg { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.r-actions { flex: none; display: flex; gap: 10px; }
+.r-sev { flex: none; width: 6px; height: 6px; border-radius: 50%; transform: translateY(-1px); }
+.r-sev.error { background: var(--bad); }
+.r-sev.warning { background: var(--m-post); }
+.r-badge { margin: -2px 0 4px 26px; color: var(--m-post); background: color-mix(in srgb, var(--m-post) 13%, transparent); }
+.r-diff { margin-left: 12px; padding: 6px 0; font-family: var(--mono); }
+.r-diff div { padding: 0 10px; white-space: pre; }
+.r-diff .add { color: var(--m-get); background: color-mix(in srgb, var(--m-get) 10%, transparent); }
+.r-diff .del { color: var(--bad); background: color-mix(in srgb, var(--bad) 10%, transparent); }
+.r-diff .hunk { color: var(--faint); }
+.r-shape { grid-column: 2 / 4; }
+.r-stale-head { display: flex; align-items: baseline; gap: 10px; }
+.r-stale-head .link { text-transform: none; letter-spacing: 0; font-weight: 400; }
+.r-at { font-family: var(--mono); color: var(--faint); }
 .r-path { font: 12px var(--mono); overflow-wrap: anywhere; }
 .r-sub { grid-column: 3; font-size: 11px; color: var(--faint); }
 .r-summary { grid-column: 3; font-size: 12px; color: var(--text); }

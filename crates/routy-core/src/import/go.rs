@@ -462,6 +462,7 @@ impl Index {
         Scan {
             files: self.sources.len(),
             routes,
+            shapes: describer.into_shapes(),
             warnings: self.warnings,
         }
     }

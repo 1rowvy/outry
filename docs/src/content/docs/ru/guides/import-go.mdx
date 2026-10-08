@@ -4,8 +4,9 @@ description: Запросы .routy для всех роутов chi, gin и net/
 ---
 
 Routy читает исходники Go-сервиса, находит зарегистрированные роуты и создаёт запрос `.routy` для
-каждого роута, у которого его ещё нет. Существующие файлы не меняются никогда, поэтому импорт можно
-повторять после добавления эндпоинтов.
+каждого роута, у которого его ещё нет. Существующие запросы сравниваются с кодом, чтобы коллекция не
+разъезжалась с сервисом: `routy import go --check` роняет CI, когда это случилось, а `--fix` обновляет
+запросы. Существующие файлы меняются только с `--fix`.
 
 ```sh
 cd my-service
@@ -17,14 +18,18 @@ routy import go .       # сканировать весь репозиторий
 + api/users/get.routy        GET /users  internal/http/routes.go:24
 + api/users/get-by-id.routy  GET /users/{id}  internal/http/routes.go:25
 = api/users/create.routy     POST /users  internal/http/routes.go:26
+~ api/users/update.routy     PUT /users/{id}  internal/http/routes.go:27
+    api/users/update.routy:4:9  error    body field `age` is a string, code expects int
 - api/legacy/get.routy       GET /legacy  (no such route in code)
 
-14 Go files, 3 routes: 2 new, 1 existing, 1 not in code
+14 Go files, 4 routes: 2 new, 2 existing (1 changed), 1 not in code
 created 2 files
+1 differences can be fixed with --fix (preview: --fix --dry-run)
 ```
 
 - `+` — для роута создан новый файл;
 - `=` — запрос для этого роута уже есть (под любым именем, в `.routy` или `.http`);
+- `~` — запрос есть, но расходится с кодом: [расхождения](#расхождения-с-кодом) перечислены под ним;
 - `-` — запрос указывает на `base`, но такого роута в коде нет.
 
 С `--dry-run` план показывается без записи. В приложении то же самое — кнопка синхронизации рядом с
@@ -63,7 +68,11 @@ Routy также читает обработчик и показывает, чт
   вложенные структуры показываются через точку (`user.email`), комментарий после поля сохраняется;
 - **query** — `r.URL.Query().Get("page")`, `c.Query`, `c.DefaultQuery`, `c.QueryParam`, `r.FormValue`
   и `c.ShouldBindQuery(&q)` (поля из тегов `form`);
-- **заголовки** — `r.Header.Get("X-Tenant-ID")`, `c.GetHeader`.
+- **заголовки** — `r.Header.Get("X-Tenant-ID")`, `c.GetHeader`;
+- **ответ** — значение первого успешного `json.NewEncoder(w).Encode(v)`, `c.JSON(200, v)`,
+  `render.JSON(w, r, v)` или своего `writeJSON(w, http.StatusOK, v)`; ответы с кодом ошибки и
+  `gin.H` / map пропускаются. Запрос получает `expect { body matches Order }`, а структура
+  становится [shape](#shape-ответов).
 
 ```routy title="api/users/post.routy"
 // Создать пользователя
@@ -135,6 +144,110 @@ GET /users {
 переименовывать и раскладывать по папкам — следующий импорт их узнает.
 
 Если адрес сервиса в `.http`-файлах называется не `base`, укажите `--base <ИМЯ>`.
+
+## Расхождения с кодом
+
+Каждый найденный запрос сверяется с обработчиком. У каждого расхождения есть строка в файле запроса
+и место в Go-коде; **ошибки** (error) роняют `--check`, **предупреждения** (warning) — нет.
+Расхождения с пометкой *fix* исправляет `--fix`.
+
+| Расхождение | Пример | |
+|-------------|--------|-|
+| Сменился метод (запрос найден по `handler:`) | `method changed in code: PUT → PATCH` | error, fix |
+| Сменился путь (запрос найден по `handler:`) | `path changed in code: /users/{id} → /v2/users/{id}` | error, fix |
+| Переименован параметр пути | `path parameter renamed in code: {id} → {user_id}` | warning |
+| Обработчик читает тело, а запрос его не шлёт | `handler reads a dto.CreateUser body, the request sends none` | error, fix |
+| Обязательного поля нет в `body` | `` required field `email` (string) is missing from body `` | error, fix |
+| Поля из `body` нет в структуре | `` body field `nmae` is not in dto.CreateUser `` | error, fix |
+| Литерал не того типа | `` body field `age` is a string, code expects int `` | error, fix |
+| Обработчик читает query-параметр, которого запрос не шлёт | `` handler reads query parameter `page`, the request doesn't send it `` | warning (error, если `required`) |
+| Обработчик читает заголовок, которого запрос не шлёт | `` handler reads header `X-Tenant-ID`, the request doesn't send it `` | warning |
+| Ответ не проверяется | `` handler responds with Order, the request doesn't check `body matches Order` `` | warning, fix |
+
+Со структурой сравнивается только литерал-объект `body { … }`: вложенные объекты и массивы — по именам
+из `json` (`address.city`, `items[].sku`), типы — только у литералов; именованные типы раскрываются
+(`type Status string` ждёт строку). Тело из переменной, файла, формы или строки не проверяется.
+
+Запрос, который ждёт ошибку клиента — `status == 400`, `status >= 400`, `status in [401, 403]`, —
+негативный тест: тело, query и заголовки в нём неправильные нарочно, поэтому проверяются только метод
+и путь.
+
+Запросы в `.http` сравниваются ограниченно: тело — только если это валидный JSON, плюс query-параметры
+и заголовки, без правок. Метод и путь — то, по чему они найдены.
+
+### Что меняет `--fix`
+
+Правка меняет только своё место, а затронутый запрос печатается заново, как это делает `routy fmt`;
+остальной файл остаётся как был.
+
+- новый метод или путь; параметры пути сохраняют имена из запроса (`{user_id}` остаётся, даже если в
+  коде `{id}`) — на них ссылаются вызовы и переменные;
+- недостающее тело или обязательное поле добавляется с пустым значением нужного типа, лишнее поле
+  удаляется;
+- литерал не того типа приводится, когда это возможно (`"25"` → `25`, `1` → `"1"`), иначе заменяется
+  пустым значением;
+- в `expect` добавляется `body matches Order`.
+
+Переименование параметров, query-параметры и заголовки остаются вам — их значений Routy не знает.
+
+## Shape ответов
+
+Структура, которой отвечает обработчик, становится [shape](/routy/ru/reference/routy-format/#формы),
+а созданный запрос проверяет ответ через `body matches`. Shape пишутся в `shapes.routy` проекта (или в
+файл, где shape уже есть), по одному на тип Go, с его местом в комментарии:
+
+```routy title="api/shapes.routy"
+// dto.Order — internal/dto/order.go:12
+shape Order {
+  id: integer,
+  total: number,
+  note?: string,
+  parent: Order | null,
+  customer: Customer,
+  items: [Item],
+  created: string,
+}
+```
+
+Имена — из тегов `json`, `omitempty` делает поле необязательным, указатель без него может быть `null`,
+вложенные структуры становятся отдельными shape, `time.Time` — строка, map и интерфейсы — `{}` и `any`.
+
+Следующие импорты сравнивают shape с кодом. Shape может быть строже кода — литералы вместо `string`
+(`status: "new" | "paid"`), `integer` вместо `number`, без `null` — это не расхождение. Поле, которого
+нет в структуре, или тип, который ей противоречит, — ошибка; поле, которого нет в shape, —
+предупреждение. `--fix` переписывает shape по коду, оставляя ваши совместимые поля как есть. Shape для
+новых типов добавляет `routy import go`, как и новые запросы.
+
+## Проверка в CI и исправление
+
+```sh
+routy import go . --check                  # отчёт по файлам, код выхода 1 при ошибках
+routy import go . --check --format github  # то же аннотациями GitHub Actions
+routy import go . --fix --dry-run          # diff всех правок
+routy import go . --fix                    # применить (и создать новые файлы)
+routy import go . --prune                  # удалить файлы, все роуты которых пропали
+```
+
+`--check` ничего не пишет. Он падает на новых роутах без запроса, запросах, чьего роута больше нет,
+типах ответа без shape и расхождениях-ошибках:
+
+```txt
+api/users/update.routy
+  4:9     error    body field `age` is a string, code expects int  ← internal/http/routes.go:27
+
+internal/http/routes.go
+  24:1    error    route GET /users has no request (`routy import go` creates api/users/get.routy)
+
+2 routes checked: 2 errors, 0 warnings; 1 fixable with `routy import go --fix`
+```
+
+С `--format github` каждая строка становится аннотацией на файле `.routy` — или на строке Go, для
+нового роута, — и видна в pull request. `--format json` (или `--json`) выводит весь план:
+`existing[].changes` с `severity`, `go`, `fixable` и `diff` каждой правки, `shape_changes`,
+`new_shapes`, `stale` и `prunable`.
+
+`--prune` удаляет только файлы целиком, где все запросы указывают на пропавшие роуты и больше ничего
+нет (сценариев, shape, `let`). Остальные устаревшие запросы перечислены — их удалите вручную.
 
 ## Другие роутеры
 

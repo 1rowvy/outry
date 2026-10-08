@@ -3,12 +3,13 @@
 //! `c.ShouldBindJSON(&req)`, свои `decodeJSON(r, &req)`), query и заголовки — из чтения в коде
 //! (`r.URL.Query().Get("page")`, `c.Query("page")`, `r.Header.Get("X-Id")`, `c.ShouldBindQuery(&q)`).
 
+use std::cell::RefCell;
 use std::collections::HashMap;
 
 use tree_sitter::Node;
 
 use super::{Func, GoFile, children, text};
-use crate::import::{Body, Field, RouteInfo};
+use crate::import::{Body, Field, JsonType, Response, RouteInfo, ShapeDef};
 
 /// Глубина вложенных структур в примере тела.
 const MAX_DEPTH: usize = 6;
@@ -40,6 +41,8 @@ pub(super) struct Describer<'a> {
     funcs: &'a [Func],
     /// (пакет, имя) → (файл, байтовый диапазон type_spec)
     types: HashMap<(String, String), (usize, usize, usize)>,
+    /// Shape для структур из ответов, по мере встречи
+    shapes: RefCell<Vec<ShapeDef>>,
 }
 
 impl<'a> Describer<'a> {
@@ -61,7 +64,13 @@ impl<'a> Describer<'a> {
             files,
             funcs,
             types,
+            shapes: RefCell::default(),
         }
+    }
+
+    /// Shape всех структур, встреченных в ответах.
+    pub(super) fn into_shapes(self) -> Vec<ShapeDef> {
+        self.shapes.into_inner()
     }
 
     /// Описание роута по выражению-обработчику в файле `file`.
@@ -236,6 +245,7 @@ impl<'a> Describer<'a> {
                             ty: "string".into(),
                             required: false,
                             comment: None,
+                            json: None,
                         });
                     }
                     return;
@@ -283,6 +293,262 @@ impl<'a> Describer<'a> {
                 });
             }
         });
+        self.response(file, body, info);
+    }
+
+    /// Тип ответа: первый успешный `json.NewEncoder(w).Encode(x)`, `c.JSON(200, x)`,
+    /// `render.JSON(w, r, x)`, свой `writeJSON(w, http.StatusOK, x)`. Ответы с кодом ошибки
+    /// и `gin.H`/map пропускаются.
+    fn response(&self, file: usize, body: Node<'a>, info: &mut RouteInfo) {
+        let src = &self.files[file].src;
+        walk(body, &mut |n| {
+            if info.response.is_some() || n.kind() != "call_expression" {
+                return;
+            }
+            let (Some(func), Some(args)) = (
+                n.child_by_field_name("function"),
+                n.child_by_field_name("arguments"),
+            ) else {
+                return;
+            };
+            let (name, operand) = match func.kind() {
+                "selector_expression" => (
+                    func.child_by_field_name("field")
+                        .map_or("", |f| text(f, src)),
+                    func.child_by_field_name("operand")
+                        .map_or("", |o| text(o, src)),
+                ),
+                "identifier" => (text(func, src), ""),
+                _ => return,
+            };
+            let lname = name.to_ascii_lowercase();
+            let encode = name == "Encode" && operand.contains("NewEncoder");
+            let json = lname.contains("json") && !BODY_CALLS.iter().any(|w| lname.contains(w));
+            if !encode && !json {
+                return;
+            }
+            let args: Vec<Node> = children(args).collect();
+            if args.iter().any(|a| error_status(text(*a, src))) {
+                return;
+            }
+            let Some(&last) = args.last() else {
+                return;
+            };
+            let Some((f, ty, scope)) = self.value_type(file, body, last) else {
+                return;
+            };
+            let shape = self.shape_of(f, ty, scope, 0);
+            if shape == "any" || shape == "{}" {
+                return;
+            }
+            info.response = Some(Response {
+                type_name: compact(text(ty, &self.files[f].src))
+                    .trim_start_matches(['*', '&'])
+                    .to_string(),
+                shape,
+            });
+        });
+    }
+
+    /// Тип выражения-значения в теле обработчика: переменная, `&T{…}`, `T{…}`, вызов функции.
+    fn value_type(
+        &self,
+        file: usize,
+        body: Node<'a>,
+        v: Node<'a>,
+    ) -> Option<(usize, Node<'a>, Node<'a>)> {
+        let src = &self.files[file].src;
+        match v.kind() {
+            "identifier" => self.var_type(file, body, text(v, src)),
+            "unary_expression" => self.value_type(file, body, v.child_by_field_name("operand")?),
+            "composite_literal" => Some((file, v.child_by_field_name("type")?, body)),
+            "call_expression" => {
+                let (f, _, decl) = self.target(file, v.child_by_field_name("function")?, 0)?;
+                let decl = decl?;
+                let mut result = decl.child_by_field_name("result")?;
+                if result.kind() == "parameter_list" {
+                    result = children(result).next()?.child_by_field_name("type")?;
+                }
+                Some((f, result, decl))
+            }
+            _ => None,
+        }
+    }
+
+    /// Shape для типа Go: `string`, `integer`, `[Order]`, `{ id: integer }`, имя структуры.
+    /// Именованные структуры становятся отдельными shape (`self.shapes`).
+    fn shape_of(&self, file: usize, ty: Node<'a>, scope: Node<'a>, depth: usize) -> String {
+        if depth > MAX_DEPTH {
+            return "any".into();
+        }
+        let src = &self.files[file].src;
+        match ty.kind() {
+            "pointer_type" | "parenthesized_type" => ty
+                .named_child(0)
+                .map_or("any".into(), |t| self.shape_of(file, t, scope, depth + 1)),
+            "slice_type" | "array_type" => match ty.child_by_field_name("element") {
+                Some(el) if text(el, src) == "byte" => "string".into(),
+                Some(el) => format!("[{}]", self.shape_of(file, el, scope, depth + 1)),
+                None => "[any]".into(),
+            },
+            "map_type" => "{}".into(),
+            "struct_type" => self.struct_shape(file, ty, scope, depth),
+            "type_identifier" => match text(ty, src) {
+                "string" => "string".into(),
+                "bool" => "boolean".into(),
+                "int" | "int8" | "int16" | "int32" | "int64" | "uint" | "uint8" | "uint16"
+                | "uint32" | "uint64" | "byte" | "rune" => "integer".into(),
+                "float32" | "float64" => "number".into(),
+                "any" | "error" => "any".into(),
+                _ => self.named_shape(file, ty, scope, depth),
+            },
+            "qualified_type" => match compact(text(ty, src)).as_str() {
+                "time.Time" | "uuid.UUID" => "string".into(),
+                "json.Number" => "number".into(),
+                "json.RawMessage" => "any".into(),
+                _ => self.named_shape(file, ty, scope, depth),
+            },
+            _ => "any".into(),
+        }
+    }
+
+    /// Именованный тип: структура → shape с её именем, `type Status string` → `string`.
+    fn named_shape(&self, file: usize, ty: Node<'a>, scope: Node<'a>, depth: usize) -> String {
+        let Some((f, resolved)) = self.resolve(file, ty, scope, depth) else {
+            return "any".into();
+        };
+        if resolved.id() == ty.id() {
+            return "any".into(); // чужой пакет — не знаем
+        }
+        if resolved.kind() != "struct_type" {
+            return self.shape_of(f, resolved, resolved, depth + 1);
+        }
+        let name = type_name(ty, &self.files[file].src);
+        let go_type = format!("{}.{name}", self.files[f].package);
+        let shape_name = {
+            let mut shapes = self.shapes.borrow_mut();
+            if let Some(d) = shapes.iter().find(|d| d.go_type == go_type) {
+                return d.name.clone();
+            }
+            let mut shape_name = upper_first(&name);
+            if shapes.iter().any(|d| d.name == shape_name) {
+                shape_name = format!("{}{shape_name}", upper_first(&self.files[f].package));
+            }
+            shapes.push(ShapeDef {
+                name: shape_name.clone(),
+                go_type: go_type.clone(),
+                source: self.files[f].path.clone(),
+                line: resolved.start_position().row + 1,
+                shape: String::new(),
+            });
+            shape_name
+        };
+        let shape = self.struct_shape(f, resolved, resolved, depth + 1);
+        if let Some(d) = self
+            .shapes
+            .borrow_mut()
+            .iter_mut()
+            .find(|d| d.go_type == go_type)
+        {
+            d.shape = shape;
+        }
+        shape_name
+    }
+
+    /// `{ id: integer, note?: string, parent: Order | null }`: `omitempty` — необязательное поле,
+    /// указатель без него — может быть `null`.
+    fn struct_shape(&self, file: usize, st: Node<'a>, scope: Node<'a>, depth: usize) -> String {
+        let fields: Vec<String> = self
+            .struct_fields(file, st, scope, depth)
+            .into_iter()
+            .map(|(k, optional, shape)| {
+                let k = if is_shape_key(&k) {
+                    k
+                } else {
+                    serde_json::to_string(&k).unwrap_or_default()
+                };
+                format!("{k}{}: {shape}", if optional { "?" } else { "" })
+            })
+            .collect();
+        if fields.is_empty() {
+            "{}".into()
+        } else {
+            format!("{{ {} }}", fields.join(", "))
+        }
+    }
+
+    fn struct_fields(
+        &self,
+        file: usize,
+        st: Node<'a>,
+        scope: Node<'a>,
+        depth: usize,
+    ) -> Vec<(String, bool, String)> {
+        let mut out = Vec::new();
+        if depth > MAX_DEPTH {
+            return out;
+        }
+        let Some(list) = children(st).find(|n| n.kind() == "field_declaration_list") else {
+            return out;
+        };
+        let src = &self.files[file].src;
+        for decl in children(list).filter(|n| n.kind() == "field_declaration") {
+            let Some(fty) = decl.child_by_field_name("type") else {
+                continue;
+            };
+            let tag = decl
+                .child_by_field_name("tag")
+                .map(|t| literal_raw(t, src))
+                .unwrap_or_default();
+            let names: Vec<String> = {
+                let mut c = decl.walk();
+                decl.children_by_field_name("name", &mut c)
+                    .map(|n| text(n, src).to_string())
+                    .collect()
+            };
+            let json = tag_value(&tag, "json");
+            let mut opts = json.as_deref().unwrap_or("").split(',');
+            let key = opts.next().unwrap_or("").to_string();
+            let opts: Vec<&str> = opts.collect();
+            if key == "-" {
+                continue;
+            }
+            if names.is_empty() && key.is_empty() {
+                let inner = if fty.kind() == "pointer_type" {
+                    fty.named_child(0)
+                } else {
+                    Some(fty)
+                };
+                if let Some((f, r)) = inner.and_then(|t| self.resolve(file, t, scope, depth + 1))
+                    && r.kind() == "struct_type"
+                {
+                    out.extend(self.struct_fields(f, r, r, depth + 1));
+                }
+                continue;
+            }
+            let names = if names.is_empty() {
+                vec![type_name(fty, src)]
+            } else {
+                names
+            };
+            let optional = opts.contains(&"omitempty") || opts.contains(&"omitzero");
+            let mut shape = if opts.contains(&"string") {
+                "string".to_string()
+            } else {
+                self.shape_of(file, fty, scope, depth + 1)
+            };
+            if fty.kind() == "pointer_type" && !optional && shape != "any" {
+                shape.push_str(" | null");
+            }
+            for name in names {
+                if !name.starts_with(|c: char| c.is_ascii_uppercase()) {
+                    continue;
+                }
+                let k = if key.is_empty() { name } else { key.clone() };
+                out.push((k, optional, shape.clone()));
+            }
+        }
+        out
     }
 
     /// Поля структуры `ty` (тег — первый найденный из `tags`) и пример значения.
@@ -347,7 +613,9 @@ impl<'a> Describer<'a> {
                     Some("") | None => name,
                     Some(k) => k.to_string(),
                 };
-                obj.push((key.clone(), self.sample(file, fty, scope, depth + 1)));
+                let sample = self.sample(file, fty, scope, depth + 1);
+                let json = sample.json_type();
+                obj.push((key.clone(), sample));
                 // Вложенная структура — её поля через точку: `user.email`, `items[].id`.
                 if let Some((suffix, subs)) = self.nested(file, fty, scope, tags, depth + 1) {
                     fields.extend(subs.into_iter().map(|f| Field {
@@ -361,6 +629,7 @@ impl<'a> Describer<'a> {
                     ty: compact(text(fty, src)),
                     required,
                     comment: comment.clone(),
+                    json,
                 });
             }
         }
@@ -662,6 +931,35 @@ fn local_type<'t>(scope: Node<'t>, name: &str, src: &str) -> Option<Node<'t>> {
     found
 }
 
+/// Код ответа — ошибка: `http.StatusBadRequest`, `500`.
+fn error_status(arg: &str) -> bool {
+    const OK: &[&str] = &[
+        "StatusOK",
+        "StatusCreated",
+        "StatusAccepted",
+        "StatusNonAuthoritativeInfo",
+        "StatusNoContent",
+        "StatusResetContent",
+        "StatusPartialContent",
+    ];
+    if let Some(name) = arg.strip_prefix("http.") {
+        return name.starts_with("Status") && !OK.contains(&name);
+    }
+    arg.parse::<u16>().is_ok_and(|n| n >= 400)
+}
+
+fn upper_first(s: &str) -> String {
+    let mut c = s.chars();
+    c.next()
+        .map(|f| f.to_uppercase().chain(c).collect())
+        .unwrap_or_default()
+}
+
+fn is_shape_key(s: &str) -> bool {
+    s.starts_with(|c: char| c.is_ascii_alphabetic() || c == '_')
+        && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+}
+
 fn type_name(ty: Node, src: &str) -> String {
     let t = compact(text(ty, src));
     let t = t.trim_start_matches('*');
@@ -683,6 +981,17 @@ pub(super) enum Json {
 }
 
 impl Json {
+    fn json_type(&self) -> Option<JsonType> {
+        Some(match self {
+            Json::Null => return None,
+            Json::Bool => JsonType::Boolean,
+            Json::Num => JsonType::Number,
+            Json::Str(_) => JsonType::String,
+            Json::Arr(_) => JsonType::Array,
+            Json::Obj(_) => JsonType::Object,
+        })
+    }
+
     fn pretty(&self) -> String {
         let mut out = String::new();
         self.write(&mut out, 0);

@@ -116,23 +116,26 @@ flow Checkout {
 Не просто «сходится / нет», а что поменялось в Go и что поправить в `.routy` — с автоправкой.
 - [x] Поле `handler: users.GetUser` в запросе: импорт пишет его, сопоставление по хендлеру переживает смену пути и метода
   (без `handler` — по методу и пути, `import/mod.rs`)
-- [ ] Сравнение по полям: путь/метод, переименованный path-параметр, `required`-поле тела отсутствует в `body`,
-  лишнее поле, сменился тип (`"25"` vs `int`), новые query/заголовки, тип ответа (`shape` в `shapes.routy`),
-  удалённый роут, новый роут
-- [ ] `routy import go --check`: отчёт по файлам со ссылкой на строку в Go, exit code ≠ 0 для CI
-- [ ] `--fix` — безопасные правки с diff, `--fix --dry-run`; удаление файлов только с `--prune`
-- [ ] `--format github` — аннотации в PR на строках `.routy`/Go; `--json` для остальных
-- [ ] GUI: во вкладке Routes бейдж «changed», diff и «Apply» на каждое изменение
-- [ ] LSP: диагностика в `.routy` («path changed in code: …») + Quick Fix (этап 3)
-- [ ] `.http`: ограниченно — путь и метод; тело, только если это валидный JSON
-- [ ] `body matches Order` по Go-структуре из кода (теги `json` уже разбираем); импорт генерирует его из типа ответа
-  (`json.Encode` / `c.JSON`)
-- [ ] JUnit-отчёт (`--report junit.xml`)
-- [ ] Рецепт для CI в docs (GitHub Actions, GitLab) и готовый `routy-action`
+- [x] Сравнение по полям: путь/метод, переименованный path-параметр, `required`-поле тела отсутствует в `body`,
+  лишнее поле, сменился тип (`"25"` vs `int`), новые query/заголовки, удалённый роут, новый роут
+  (`import/diff.rs` → `Existing::changes`; негативные тесты со `status` 4xx — только путь и метод)
+- [x] Тип ответа: `json.Encode` / `c.JSON` / `writeJSON` → `shape` в `shapes.routy` (`go/describe.rs`), новые запросы
+  получают `body matches Order`; shape сравниваются со структурами (строже кода — можно), `--fix` переписывает
+  несовместимые поля (`import/shapes.rs`)
+- [x] `routy import go --check`: отчёт по файлам со ссылкой на строку в Go, exit code 1 при ошибках (warning — нет)
+- [x] `--fix` — правки с diff (затронутый запрос печатается заново `fmt`), `--fix --dry-run`; `--prune` удаляет
+  файлы, где все запросы — к пропавшим роутам
+- [x] `--format github` — аннотации на строках `.routy`/Go; `--format json` / `--json`
+- [x] GUI: во вкладке Routes бейдж «changed», diff и «Apply» на каждое изменение, «Fix N», «Remove N files»
+- [ ] LSP: диагностика в `.routy` («path changed in code: …») + Quick Fix — на этапе 3; данные готовы:
+  у `Change` есть строка/столбец и `Edit`
+- [x] `.http`: сопоставление по методу и пути; сравниваются тело (если валидный JSON), query и заголовки, без правок
+- [x] `body matches Order` по Go-структуре: импорт генерирует shape из типа ответа
 
 ### 3. Редакторы без GUI: `routy lsp`
 - [ ] `routy lsp` (stdio, `tower-lsp` или `lsp-server`) внутри того же бинаря
 - [ ] Диагностика как `routy check`; автодополнение переменных (`Vars::list`), встроенных функций и имён запросов
+- [ ] Расхождения с кодом (`import::Plan::changes`, этап 2) как диагностика, `Edit` — как Quick Fix
 - [ ] Hover: значение и источник переменной (`Vars::lookup`, секреты замаскированы), сигнатура вызываемого запроса
 - [ ] Go to definition: переменная → строка в `env.toml`, `Login()` → его файл, `Order` → Go-структура
 - [ ] Code lens «Send» / «Run flow» → ответ в отдельном буфере
@@ -157,6 +160,8 @@ LSP-клиент + интерфейс; логика вся в `routy`, свои�
 - [ ] Подпись и нотаризация macOS, подпись Windows-установщика
 
 ### Потом
+- CI-обвязка для этапа 2: JUnit-отчёт (`--report junit.xml`); рецепт для CI в docs (GitHub Actions, GitLab)
+  и готовый `routy-action`
 - Импорт роутов из других языков (FastAPI, Express, Spring) — когда Go-история заработает
 - Импорт из Postman / Insomnia / OpenAPI в `*.routy`
 - GraphQL, WebSocket — не раньше этапов 1–4

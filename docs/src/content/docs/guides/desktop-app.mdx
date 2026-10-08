@@ -105,8 +105,11 @@ runs.
 
 **Routes** compares the routes of your Go service with the project's requests, like
 [`routy import go`](/routy/guides/import-go/): new routes, routes that already have a request, and
-requests whose route is gone from the code. **Create files** writes `.routy` requests for the new ones;
-existing files are never changed. The sync button next to **Requests** opens the tab and rescans. The Go folder defaults to
+requests whose route is gone from the code. **Create files** writes `.routy` requests for the new ones
+and shapes for new response types. A request that differs from its handler gets a **changed** badge
+and the list of [differences](/routy/guides/import-go/#differences-from-the-code): **Diff** shows what a
+fix changes, **Apply** writes it, **Fix N** in the toolbar applies all of them, and **Remove N files**
+deletes files whose routes are all gone. The sync button next to **Requests** opens the tab and rescans. The Go folder defaults to
 the one above `api/`; click its path to choose another.
 
 ## Live reload
