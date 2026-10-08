@@ -98,6 +98,26 @@ Create `api/env.toml` and an example request in the given folder (default: curre
 routy init [DIR]
 ```
 
+## `routy import go`
+
+Create a request file for every route of a Go service (chi, gin, `net/http`) that doesn't have one yet.
+Existing files are never changed. See [Import routes from Go](/routy/guides/import-go/).
+
+```sh
+routy import go [DIR]
+```
+
+`DIR` is the folder with Go code, scanned recursively (default: current). Files are created in the
+project found from the current folder; it must have an `env.toml`.
+
+| Flag | Description |
+|------|-------------|
+| `--dry-run` | Only print the plan |
+| `--base <NAME>` | Variable with the service address in generated URLs, default `base` |
+| `--query <FILE.scm>` | An extra tree-sitter query for another router; can be repeated |
+| `--project <DIR>` | Project folder with `env.toml` |
+| `--json` | Print the plan as JSON |
+
 ## `routy update`
 
 Update the CLI to the latest GitHub release. The archive's SHA-256 checksum is verified before the

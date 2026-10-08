@@ -52,7 +52,7 @@ used by the next request. Keep tokens and passwords out of this file — use **A
 
 ## Response
 
-The right panel has three tabs: **Response**, **History** and **Variables**. The response itself has
+The right panel has four tabs: **Response**, **History**, **Variables** and **Routes**. The response itself has
 these views:
 
 - **body** — pretty-printed and highlighted JSON, HTML or XML; the search button (or
@@ -78,6 +78,14 @@ from — `env.toml`, `saved`, `ROUTY_*` or `keychain` — like [`routy vars`](/r
 Secrets are masked. Secrets listed in [`secrets`](/routy/reference/env-toml/) but not set anywhere are
 marked **missing**, with a button to add them. **Clear saved** forgets the values captured by `> save`
 in this environment.
+
+## Routes
+
+**Routes** compares the routes of your Go service with the project's request files, like
+[`routy import go`](/routy/guides/import-go/): new routes, routes that already have a file, and files
+whose route is gone from the code. **Create files** writes requests for the new ones; existing files are
+never changed. The sync button next to **Requests** opens the tab and rescans. The Go folder defaults to
+the one above `api/`; click its path to choose another.
 
 ## Live reload
 

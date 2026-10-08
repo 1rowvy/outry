@@ -1,0 +1,115 @@
+---
+title: Import routes from Go
+description: Generate request files for every chi, gin and net/http route of a Go service.
+---
+
+Routy can read your Go service's source code, find the registered routes and create a `.http` file for
+every route that doesn't have one yet. Existing files are never changed, so you can re-run the import
+after adding endpoints.
+
+```sh
+cd my-service
+routy init              # once: api/env.toml with {{base}}
+routy import go .       # scan the whole repository
+```
+
+```txt
++ api/users/get.http               GET /users  internal/http/routes.go:24
++ api/users/get-by-id.http         GET /users/{{id}}  internal/http/routes.go:25
+= api/users/create.http            POST /users  internal/http/routes.go:26
+- api/legacy/get.http              GET {{base}}/legacy  (no such route in code)
+
+14 Go files, 3 routes: 2 new, 1 existing, 1 not in code
+created 2 files
+```
+
+- `+` — a new file was created for the route;
+- `=` — a request for this route already exists (under any name);
+- `-` — a request file points at `{{base}}/…`, but no such route was found in the code.
+
+Add `--dry-run` to see the plan without writing anything. In the desktop app the same thing is the sync
+button next to **Requests**, or the **Routes** tab.
+
+## Supported routers
+
+| Router | What is recognized |
+|--------|--------------------|
+| [chi](https://github.com/go-chi/chi) | `r.Get/Post/…`, `r.Method("GET", …)`, `r.Handle`, `r.Route("/prefix", func(r chi.Router) {…})`, `r.Mount("/prefix", sub())`, `r.Mount("/prefix", subRouter)`, `r.With(mw).Get(…)` |
+| [gin](https://github.com/gin-gonic/gin) | `r.GET/POST/…`, `r.Any`, `r.Handle("GET", …)`, `v1 := r.Group("/v1")` with nested groups, `r.Group("/v1").GET(…)` |
+| `net/http` | `mux.HandleFunc("GET /items/{id}", h)` (Go 1.22 patterns), `http.HandleFunc("/path", h)` |
+
+A router is only looked for in files that import it. Routes registered in other functions and packages
+get their prefixes too: `r.Mount("/admin", admin.Routes())`, `users.Register(v1)`,
+`users.Register(r.Group("/users"))` — that's why it's best to scan the whole repository, not just
+`cmd/server`. `vendor/`, `testdata/` and `*_test.go` are skipped.
+
+Paths may be string literals, concatenations and package constants (`apiPrefix + "/users"`). A path
+computed at runtime can't be resolved; it is reported as a warning.
+
+## Generated files
+
+Path parameters become variables: `{id}`, `{id:[0-9]+}`, `{path...}`, `:id` and `*path` all turn into
+`{{id}}` / `{{path}}`.
+
+```http title="api/users/get-by-id.http"
+# chi internal/http/routes.go:25 → h.GetUser
+GET {{base}}/users/{{id}}
+```
+
+`POST`, `PUT` and `PATCH` get an empty JSON body `{}`. A route that accepts any method (`r.Handle`,
+gin `Any`) is created as `GET` with a `# any method` comment.
+
+File names follow the path: static segments become folders, trailing parameters go into the name.
+
+| Route | File |
+|-------|------|
+| `GET /users` | `users/get.http` |
+| `POST /users` | `users/post.http` |
+| `GET /users/{id}` | `users/get-by-id.http` |
+| `GET /users/{id}/posts` | `users/posts/get.http` |
+| `GET /` | `root/get.http` |
+
+If the name is taken by a request for a different route, a suffix is added: `users/get-2.http`.
+
+## Matching existing files
+
+A file counts as the request for a route when its method and URL path match, ignoring the query string.
+Only URLs that start with `{{base}}` are compared; parameters match any variable, so
+`{{base}}/users/{{user_id}}` covers `GET /users/{id}`. Rename and reorganize the generated files freely —
+the next import still recognizes them.
+
+Use `--base <NAME>` if your environments call the service address something other than `base`.
+
+## Other routers
+
+Routes are found by [tree-sitter queries](https://tree-sitter.github.io/tree-sitter/using-parsers/queries/)
+— the built-in ones live in
+[`crates/routy-core/queries`](https://github.com/1rowvy/routy/tree/master/crates/routy-core/queries).
+To support another router, write your own query and pass it with `--query`:
+
+```scheme title="echo.scm"
+; routy: import github.com/labstack/echo
+(call_expression
+  function: (selector_expression
+    operand: (_) @receiver
+    field: (field_identifier) @method)
+  arguments: (argument_list . (_) @path (_) @handler .)
+  (#any-of? @method "GET" "POST" "PUT" "PATCH" "DELETE")) @route
+```
+
+```sh
+routy import go . --query echo.scm
+```
+
+| Capture | Meaning |
+|---------|---------|
+| `@route` | The call that registers a route |
+| `@path` | Its path |
+| `@method` | Method: `Get`, `GET`, `"GET"` or `http.MethodGet`. Without it the method comes from a `"GET /path"` pattern, otherwise any method |
+| `@handler` | Handler, written into the comment |
+| `@receiver` | The router the method is called on — used to find its group prefix |
+| `@group` + `@group.path` | A prefix. With `@group.var` it applies to that variable (`v1 := r.Group("/v1")`), with `@group.body` to everything inside the block (`r.Route`) |
+| `@mount` + `@mount.func` | Routes of the function with this name get the prefix of `@receiver` plus `@mount.path`; `@mount.pkg` narrows it to a package |
+
+Captures starting with `_` are free for predicates. A `; routy: import <path>` line limits the query to
+files importing a package with that prefix.

@@ -387,3 +387,19 @@ label.check:hover { background: var(--hover); }
 label.check input { margin: 2px 0 0; accent-color: var(--accent); }
 label.check small { display: block; color: var(--faint); font-size: 11.5px; }
 .path-form label { font-size: 11.5px; padding: 0 2px; }
+
+/* Синхронизация роутов с кодом */
+
+.routes .history-bar .primary { padding: 3px 10px; font-size: 12px; }
+.r-dir { min-width: 0; max-width: 60%; font: 12px var(--mono); text-align: left; }
+.routes-body { overflow: auto; flex: 1; }
+.routes-summary { margin: 10px 14px 4px; font-size: 12px; }
+.routes-warning { margin: 4px 14px; font: 12px var(--mono); color: var(--m-patch); }
+.routes h3 { margin: 12px 14px 0; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--faint); }
+.routes .history-list { flex: none; overflow: visible; padding: 4px 6px; }
+.r-row { display: flex; align-items: center; gap: 8px; padding: 6px 8px; }
+.r-mark { flex: none; width: 10px; font: 700 12px var(--mono); color: var(--faint); }
+.r-mark.new { color: var(--m-get); }
+.r-mark.stale { color: var(--bad); }
+.r-path { flex: 1; min-width: 0; font: 12px var(--mono); }
+.r-file { flex: 0 1 auto; max-width: 35%; text-align: right; color: var(--faint); }

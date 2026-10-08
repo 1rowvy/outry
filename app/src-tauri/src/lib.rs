@@ -479,6 +479,60 @@ async fn set_secret(
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
+#[derive(Serialize)]
+struct ImportReport {
+    /// Каталог, который сканировался
+    dir: PathBuf,
+    plan: routy_core::import::Plan,
+    /// Созданные файлы (при `apply`), относительно проекта
+    created: Vec<String>,
+}
+
+/// Каталог с кодом по умолчанию: над `api/` — репозиторий, иначе сам проект.
+fn default_source_dir(root: &Path) -> PathBuf {
+    match root.file_name() {
+        Some(n) if n == "api" => root.parent().unwrap_or(root).to_path_buf(),
+        _ => root.to_path_buf(),
+    }
+}
+
+/// Роуты из Go-кода в `dir` против файлов проекта (`routy import go`); `apply` — создать недостающие.
+#[tauri::command]
+async fn import_go(
+    state: State<'_, AppState>,
+    dir: Option<PathBuf>,
+    apply: bool,
+) -> CmdResult<ImportReport> {
+    let root = {
+        let guard = state.session.lock().await;
+        let s = guard.as_ref().ok_or("no project open")?;
+        if !s.project.has_config() {
+            return Err("create env.toml first".into());
+        }
+        s.project.root.clone()
+    };
+    let dir = dir.unwrap_or_else(|| default_source_dir(&root));
+    tauri::async_runtime::spawn_blocking(move || {
+        use routy_core::import;
+        let plan = import::plan_go(&dir, &root, &[], import::DEFAULT_BASE).map_err(err)?;
+        let created = if apply {
+            import::apply(&root, &plan).map_err(err)?
+        } else {
+            Vec::new()
+        };
+        Ok(ImportReport {
+            dir,
+            plan,
+            created: created
+                .iter()
+                .map(|p| p.to_string_lossy().replace('\\', "/"))
+                .collect(),
+        })
+    })
+    .await
+    .map_err(err)?
+}
+
 pub fn run() {
     let mut builder = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -510,6 +564,7 @@ pub fn run() {
             clear_saved,
             var_names,
             set_secret,
+            import_go,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Routy");

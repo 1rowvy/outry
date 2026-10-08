@@ -1,0 +1,115 @@
+---
+title: Импорт роутов из Go
+description: Файлы запросов для всех роутов chi, gin и net/http в Go-сервисе.
+---
+
+Routy читает исходники Go-сервиса, находит зарегистрированные роуты и создаёт `.http`-файл для каждого
+роута, у которого его ещё нет. Существующие файлы не меняются никогда, поэтому импорт можно повторять
+после добавления эндпоинтов.
+
+```sh
+cd my-service
+routy init              # один раз: api/env.toml с {{base}}
+routy import go .       # сканировать весь репозиторий
+```
+
+```txt
++ api/users/get.http               GET /users  internal/http/routes.go:24
++ api/users/get-by-id.http         GET /users/{{id}}  internal/http/routes.go:25
+= api/users/create.http            POST /users  internal/http/routes.go:26
+- api/legacy/get.http              GET {{base}}/legacy  (no such route in code)
+
+14 Go files, 3 routes: 2 new, 1 existing, 1 not in code
+created 2 files
+```
+
+- `+` — для роута создан новый файл;
+- `=` — запрос для этого роута уже есть (под любым именем);
+- `-` — файл запроса указывает на `{{base}}/…`, но такого роута в коде нет.
+
+С `--dry-run` план показывается без записи. В приложении то же самое — кнопка синхронизации рядом с
+**Requests** или вкладка **Routes**.
+
+## Поддерживаемые роутеры
+
+| Роутер | Что распознаётся |
+|--------|------------------|
+| [chi](https://github.com/go-chi/chi) | `r.Get/Post/…`, `r.Method("GET", …)`, `r.Handle`, `r.Route("/prefix", func(r chi.Router) {…})`, `r.Mount("/prefix", sub())`, `r.Mount("/prefix", subRouter)`, `r.With(mw).Get(…)` |
+| [gin](https://github.com/gin-gonic/gin) | `r.GET/POST/…`, `r.Any`, `r.Handle("GET", …)`, `v1 := r.Group("/v1")` и вложенные группы, `r.Group("/v1").GET(…)` |
+| `net/http` | `mux.HandleFunc("GET /items/{id}", h)` (шаблоны Go 1.22), `http.HandleFunc("/path", h)` |
+
+Роутер ищется только в файлах, которые его импортируют. Роуты из других функций и пакетов тоже получают
+префиксы: `r.Mount("/admin", admin.Routes())`, `users.Register(v1)`, `users.Register(r.Group("/users"))` —
+поэтому лучше сканировать весь репозиторий, а не только `cmd/server`. `vendor/`, `testdata/` и
+`*_test.go` пропускаются.
+
+Путь может быть строкой, конкатенацией и константой пакета (`apiPrefix + "/users"`). Путь, который
+вычисляется во время работы, не определить — о нём будет предупреждение.
+
+## Что создаётся
+
+Параметры пути становятся переменными: `{id}`, `{id:[0-9]+}`, `{path...}`, `:id` и `*path` превращаются
+в `{{id}}` / `{{path}}`.
+
+```http title="api/users/get-by-id.http"
+# chi internal/http/routes.go:25 → h.GetUser
+GET {{base}}/users/{{id}}
+```
+
+У `POST`, `PUT` и `PATCH` — пустое JSON-тело `{}`. Роут на любой метод (`r.Handle`, `Any` в gin)
+создаётся как `GET` с комментарием `# any method`.
+
+Имена файлов повторяют путь: статические сегменты — папки, параметры в конце — в имени.
+
+| Роут | Файл |
+|------|------|
+| `GET /users` | `users/get.http` |
+| `POST /users` | `users/post.http` |
+| `GET /users/{id}` | `users/get-by-id.http` |
+| `GET /users/{id}/posts` | `users/posts/get.http` |
+| `GET /` | `root/get.http` |
+
+Если имя занято запросом к другому роуту, добавляется суффикс: `users/get-2.http`.
+
+## Сопоставление с существующими файлами
+
+Файл считается запросом для роута, если совпадают метод и путь URL (query-строка не учитывается).
+Сравниваются только URL, начинающиеся с `{{base}}`; параметры совпадают с любой переменной, так что
+`{{base}}/users/{{user_id}}` подходит для `GET /users/{id}`. Созданные файлы можно свободно
+переименовывать и раскладывать по папкам — следующий импорт их узнает.
+
+Если адрес сервиса в окружениях называется не `base`, укажите `--base <ИМЯ>`.
+
+## Другие роутеры
+
+Роуты находятся [запросами tree-sitter](https://tree-sitter.github.io/tree-sitter/using-parsers/queries/) —
+встроенные лежат в
+[`crates/routy-core/queries`](https://github.com/1rowvy/routy/tree/master/crates/routy-core/queries).
+Чтобы поддержать другой роутер, напишите свой запрос и передайте его через `--query`:
+
+```scheme title="echo.scm"
+; routy: import github.com/labstack/echo
+(call_expression
+  function: (selector_expression
+    operand: (_) @receiver
+    field: (field_identifier) @method)
+  arguments: (argument_list . (_) @path (_) @handler .)
+  (#any-of? @method "GET" "POST" "PUT" "PATCH" "DELETE")) @route
+```
+
+```sh
+routy import go . --query echo.scm
+```
+
+| Захват | Значение |
+|--------|----------|
+| `@route` | Вызов, регистрирующий роут |
+| `@path` | Его путь |
+| `@method` | Метод: `Get`, `GET`, `"GET"` или `http.MethodGet`. Без него метод берётся из шаблона `"GET /path"`, иначе — любой |
+| `@handler` | Обработчик, пишется в комментарий |
+| `@receiver` | Роутер, на котором вызван метод, — по нему ищется префикс группы |
+| `@group` + `@group.path` | Префикс. С `@group.var` — для этой переменной (`v1 := r.Group("/v1")`), с `@group.body` — для всего внутри блока (`r.Route`) |
+| `@mount` + `@mount.func` | Роуты функции с этим именем получают префикс `@receiver` плюс `@mount.path`; `@mount.pkg` сужает поиск до пакета |
+
+Захваты, начинающиеся с `_`, — для предикатов. Строка `; routy: import <путь>` ограничивает запрос
+файлами, импортирующими пакет с таким префиксом.

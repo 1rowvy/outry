@@ -2,12 +2,13 @@ import { useCallback, useEffect, useRef, useState, type MouseEvent } from "react
 import { getVersion } from "@tauri-apps/api/app";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
-import { api, type Entry, type ParseError, type ProjectInfo, type VarInfo, type VarName } from "./api";
+import { api, type Entry, type ImportReport, type ParseError, type ProjectInfo, type VarInfo, type VarName } from "./api";
 import { CodeEditor } from "./CodeEditor";
 import { ContextMenu, type MenuItem } from "./ContextMenu";
 import { FileTree, type TreeTarget } from "./FileTree";
 import { HistoryList } from "./HistoryList";
 import { ResponseView } from "./ResponseView";
+import { RoutesPanel } from "./RoutesPanel";
 import { SettingsMenu } from "./SettingsMenu";
 import { TitleBar } from "./TitleBar";
 import { UpdateBanner } from "./UpdateBanner";
@@ -17,6 +18,8 @@ import { VarsPanel } from "./VarsPanel";
 const LAST_PROJECT_KEY = "routy.lastProject";
 const AUTO_UPDATE_KEY = "routy.autoUpdate";
 const PERSIST_HISTORY_KEY = "routy.persistHistory";
+/** + корень проекта: каталог с Go-кодом для синхронизации роутов */
+const IMPORT_DIR_KEY = "routy.importDir:";
 const CONFIG = "env.toml";
 const CONFIG_EXAMPLE = `default = "dev"
 secrets = ["token"]
@@ -49,7 +52,7 @@ interface Run {
   pending?: number;
 }
 
-type View = "response" | "history" | "vars";
+type View = "response" | "history" | "vars" | "routes";
 
 /** Форма пути в сайдбаре: новый запрос или переименование/перенос. */
 interface PathForm {
@@ -101,6 +104,8 @@ export default function App() {
   const [secretForm, setSecretForm] = useState<{ name: string; value: string } | null>(null);
   const [version, setVersion] = useState<string | null>(null);
   const [vars, setVars] = useState<VarName[]>([]);
+  const [routes, setRoutes] = useState<ImportReport | null>(null);
+  const [routesBusy, setRoutesBusy] = useState(false);
   const [autoUpdate, setAutoUpdate] = useState(() => storage(AUTO_UPDATE_KEY) === "1");
   const [persistHistory, setPersistHistory] = useState(() => storage(PERSIST_HISTORY_KEY) === "1");
   const updates = useUpdates(autoUpdate);
@@ -128,6 +133,7 @@ export default function App() {
     setRuns({});
     setOpened(null);
     setError(null);
+    setRoutes(null);
   }, []);
 
   const openProject = useCallback(
@@ -287,6 +293,31 @@ export default function App() {
 
   const refresh = async () => setProject(await api.refreshProject());
 
+  /** Роуты из Go-кода; apply — создать недостающие файлы и пересканировать. */
+  const syncRoutes = async (apply = false, dir?: string) => {
+    if (!project) return;
+    const key = IMPORT_DIR_KEY + project.root;
+    setView("routes");
+    setRoutesBusy(true);
+    try {
+      const source = dir ?? storage(key);
+      if (apply) await api.importGo(source, true);
+      const report = await api.importGo(source, false);
+      if (dir) storage(key, dir);
+      setRoutes(report);
+      if (apply) await refresh();
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setRoutesBusy(false);
+    }
+  };
+
+  const pickRoutesDir = async () => {
+    const dir = await open({ directory: true, title: "Folder with the service's Go code", defaultPath: routes?.dir });
+    if (typeof dir === "string") syncRoutes(false, dir);
+  };
+
   const submitPath = async () => {
     if (!pathForm) return;
     const from = pathForm.from;
@@ -444,6 +475,14 @@ export default function App() {
           <>
             <div className="tree-head">
               <span>Requests</span>
+              {project.has_config && (
+                <button className="icon" onClick={() => syncRoutes()} title="Sync routes from Go code">
+                  <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <path d="M13.5 6.5A5.5 5.5 0 0 0 3.2 4.8M2.5 9.5a5.5 5.5 0 0 0 10.3 1.7" />
+                    <path d="M3 2v3h3M13 14v-3h-3" />
+                  </svg>
+                </button>
+              )}
               <button className="icon" onClick={() => setPathForm(pathForm ? null : { value: "" })} title="New request">
                 +
               </button>
@@ -586,6 +625,11 @@ export default function App() {
                     <button className={view === "vars" ? "active" : ""} onClick={() => setView("vars")}>
                       Variables
                     </button>
+                    {project.has_config && (
+                      <button className={view === "routes" ? "active" : ""} onClick={() => (routes ? setView("routes") : syncRoutes())}>
+                        Routes
+                      </button>
+                    )}
                   </div>
                   <span className="spacer" />
                   {view === "response" && opened && (
@@ -607,6 +651,15 @@ export default function App() {
                       setView("response");
                     }}
                     onClear={clearHistory}
+                  />
+                ) : view === "routes" ? (
+                  <RoutesPanel
+                    report={routes}
+                    busy={routesBusy}
+                    onScan={() => syncRoutes()}
+                    onPickDir={pickRoutesDir}
+                    onCreate={() => syncRoutes(true)}
+                    onOpen={select}
                   />
                 ) : view === "vars" ? (
                   <VarsPanel env={env} vars={varList} onClearSaved={clearSaved} onSetSecret={(name) => setSecretForm({ name, value: "" })} />

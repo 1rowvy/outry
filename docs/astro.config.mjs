@@ -44,6 +44,7 @@ export default defineConfig({
 						{ slug: 'guides/secrets' },
 						{ slug: 'guides/chains-and-assertions' },
 						{ slug: 'guides/ci' },
+						{ slug: 'guides/import-go' },
 						{ slug: 'guides/desktop-app' },
 					],
 				},

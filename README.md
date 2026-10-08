@@ -106,6 +106,14 @@ routy run api              # sends every request in api/, alphabetically
 
 Or open the folder in the desktop app. It offers to create `api/env.toml` if there isn't one.
 
+Have a Go service? Generate a request for every route (chi, gin, `net/http`); existing files are left alone:
+
+```sh
+routy import go .          # + api/users/get-by-id.http   GET /users/{{id}}
+```
+
+See [Import routes from Go](https://1rowvy.github.io/routy/guides/import-go/).
+
 ## Request files
 
 ```http
@@ -215,6 +223,7 @@ routy run <PATHS>...                   # send requests; folders run alphabetical
 routy check <PATHS>...                 # syntax check, nothing is sent
 routy vars [-e ENV] [--reveal]         # final variable values and their sources
 routy envs                             # list environments (* = default)
+routy import go [DIR] [--dry-run]      # create requests for Go routes that have no file yet
 routy secret set|rm <NAME> [-e ENV]    # manage keychain secrets
 routy update [--check]                 # self-update from GitHub releases
 ```
@@ -230,6 +239,7 @@ All commands and flags: [CLI reference](https://1rowvy.github.io/routy/reference
   exact request that was sent; the body can be saved to a file
 - Response history (in memory, or on disk outside the repo) and a variables panel showing where every value comes from
 - A built-in `env.toml` editor with TOML validation
+- Routes tab: syncs request files with the routes of a Go service
 - Changes made outside the app (VS Code, `git pull`) show up immediately
 
 More in the [desktop app guide](https://1rowvy.github.io/routy/guides/desktop-app/).

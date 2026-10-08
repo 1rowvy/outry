@@ -72,14 +72,16 @@ GUI и CLI не могут разъехаться: оба вызывают од�
 - [x] `routy vars` в CLI — показать итоговые значения (секреты замаскированы, `--reveal`)
 - [x] Объявление секретов в `env.toml` (`secrets = ["token"]`), чтобы GUI подсказывал, чего не хватает
 
-### 5. Импорт роутов из Go
-- [ ] `routy-core::import` на `tree-sitter` + `tree-sitter-go`
-- [ ] chi: `r.Get/Post/...("/path", h)`, `r.Route("/prefix", func(r chi.Router){...})`, `r.Mount`
-- [ ] gin: `r.GET(...)`, `r.Group("/v1")` с учётом префиксов групп
-- [ ] Роутеры как шаблоны-запросы tree-sitter (`queries/chi.scm`, `queries/gin.scm`) — добавление роутера без кода на Rust
-- [ ] `/users/{id}` и `/users/:id` → `{{id}}`
-- [ ] Генерация `api/<resource>/<method>.http` только для отсутствующих файлов; `--dry-run`, отчёт «новые / пропавшие роуты»
-- [ ] `routy import go ./cmd/server`, кнопка «Синхронизировать» в GUI
+### ✅ 5. Импорт роутов из Go
+- [x] `routy-core::import` на `tree-sitter` + `tree-sitter-go`
+- [x] chi: `r.Get/Post/...("/path", h)`, `r.Route("/prefix", func(r chi.Router){...})`, `r.Mount`
+- [x] gin: `r.GET(...)`, `r.Group("/v1")` с учётом префиксов групп
+- [x] net/http: шаблоны Go 1.22 `mux.HandleFunc("GET /items/{id}", h)`
+- [x] Роутеры как шаблоны-запросы tree-sitter (`queries/chi.scm`, `queries/gin.scm`) — добавление роутера без кода на Rust; свои через `--query`
+- [x] Префиксы через функции и пакеты: `r.Mount("/x", pkg.Routes())`, `users.Register(v1)`
+- [x] `/users/{id}` и `/users/:id` → `{{id}}`
+- [x] Генерация `api/<resource>/<method>.http` только для отсутствующих файлов; `--dry-run`, отчёт «новые / пропавшие роуты»
+- [x] `routy import go ./cmd/server`, кнопка «Синхронизировать» и вкладка Routes в GUI
 - [ ] Позже: тело запроса из структур хендлеров (`json.Decode(&req)` → поля структуры с тегами `json:`)
 
 ### 6. Цепочки и проверки

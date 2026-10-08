@@ -26,6 +26,9 @@ pub enum Error {
     #[error("http: {0}")]
     Http(#[from] reqwest::Error),
 
+    #[error("import: {0}")]
+    Import(String),
+
     #[error("secret store: {0}")]
     Secret(String),
 

@@ -97,6 +97,11 @@ enum Cmd {
     /// Фоновая проверка новой версии (запускается самим routy)
     #[command(name = notifier::REFRESH_COMMAND, hide = true)]
     RefreshUpdateCache,
+    /// Создать *.http для роутов из кода сервиса (только отсутствующие файлы)
+    Import {
+        #[command(subcommand)]
+        cmd: ImportCmd,
+    },
     /// Создать api/env.toml и пример запроса
     Init {
         #[arg(default_value = ".")]
@@ -117,6 +122,32 @@ enum SecretCmd {
         name: String,
         #[command(flatten)]
         env: EnvArgs,
+    },
+}
+
+#[derive(Subcommand)]
+enum ImportCmd {
+    /// Роуты из Go: chi, gin, net/http. Сканируется весь каталог — роуты из других пакетов
+    /// (r.Mount, users.Register(v1)) получают свои префиксы.
+    Go {
+        /// Каталог с исходниками (рекурсивно, без vendor/ и *_test.go)
+        #[arg(default_value = ".")]
+        dir: PathBuf,
+        /// Только показать, что будет создано
+        #[arg(long)]
+        dry_run: bool,
+        /// Переменная с адресом сервиса в URL: {{base}}/users
+        #[arg(long, default_value = routy_core::import::DEFAULT_BASE)]
+        base: String,
+        /// Свой шаблон-запрос tree-sitter для роутера (можно несколько раз)
+        #[arg(long = "query", value_name = "FILE.scm")]
+        queries: Vec<PathBuf>,
+        /// Каталог проекта с env.toml (по умолчанию ищется вверх от текущего)
+        #[arg(long)]
+        project: Option<PathBuf>,
+        /// Вывод плана в JSON
+        #[arg(long)]
+        json: bool,
     },
 }
 
@@ -240,6 +271,7 @@ fn real_main(cmd: Cmd) -> anyhow::Result<ExitCode> {
             Ok(ExitCode::SUCCESS)
         }
         Cmd::Secret { cmd } => secret(cmd),
+        Cmd::Import { cmd } => import(cmd),
         Cmd::Init { dir } => init(&dir),
         Cmd::Update { check } => {
             tokio::runtime::Runtime::new()?.block_on(update::run(check))?;
@@ -466,6 +498,109 @@ fn secret(cmd: SecretCmd) -> anyhow::Result<ExitCode> {
         eprintln!("removed {name} for {}/{env_name}", project.id());
     } else {
         eprintln!("{name} not found for {}/{env_name}", project.id());
+    }
+    Ok(ExitCode::SUCCESS)
+}
+
+fn import(cmd: ImportCmd) -> anyhow::Result<ExitCode> {
+    let ImportCmd::Go {
+        dir,
+        dry_run,
+        base,
+        queries,
+        project,
+        json,
+    } = cmd;
+    let project = find_project(project.as_deref(), Path::new("."))?;
+    if !project.has_config() {
+        bail!(
+            "no env.toml found from {}; run `routy init` first",
+            project.root.display()
+        );
+    }
+    let extra = queries
+        .iter()
+        .map(|q| {
+            let src = std::fs::read_to_string(q).with_context(|| q.display().to_string())?;
+            Ok((q.display().to_string(), src))
+        })
+        .collect::<anyhow::Result<Vec<_>>>()?;
+    let plan = routy_core::import::plan_go(&dir, &project.root, &extra, &base)?;
+    let created = if dry_run {
+        Vec::new()
+    } else {
+        routy_core::import::apply(&project.root, &plan)?
+    };
+    if json {
+        println!("{}", serde_json::to_string_pretty(&plan)?);
+        return Ok(ExitCode::SUCCESS);
+    }
+
+    let st = Style::stdout();
+    let shown = |p: &Path| {
+        let full = project.root.join(p);
+        full.strip_prefix(std::env::current_dir().unwrap_or_default())
+            .map(Path::to_path_buf)
+            .unwrap_or(full)
+            .display()
+            .to_string()
+    };
+    let width = plan
+        .new
+        .iter()
+        .map(|f| shown(&f.file).len())
+        .chain(plan.existing.iter().map(|e| shown(&e.file).len()))
+        .chain(plan.stale.iter().map(|s| shown(&s.file).len()))
+        .max()
+        .unwrap_or(0);
+    let route = |r: &routy_core::import::Route| {
+        format!(
+            "{} {}  {}",
+            r.method,
+            r.path,
+            st.dim(&format!("{}:{}", r.source.display(), r.line))
+        )
+    };
+    for f in &plan.new {
+        let file = format!("{:width$}", shown(&f.file));
+        println!("{} {}  {}", st.green("+"), st.green(&file), route(&f.route));
+    }
+    for e in &plan.existing {
+        println!(
+            "{} {}  {}",
+            st.dim("="),
+            st.dim(&format!("{:width$}", shown(&e.file))),
+            route(&e.route)
+        );
+    }
+    for s in &plan.stale {
+        println!(
+            "{} {:width$}  {} {}  {}",
+            st.red("-"),
+            shown(&s.file),
+            s.method,
+            s.url,
+            st.red("(no such route in code)")
+        );
+    }
+    for w in &plan.warnings {
+        eprintln!("{} {w}", Style::stderr().red("warning:"));
+    }
+    let routes = plan.new.len() + plan.existing.len();
+    let summary = format!(
+        "{} Go files, {routes} routes: {} new, {} existing, {} not in code",
+        plan.files,
+        plan.new.len(),
+        plan.existing.len(),
+        plan.stale.len()
+    );
+    println!("\n{summary}");
+    if dry_run {
+        if !plan.new.is_empty() {
+            println!("dry run: nothing written");
+        }
+    } else if !created.is_empty() {
+        println!("created {} files", created.len());
     }
     Ok(ExitCode::SUCCESS)
 }

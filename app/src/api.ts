@@ -70,6 +70,32 @@ export interface VarInfo {
   secret: boolean;
 }
 
+export interface Route {
+  /** GET, POST, … или "ANY" (r.Handle, gin Any) */
+  method: string;
+  /** /users/{{id}} */
+  path: string;
+  /** Go-файл относительно сканируемого каталога */
+  source: string;
+  line: number;
+  handler: string | null;
+  router: string;
+}
+
+export interface ImportPlan {
+  files: number;
+  new: { route: Route; file: string; content: string }[];
+  existing: { route: Route; file: string }[];
+  stale: { file: string; method: string; url: string }[];
+  warnings: string[];
+}
+
+export interface ImportReport {
+  dir: string;
+  plan: ImportPlan;
+  created: string[];
+}
+
 export const api = {
   openProject: (dir: string) => invoke<ProjectInfo>("open_project", { dir }),
   initProject: () => invoke<ProjectInfo>("init_project"),
@@ -93,4 +119,6 @@ export const api = {
   clearSaved: (env: string | null) => invoke<void>("clear_saved", { env }),
   varNames: (env: string | null) => invoke<VarName[]>("var_names", { env }),
   setSecret: (env: string | null, name: string, value: string) => invoke<void>("set_secret", { env, name, value }),
+  /** dir: null — каталог над api/; apply — создать недостающие файлы */
+  importGo: (dir: string | null, apply: boolean) => invoke<ImportReport>("import_go", { dir, apply }),
 };

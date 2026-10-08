@@ -20,6 +20,10 @@ serde_json.workspace = true
 thiserror.workspace = true
 toml.workspace = true
 fastrand = "2"
+# Импорт роутов из исходников Go: разбор кода + шаблоны-запросы из queries/*.scm.
+streaming-iterator = "0.1"
+tree-sitter = "0.26"
+tree-sitter-go = "0.25"
 # Secret Service через zbus (чистый Rust): на Linux не нужны libdbus и pkg-config,
 # поэтому CLI собирается статически (musl) и запускается на любом дистрибутиве.
 # async-io, а не tokio: блокирующий API keyring вызывается изнутри tokio-рантайма.
