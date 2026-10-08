@@ -1,4 +1,4 @@
-# Логин: httpbin возвращает тело запроса в поле `json`.
+# Login: httpbin echoes the request body back in the `json` field.
 POST {{base}}/anything/login
 
 {"user": "{{user}}", "access_token": "demo-token"}

@@ -1,4 +1,4 @@
-# Использует token, сохранённый предыдущим запросом.
+# Uses the token saved by the previous request.
 GET {{base}}/bearer
 Authorization: Bearer {{token}}
 
