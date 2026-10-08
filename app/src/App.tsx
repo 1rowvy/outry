@@ -5,6 +5,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { api, type ParseError, type ProjectInfo, type RunOutcome } from "./api";
 import { FileTree } from "./FileTree";
 import { ResponseView } from "./ResponseView";
+import { TitleBar } from "./TitleBar";
 import { UpdateBanner } from "./UpdateBanner";
 
 const LAST_PROJECT_KEY = "routy.lastProject";
@@ -230,12 +231,8 @@ export default function App() {
 
   return (
     <div className="app">
+      <TitleBar version={version} />
       <aside className="sidebar">
-        <div className="brand">
-          <span>routy</span>
-          {version && <span className="muted">{version}</span>}
-        </div>
-
         <div className="project">
           <button className="project-name" onClick={pickFolder} title={project ? `${project.root}\nOpen another project` : undefined}>
             <span className="ellipsis">{project ? project.id : "Open project…"}</span>

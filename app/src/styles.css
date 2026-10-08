@@ -114,21 +114,41 @@ kbd {
 .seg button:hover:not(:disabled) { background: none; color: var(--text); }
 .seg button.active { background: var(--raised); color: var(--text); box-shadow: var(--raised-shadow); }
 
-.app { display: grid; grid-template-columns: 236px minmax(0, 1fr); height: 100%; }
+.app {
+  display: grid; grid-template-columns: 236px minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr);
+  height: 100%;
+}
+
+/* Шапка окна */
+
+.titlebar {
+  grid-column: 1 / -1; display: flex; align-items: center; height: 38px;
+  padding-left: 18px; user-select: none; -webkit-user-select: none;
+}
+.titlebar.mac { padding-left: 82px; } /* место под кнопки-светофор */
+.titlebar .brand {
+  display: flex; align-items: center; gap: 8px; flex: 1; height: 100%;
+  font: 700 13px var(--mono); letter-spacing: -0.02em;
+}
+/* Перетаскивание срабатывает только на элементе с data-tauri-drag-region, не на детях. */
+.titlebar .brand > * { pointer-events: none; }
+.titlebar .brand img { width: 18px; height: 18px; border-radius: 4px; }
+.titlebar .version { font-weight: 400; font-size: 11px; color: var(--faint); }
+
+.window-controls { display: flex; align-self: stretch; }
+.window-controls button {
+  display: grid; place-items: center; width: 46px; padding: 0;
+  border: 0; border-radius: 0; background: none; color: var(--muted);
+}
+.window-controls button:hover:not(:disabled) { background: var(--hover); color: var(--text); }
+.window-controls button.close:hover:not(:disabled) { background: #e81123; color: #fff; }
+.window-controls button:focus-visible { outline-offset: -2px; }
+.window-controls svg { width: 10px; height: 10px; fill: none; stroke: currentColor; stroke-width: 1; shape-rendering: crispEdges; }
+.window-controls .close svg { shape-rendering: geometricPrecision; }
 
 /* Сайдбар */
 
-.sidebar { display: flex; flex-direction: column; min-height: 0; padding: 8px 0 8px 8px; }
-.brand {
-  display: flex; align-items: center; gap: 8px; flex: none;
-  height: var(--head); padding: 0 10px;
-  font: 700 14px var(--mono); letter-spacing: -0.02em;
-}
-.brand::before {
-  content: ""; width: 10px; height: 10px; border-radius: 3px;
-  background: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
-}
-.brand .muted { margin-left: auto; font-weight: 400; font-size: 11px; color: var(--faint); }
+.sidebar { display: flex; flex-direction: column; min-height: 0; padding: 0 0 8px 8px; }
 
 .project { display: flex; flex-direction: column; gap: 8px; padding: 6px 2px 14px; }
 .project-name {
@@ -197,7 +217,7 @@ kbd {
 
 /* Основная область */
 
-.main { display: flex; flex-direction: column; gap: 8px; min-width: 0; min-height: 0; padding: 8px; }
+.main { display: flex; flex-direction: column; gap: 8px; min-width: 0; min-height: 0; padding: 0 8px 8px; }
 
 .panel {
   display: flex; flex-direction: column; min-height: 0; overflow: hidden;
