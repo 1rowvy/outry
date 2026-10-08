@@ -3489,7 +3489,7 @@ dependencies = [
 
 [[package]]
 name = "routy-app"
-version = "0.2.3"
+version = "0.2.4"
 dependencies = [
  "notify",
  "routy-core",
@@ -3505,7 +3505,7 @@ dependencies = [
 
 [[package]]
 name = "routy-cli"
-version = "0.2.3"
+version = "0.2.4"
 dependencies = [
  "anyhow",
  "clap",
@@ -3523,7 +3523,7 @@ dependencies = [
 
 [[package]]
 name = "routy-core"
-version = "0.2.3"
+version = "0.2.4"
 dependencies = [
  "dirs",
  "keyring",
