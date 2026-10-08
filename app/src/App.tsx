@@ -204,28 +204,56 @@ export default function App() {
     <div className="app">
       <aside className="sidebar">
         <div className="brand">
-          <Logo />
-          <strong>routy</strong>
-          {version && <span className="version">v{version}</span>}
+          <span>routy</span>
+          {version && <span className="muted">{version}</span>}
+        </div>
+
+        <div className="project">
+          <button className="field" onClick={pickFolder} title={project?.root}>
+            <span className="label">проект</span>
+            <span className="ellipsis">{project ? project.id : "открыть…"}</span>
+          </button>
+          {project && project.envs.length > 0 && (
+            <label className="field">
+              <span className="label">env</span>
+              <select value={env ?? ""} onChange={(e) => setEnv(e.target.value)}>
+                {project.envs.map((e) => (
+                  <option key={e}>{e}</option>
+                ))}
+              </select>
+            </label>
+          )}
+          {project && (
+            <button
+              className="link"
+              onClick={() => setSecretForm(secretForm ? null : { name: "", value: "" })}
+              title="Секреты хранятся в системном хранилище паролей"
+            >
+              {secretForm ? "отмена" : "добавить секрет"}
+            </button>
+          )}
+          {secretForm && (
+            <form className="stack" onSubmit={(e) => (e.preventDefault(), saveSecret())}>
+              <input placeholder="имя" value={secretForm.name} onChange={(e) => setSecretForm({ ...secretForm, name: e.target.value })} autoFocus />
+              <input placeholder="значение" type="password" value={secretForm.value} onChange={(e) => setSecretForm({ ...secretForm, value: e.target.value })} />
+              <button type="submit">Сохранить для {env ?? "default"}</button>
+            </form>
+          )}
         </div>
 
         {project && (
-          <button className="primary wide" onClick={() => setNewPath(newPath === null ? "" : null)}>
-            + Новый запрос
-          </button>
-        )}
-        {newPath !== null && (
-          <form className="new-request" onSubmit={(e) => (e.preventDefault(), createRequest())}>
-            <input placeholder="users/create" value={newPath} onChange={(e) => setNewPath(e.target.value)} autoFocus />
-          </form>
-        )}
-
-        {project && (
           <>
-            <div className="section-title">
-              <span title={project.root}>Запросы</span>
-              <span className="count">{project.files.length}</span>
+            <div className="tree-head">
+              <span>Запросы</span>
+              <button className="icon" onClick={() => setNewPath(newPath === null ? "" : null)} title="Новый запрос">
+                +
+              </button>
             </div>
+            {newPath !== null && (
+              <form className="stack" onSubmit={(e) => (e.preventDefault(), createRequest())}>
+                <input placeholder="users/create" value={newPath} onChange={(e) => setNewPath(e.target.value)} autoFocus />
+              </form>
+            )}
             <div className="tree-wrap">
               <FileTree files={project.files} selected={selected} onSelect={select} />
             </div>
@@ -234,39 +262,6 @@ export default function App() {
 
         <span className="spacer" />
         <UpdateBanner />
-
-        <div className="section-title">Проект</div>
-        <button className="nav-item" onClick={pickFolder} title={project?.root}>
-          <span className="nav-icon">▤</span>
-          <span className="ellipsis">{project ? project.id : "Открыть проект"}</span>
-        </button>
-        {project && project.envs.length > 0 && (
-          <label className="nav-item">
-            <span className="nav-icon">◎</span>
-            <select value={env ?? ""} onChange={(e) => setEnv(e.target.value)} title="Окружение">
-              {project.envs.map((e) => (
-                <option key={e}>{e}</option>
-              ))}
-            </select>
-          </label>
-        )}
-        {project && (
-          <button
-            className={"nav-item" + (secretForm ? " active" : "")}
-            onClick={() => setSecretForm(secretForm ? null : { name: "", value: "" })}
-            title="Секреты хранятся в системном хранилище паролей"
-          >
-            <span className="nav-icon">⚿</span>
-            Секрет
-          </button>
-        )}
-        {secretForm && (
-          <form className="secret-form" onSubmit={(e) => (e.preventDefault(), saveSecret())}>
-            <input placeholder="имя" value={secretForm.name} onChange={(e) => setSecretForm({ ...secretForm, name: e.target.value })} autoFocus />
-            <input placeholder="значение" type="password" value={secretForm.value} onChange={(e) => setSecretForm({ ...secretForm, value: e.target.value })} />
-            <button type="submit">Сохранить для {env ?? "default"}</button>
-          </form>
-        )}
       </aside>
 
       <main className="main">
@@ -277,7 +272,7 @@ export default function App() {
         )}
 
         {!project ? (
-          <div className="card empty">
+          <div className="empty">
             <p>Откройте каталог проекта — Routy найдёт <code>api/env.toml</code> и все <code>*.http</code> файлы.</p>
             <button className="primary" onClick={pickFolder}>Открыть проект</button>
           </div>
@@ -294,7 +289,7 @@ export default function App() {
                 </button>
               </div>
             )}
-            <div className="card layout">
+            <div className="layout">
               <section className="editor">
                 {selected ? (
                   <>
@@ -334,11 +329,3 @@ export default function App() {
   );
 }
 
-function Logo() {
-  return (
-    <svg className="logo" viewBox="0 0 24 24" aria-hidden="true">
-      <path d="M4 5h16l-3 5H7z" fill="currentColor" />
-      <path d="M7 12h10l-5 8z" fill="currentColor" opacity="0.7" />
-    </svg>
-  );
-}

@@ -27,10 +27,10 @@ export function ResponseView({ outcome }: { outcome: RunOutcome }) {
         <span className={"status " + (r.status < 400 ? "ok" : "bad")}>
           {r.status} {r.status_text}
         </span>
-        <span className="meta-pill">{r.duration_ms} ms</span>
-        <span className="meta-pill">{formatSize(r.size)}</span>
+        <span className="muted">{r.duration_ms} ms</span>
+        <span className="muted">{formatSize(r.size)}</span>
         {Object.keys(outcome.saved).length > 0 && (
-          <span className="meta-pill">saved: {Object.keys(outcome.saved).join(", ")}</span>
+          <span className="muted">saved: {Object.keys(outcome.saved).join(", ")}</span>
         )}
       </div>
       <div className="tabs">

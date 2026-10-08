@@ -62,7 +62,7 @@ function TreeNode(props: { node: Node; selected: string | null; onSelect: (path:
       <details open>
         <summary>
           <span className="ellipsis">{node.name}</span>
-          <span className="count">{countFiles(node)}</span>
+          <span className="muted">{countFiles(node)}</span>
         </summary>
         <ul className="tree">
           {node.children.map((c) => (
