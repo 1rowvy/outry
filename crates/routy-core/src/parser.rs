@@ -14,12 +14,12 @@
 //! Строка запроса: `МЕТОД URL [HTTP/версия]`, метод можно опустить (тогда GET).
 //! После заголовков — пустая строка и тело. Строки `> …` в самом конце файла — директивы.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::error::{Error, Result};
 use crate::expr::{Assertion, Path};
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Header {
     pub name: String,
     pub value: String,
@@ -122,8 +122,35 @@ pub fn parse(src: &str) -> Result<RequestFile> {
     })
 }
 
+/// Слова через пробел; внутри `{{ … }}` пробелы не разделяют (`{{$randomInt 1 10}}`).
+fn words(line: &str) -> Vec<&str> {
+    let mut out = Vec::new();
+    let mut start = None;
+    let mut depth = false;
+    let mut chars = line.char_indices().peekable();
+    while let Some((i, c)) = chars.next() {
+        let next = chars.peek().map(|&(_, n)| n);
+        if !depth && c == '{' && next == Some('{') {
+            depth = true;
+        } else if depth && c == '}' && next == Some('}') {
+            depth = false;
+        }
+        if c.is_whitespace() && !depth {
+            if let Some(s) = start.take() {
+                out.push(&line[s..i]);
+            }
+        } else if start.is_none() {
+            start = Some(i);
+        }
+    }
+    if let Some(s) = start {
+        out.push(&line[s..]);
+    }
+    out
+}
+
 fn parse_request_line(line: &str) -> Result<(String, String), String> {
-    let mut parts = line.split_whitespace();
+    let mut parts = words(line).into_iter();
     let first = parts.next().ok_or("empty request line")?;
     let (method, url) = if is_method(first) {
         let url = parts
@@ -217,6 +244,14 @@ mod tests {
         assert_eq!(r.headers.len(), 1);
         assert_eq!(r.body, None);
         assert!(r.directives.is_empty());
+    }
+
+    #[test]
+    fn spaces_inside_braces_stay_in_url() {
+        let r = parse("POST {{base}}/x/{{ $randomInt 1 10 }}?a={{$uuid}} HTTP/1.1\n").unwrap();
+        assert_eq!(r.method, "POST");
+        assert_eq!(r.url, "{{base}}/x/{{ $randomInt 1 10 }}?a={{$uuid}}");
+        assert!(parse("GET /x {{a}}\n").is_err());
     }
 
     #[test]

@@ -1,25 +1,88 @@
-import { useState } from "react";
-import type { RunOutcome } from "./api";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { save } from "@tauri-apps/plugin-dialog";
+import { api, type Entry, type Header } from "./api";
+import { BodyViewer, type BodyLanguage, type BodyViewerHandle } from "./BodyViewer";
 
-type Tab = "body" | "headers" | "tests" | "request";
+type Tab = "body" | "preview" | "headers" | "tests" | "request";
 
-function prettyBody(body: string): string {
+function contentType(headers: Header[]): string {
+  return headers.find((h) => h.name.toLowerCase() === "content-type")?.value.split(";")[0].trim().toLowerCase() ?? "";
+}
+
+function prettyJson(body: string): string | null {
   try {
     return JSON.stringify(JSON.parse(body), null, 2);
   } catch {
-    return body;
+    return null;
   }
 }
 
-function formatSize(bytes: number): string {
-  return bytes < 1024 ? `${bytes} B` : `${(bytes / 1024).toFixed(1)} KB`;
+export function formatSize(bytes: number): string {
+  return bytes < 1024 ? `${bytes} B` : bytes < 1024 * 1024 ? `${(bytes / 1024).toFixed(1)} KB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
 
-export function ResponseView({ outcome }: { outcome: RunOutcome }) {
-  const [tab, setTab] = useState<Tab>("body");
+const EXTENSIONS: Record<string, string> = {
+  "application/json": "json",
+  "text/html": "html",
+  "application/xml": "xml",
+  "text/xml": "xml",
+  "text/plain": "txt",
+  "text/csv": "csv",
+  "application/pdf": "pdf",
+  "image/png": "png",
+  "image/jpeg": "jpg",
+  "image/gif": "gif",
+  "image/webp": "webp",
+  "image/svg+xml": "svg",
+};
+
+/** Имя файла для «Save»: последний сегмент URL или `response`, расширение — по Content-Type. */
+function suggestedName(url: string, mime: string): string {
+  let base = "response";
+  try {
+    base = decodeURIComponent(new URL(url).pathname.split("/").filter(Boolean).pop() ?? "") || base;
+  } catch {
+    // URL уже проверен ядром; на всякий случай — имя по умолчанию.
+  }
+  const ext = EXTENSIONS[mime] ?? (mime.endsWith("+json") ? "json" : "");
+  return ext && !base.includes(".") ? `${base}.${ext}` : base;
+}
+
+export function ResponseView({ entry, onError }: { entry: Entry; onError: (e: string) => void }) {
+  const { outcome } = entry;
   const r = outcome.response;
+  const mime = contentType(r.headers);
+  const isImage = mime.startsWith("image/");
+  const isHtml = mime === "text/html";
+  const [tab, setTab] = useState<Tab>(isImage ? "preview" : "body");
+  const [image, setImage] = useState<string | null>(null);
+  const viewer = useRef<BodyViewerHandle>(null);
+
   const failed = outcome.asserts.filter((a) => !a.passed).length + outcome.save_misses.length;
   const checks = outcome.asserts.length + outcome.save_misses.length;
+  const tabs: Tab[] = isImage || isHtml ? ["body", "preview", "headers", "tests", "request"] : ["body", "headers", "tests", "request"];
+
+  const [text, language] = useMemo((): [string, BodyLanguage] => {
+    const pretty = prettyJson(r.body);
+    if (pretty !== null) return [pretty, "json"];
+    if (isHtml) return [r.body, "html"];
+    if (mime.includes("xml")) return [r.body, "xml"];
+    return [r.body, "text"];
+  }, [r.body, mime, isHtml]);
+
+  // Родитель задаёт key={entry.id}, так что вкладка сбрасывается на каждый ответ.
+  useEffect(() => {
+    if (isImage) api.responseImage(entry.id).then(setImage, () => setImage(null));
+  }, [entry.id, isImage]);
+
+  const saveBody = async () => {
+    try {
+      const dest = await save({ title: "Save response body", defaultPath: suggestedName(outcome.request.url, mime) });
+      if (dest) await api.saveBody(entry.id, dest);
+    } catch (e) {
+      onError(String(e));
+    }
+  };
 
   return (
     <div className="response">
@@ -30,8 +93,23 @@ export function ResponseView({ outcome }: { outcome: RunOutcome }) {
         <span className="metric">{r.duration_ms} ms</span>
         <span className="metric">{formatSize(r.size)}</span>
         <span className="spacer" />
+        {tab === "body" && (
+          <button className="icon" onClick={() => viewer.current?.find()} title="Find in response (Ctrl+F)" aria-label="Find">
+            <svg viewBox="0 0 16 16" aria-hidden>
+              <circle cx="7" cy="7" r="4.5" />
+              <path d="M10.5 10.5 14 14" />
+            </svg>
+          </button>
+        )}
+        <button className="icon" onClick={saveBody} title="Save body to file…" aria-label="Save body to file">
+          <svg viewBox="0 0 16 16" aria-hidden>
+            <path d="M8 2v8M4.5 6.5 8 10l3.5-3.5M2.5 13.5h11" />
+          </svg>
+        </button>
+      </div>
+      <div className="response-tabs">
         <div className="seg">
-          {(["body", "headers", "tests", "request"] as Tab[]).map((t) => (
+          {tabs.map((t) => (
             <button key={t} className={tab === t ? "active" : ""} onClick={() => setTab(t)}>
               {t}
               {t === "tests" && checks > 0 && (
@@ -42,17 +120,35 @@ export function ResponseView({ outcome }: { outcome: RunOutcome }) {
             </button>
           ))}
         </div>
+        {Object.keys(outcome.saved).length > 0 && (
+          <span className="saved">
+            saved {Object.keys(outcome.saved).map((k) => <code key={k}>{k}</code>)}
+          </span>
+        )}
       </div>
-      {Object.keys(outcome.saved).length > 0 && (
-        <div className="saved">
-          saved: {Object.keys(outcome.saved).map((k) => <code key={k}>{k}</code>)}
+      {tab === "body" && <BodyViewer ref={viewer} text={text} language={language} />}
+      {tab === "preview" && (
+        <div className="tab-body preview">
+          {isImage ? (
+            image ? (
+              <img src={image} alt="Response" />
+            ) : (
+              <p className="muted">Image data is only kept for responses from this session.</p>
+            )
+          ) : (
+            // Без allow-scripts: страница из ответа не выполняет JS и не видит приложение.
+            <iframe title="HTML preview" sandbox="" srcDoc={r.body} />
+          )}
         </div>
       )}
-      <div className="tab-body">
-        {tab === "body" && <pre>{prettyBody(r.body)}</pre>}
-        {tab === "headers" && <HeaderTable headers={r.headers} />}
-        {tab === "tests" &&
-          (checks === 0 ? (
+      {tab === "headers" && (
+        <div className="tab-body">
+          <HeaderTable headers={r.headers} />
+        </div>
+      )}
+      {tab === "tests" && (
+        <div className="tab-body">
+          {checks === 0 ? (
             <p className="muted">No checks. Add to the end of the file: <code>&gt; assert status == 200</code></p>
           ) : (
             <ul className="tests">
@@ -66,20 +162,23 @@ export function ResponseView({ outcome }: { outcome: RunOutcome }) {
                 <li key={m} className="bad">✗ save {m} <span className="muted">— no value in the response</span></li>
               ))}
             </ul>
-          ))}
-        {tab === "request" && (
+          )}
+        </div>
+      )}
+      {tab === "request" && (
+        <div className="tab-body">
           <pre>
             {`${outcome.request.method} ${outcome.request.url}\n`}
             {outcome.request.headers.map((h) => `${h.name}: ${h.value}\n`).join("")}
             {outcome.request.body ? `\n${outcome.request.body}` : ""}
           </pre>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   );
 }
 
-function HeaderTable({ headers }: { headers: { name: string; value: string }[] }) {
+function HeaderTable({ headers }: { headers: Header[] }) {
   return (
     <table className="headers">
       <tbody>

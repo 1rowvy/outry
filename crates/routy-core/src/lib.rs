@@ -2,8 +2,10 @@
 //! поэтому поведение у них не может разъехаться.
 
 pub mod discover;
+pub mod dynamic;
 pub mod error;
 pub mod expr;
+pub mod history;
 pub mod parser;
 pub mod project;
 pub mod runner;

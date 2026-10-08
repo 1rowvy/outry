@@ -17,13 +17,18 @@ pub struct State {
 }
 
 pub fn state_path(project_root: &Path) -> Option<PathBuf> {
+    project_data_file(project_root, "state", "json")
+}
+
+/// `<data_local_dir>/routy/<kind>/<хеш корня проекта>.<ext>` — данные проекта вне репозитория.
+pub fn project_data_file(project_root: &Path, kind: &str, ext: &str) -> Option<PathBuf> {
     let root = std::fs::canonicalize(project_root).unwrap_or_else(|_| project_root.to_path_buf());
     let hash = fnv1a(root.to_string_lossy().as_bytes());
     Some(
         dirs::data_local_dir()?
             .join("routy")
-            .join("state")
-            .join(format!("{hash:016x}.json")),
+            .join(kind)
+            .join(format!("{hash:016x}.{ext}")),
     )
 }
 

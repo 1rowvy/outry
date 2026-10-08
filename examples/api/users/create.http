@@ -1,7 +1,7 @@
 POST {{base}}/anything/users
 Authorization: Bearer {{token}}
 
-{"name": "Viktor"}
+{"name": "Viktor", "request_id": "{{$uuid}}"}
 
 > assert status == 200
 > assert body.json.name == "Viktor"

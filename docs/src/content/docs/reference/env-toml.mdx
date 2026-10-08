@@ -8,6 +8,7 @@ description: All keys of the env.toml project file.
 ```toml title="api/env.toml"
 project = "billing-api"   # optional
 default = "dev"           # optional
+secrets = ["token"]       # optional
 
 [vars]
 version = "v1"
@@ -23,6 +24,7 @@ base = "https://api.example.com"
 |-----|-------------|
 | `project` | Namespace for secrets and saved values. Default: the project folder name, or its parent's name if the folder is called `api` |
 | `default` | Environment used when `--env` is not given. Default: the first environment in alphabetical order |
+| `secrets` | Names of variables that are secrets. Values live in the keychain or `ROUTY_*`; the list lets `routy vars` and the app point out missing ones |
 | `[vars]` | Variables shared by all environments |
 | `[env.<name>]` | An environment; its variables override `[vars]` |
 

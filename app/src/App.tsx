@@ -1,17 +1,25 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type MouseEvent } from "react";
 import { getVersion } from "@tauri-apps/api/app";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
-import { api, type ParseError, type ProjectInfo, type RunOutcome, type VarName } from "./api";
+import { api, type Entry, type ParseError, type ProjectInfo, type VarInfo, type VarName } from "./api";
 import { CodeEditor } from "./CodeEditor";
-import { FileTree } from "./FileTree";
+import { ContextMenu, type MenuItem } from "./ContextMenu";
+import { FileTree, type TreeTarget } from "./FileTree";
+import { HistoryList } from "./HistoryList";
 import { ResponseView } from "./ResponseView";
+import { SettingsMenu } from "./SettingsMenu";
 import { TitleBar } from "./TitleBar";
 import { UpdateBanner } from "./UpdateBanner";
+import { useUpdates } from "./updater";
+import { VarsPanel } from "./VarsPanel";
 
 const LAST_PROJECT_KEY = "routy.lastProject";
+const AUTO_UPDATE_KEY = "routy.autoUpdate";
+const PERSIST_HISTORY_KEY = "routy.persistHistory";
 const CONFIG = "env.toml";
 const CONFIG_EXAMPLE = `default = "dev"
+secrets = ["token"]
 
 [vars]
 version = "v1"
@@ -33,6 +41,35 @@ function requestMethod(text: string): string {
   return "GET";
 }
 
+/** Последний ответ, ошибка и запрос в полёте — на каждый файл, чтобы запросы шли параллельно. */
+interface Run {
+  entry?: Entry;
+  error?: string;
+  /** id для отмены */
+  pending?: number;
+}
+
+type View = "response" | "history" | "vars";
+
+/** Форма пути в сайдбаре: новый запрос или переименование/перенос. */
+interface PathForm {
+  from?: TreeTarget;
+  value: string;
+}
+
+/** `users/create` → `users/create.http`; каталоги — без расширения. */
+function normalizePath(value: string, isDir: boolean): string {
+  const p = value.trim().replace(/^\/+|\/+$/g, "");
+  return isDir ? p : p.replace(/(\.http)?$/, ".http");
+}
+
+/** Путь после переименования `from` → `to` (файла или каталога). */
+function movedPath(path: string, from: string, to: string): string | null {
+  if (path === from) return to;
+  if (path.startsWith(from + "/")) return to + path.slice(from.length);
+  return null;
+}
+
 function storage(key: string, value?: string | null): string | null {
   try {
     if (value === undefined) return localStorage.getItem(key);
@@ -51,16 +88,28 @@ export default function App() {
   const [content, setContent] = useState("");
   const [savedContent, setSavedContent] = useState("");
   const [parseError, setParseError] = useState<ParseError | null>(null);
-  const [outcome, setOutcome] = useState<RunOutcome | null>(null);
-  const [sendError, setSendError] = useState<string | null>(null);
-  const [sending, setSending] = useState(false);
+  const [runs, setRuns] = useState<Record<string, Run>>({});
+  const [opened, setOpened] = useState<Entry | null>(null);
+  const [view, setView] = useState<View>("response");
+  const [history, setHistory] = useState<Entry[]>([]);
+  const [varList, setVarList] = useState<VarInfo[]>([]);
+  /** Растёт после отправки и правок переменных — перечитать историю и переменные. */
+  const [tick, setTick] = useState(0);
   const [error, setError] = useState<string | null>(null);
-  const [newPath, setNewPath] = useState<string | null>(null);
+  const [pathForm, setPathForm] = useState<PathForm | null>(null);
+  const [menu, setMenu] = useState<{ x: number; y: number; items: MenuItem[] } | null>(null);
   const [secretForm, setSecretForm] = useState<{ name: string; value: string } | null>(null);
   const [version, setVersion] = useState<string | null>(null);
   const [vars, setVars] = useState<VarName[]>([]);
+  const [autoUpdate, setAutoUpdate] = useState(() => storage(AUTO_UPDATE_KEY) === "1");
+  const [persistHistory, setPersistHistory] = useState(() => storage(PERSIST_HISTORY_KEY) === "1");
+  const updates = useUpdates(autoUpdate);
+  const nextId = useRef(0);
 
   const dirty = content !== savedContent;
+  const run = selected ? runs[selected] : undefined;
+  const shown = opened ?? run?.entry ?? null;
+  const bump = () => setTick((t) => t + 1);
   const isConfig = selected === CONFIG;
   const method = requestMethod(content);
   const cut = (selected ?? "").lastIndexOf("/") + 1;
@@ -76,7 +125,8 @@ export default function App() {
     setSelected(null);
     setContent("");
     setSavedContent("");
-    setOutcome(null);
+    setRuns({});
+    setOpened(null);
     setError(null);
   }, []);
 
@@ -141,11 +191,24 @@ export default function App() {
     };
   }, []);
 
-  // Имена переменных для автодополнения; `> save` после отправки добавляет новые.
+  // Имена переменных для автодополнения и панель переменных; `> save` после отправки добавляет новые.
   useEffect(() => {
     if (!project) return setVars([]);
     api.varNames(env).then(setVars, () => setVars([]));
-  }, [project, env, outcome]);
+    api.variables(env).then(setVarList, () => setVarList([]));
+  }, [project, env, tick]);
+
+  // История на диске включается для каждого открытого проекта заново.
+  const root = project?.root;
+  useEffect(() => {
+    if (!root) return;
+    api.setHistoryPersist(persistHistory).then(bump, (e) => setError(String(e)));
+  }, [root, persistHistory]);
+
+  useEffect(() => {
+    if (!root) return setHistory([]);
+    api.history().then(setHistory, () => setHistory([]));
+  }, [root, tick]);
 
   // Проверка синтаксиса на лету.
   useEffect(() => {
@@ -162,8 +225,8 @@ export default function App() {
       setSelected(path);
       setContent(text);
       setSavedContent(text);
-      setOutcome(null);
-      setSendError(null);
+      setOpened(null);
+      if (path === CONFIG) setView("response");
     } catch (e) {
       setError(String(e));
     }
@@ -181,18 +244,26 @@ export default function App() {
   }, [selected, content, parseError]);
 
   const send = useCallback(async () => {
-    if (!selected || selected === CONFIG || sending) return;
-    setSending(true);
-    setSendError(null);
+    if (!selected || selected === CONFIG || runs[selected]?.pending) return;
+    const path = selected;
+    const id = ++nextId.current;
+    setRuns((r) => ({ ...r, [path]: { ...r[path], pending: id, error: undefined } }));
+    setOpened(null);
+    setView("response");
     try {
-      setOutcome(await api.sendRequest(env, content));
+      const entry = await api.sendRequest(id, env, path, content);
+      setRuns((r) => ({ ...r, [path]: { entry } }));
     } catch (e) {
-      setOutcome(null);
-      setSendError(String(e));
+      const msg = String(e);
+      setRuns((r) => ({ ...r, [path]: { ...r[path], pending: undefined, error: msg === "cancelled" ? undefined : msg } }));
     } finally {
-      setSending(false);
+      bump();
     }
-  }, [selected, sending, env, content]);
+  }, [selected, runs, env, content]);
+
+  const cancel = () => {
+    if (run?.pending) api.cancelRequest(run.pending);
+  };
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -214,17 +285,110 @@ export default function App() {
     if (typeof dir === "string") openProject(dir);
   };
 
-  const createRequest = async () => {
-    if (!newPath) return;
-    const path = newPath.trim().replace(/^\/+/, "").replace(/(\.http)?$/, ".http");
+  const refresh = async () => setProject(await api.refreshProject());
+
+  const submitPath = async () => {
+    if (!pathForm) return;
+    const from = pathForm.from;
+    const path = normalizePath(pathForm.value, from ? !from.isFile : false);
+    if (!path || path === ".http") return;
     try {
-      await api.writeRequest(path, NEW_REQUEST);
-      setNewPath(null);
-      setProject(await api.refreshProject());
-      await select(path);
+      if (!from) {
+        if (project?.files.includes(path)) throw new Error(`${path} already exists`);
+        await api.writeRequest(path, NEW_REQUEST);
+        setPathForm(null);
+        await refresh();
+        await select(path);
+        return;
+      }
+      if (path !== from.path) {
+        await api.renamePath(from.path, path);
+        const move = (p: string) => movedPath(p, from.path, path) ?? p;
+        setSelected((s) => s && move(s));
+        setRuns((r) => Object.fromEntries(Object.entries(r).map(([k, v]) => [move(k), v])));
+        await refresh();
+      }
+      setPathForm(null);
     } catch (e) {
       setError(String(e));
     }
+  };
+
+  const remove = async (t: TreeTarget) => {
+    const what = t.isFile ? t.path : `${t.count} request${t.count === 1 ? "" : "s"} in ${t.path}/`;
+    if (!window.confirm(`Delete ${what}?`)) return;
+    try {
+      await api.deletePath(t.path);
+      if (selected && movedPath(selected, t.path, "") !== null) {
+        setSelected(null);
+        setContent("");
+        setSavedContent("");
+      }
+      await refresh();
+    } catch (e) {
+      setError(String(e));
+    }
+  };
+
+  const duplicate = async (path: string) => {
+    const base = path.replace(/\.http$/, "");
+    let copy = `${base}-copy.http`;
+    for (let i = 2; project?.files.includes(copy); i++) copy = `${base}-copy${i}.http`;
+    try {
+      await api.writeRequest(copy, await api.readRequest(path));
+      await refresh();
+      await select(copy);
+    } catch (e) {
+      setError(String(e));
+    }
+  };
+
+  const openMenu = (e: MouseEvent, t: TreeTarget | null) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const dirPrefix = t ? (t.isFile ? t.path.slice(0, t.path.lastIndexOf("/") + 1) : `${t.path}/`) : "";
+    const items: MenuItem[] = [{ label: "New request", run: () => setPathForm({ value: dirPrefix }) }];
+    if (t?.isFile) {
+      items.unshift({ label: "Open", run: () => select(t.path) });
+      items.push({ label: "Duplicate", run: () => duplicate(t.path) });
+    }
+    if (t) {
+      items.push(
+        { label: "Rename / Move…", run: () => setPathForm({ from: t, value: t.isFile ? t.path.replace(/\.http$/, "") : t.path }) },
+        { label: "Delete", danger: true, run: () => remove(t) },
+      );
+    }
+    setMenu({ x: e.clientX, y: e.clientY, items });
+  };
+
+  const clearSaved = async () => {
+    try {
+      await api.clearSaved(env);
+      bump();
+    } catch (e) {
+      setError(String(e));
+    }
+  };
+
+  const clearHistory = async () => {
+    try {
+      await api.clearHistory();
+      setOpened(null);
+      setRuns((r) => Object.fromEntries(Object.entries(r).map(([k, v]) => [k, { pending: v.pending }])));
+      bump();
+    } catch (e) {
+      setError(String(e));
+    }
+  };
+
+  const toggleAutoUpdate = (v: boolean) => {
+    setAutoUpdate(v);
+    storage(AUTO_UPDATE_KEY, v ? "1" : null);
+  };
+
+  const togglePersistHistory = (v: boolean) => {
+    setPersistHistory(v);
+    storage(PERSIST_HISTORY_KEY, v ? "1" : null);
   };
 
   const saveSecret = async () => {
@@ -232,6 +396,7 @@ export default function App() {
     try {
       await api.setSecret(env, secretForm.name.trim(), secretForm.value);
       setSecretForm(null);
+      bump();
     } catch (e) {
       setError(String(e));
     }
@@ -239,7 +404,19 @@ export default function App() {
 
   return (
     <div className="app">
-      <TitleBar version={version} />
+      <TitleBar
+        version={version}
+        menu={
+          <SettingsMenu
+            updates={updates}
+            autoUpdate={autoUpdate}
+            onAutoUpdate={toggleAutoUpdate}
+            persistHistory={persistHistory}
+            onPersistHistory={togglePersistHistory}
+          />
+        }
+      />
+      {menu && <ContextMenu {...menu} onClose={() => setMenu(null)} />}
       <aside className="sidebar">
         <div className="project">
           <button className="project-name" onClick={pickFolder} title={project ? `${project.root}\nOpen another project` : undefined}>
@@ -267,22 +444,31 @@ export default function App() {
           <>
             <div className="tree-head">
               <span>Requests</span>
-              <button className="icon" onClick={() => setNewPath(newPath === null ? "" : null)} title="New request">
+              <button className="icon" onClick={() => setPathForm(pathForm ? null : { value: "" })} title="New request">
                 +
               </button>
             </div>
-            {newPath !== null && (
-              <form className="stack" onSubmit={(e) => (e.preventDefault(), createRequest())}>
-                <input placeholder="users/create" value={newPath} onChange={(e) => setNewPath(e.target.value)} autoFocus />
+            {pathForm && (
+              <form className="stack path-form" onSubmit={(e) => (e.preventDefault(), submitPath())}>
+                <label className="muted">
+                  {pathForm.from ? `Rename or move ${pathForm.from.isFile ? "request" : "folder"}` : "New request"}
+                </label>
+                <input
+                  placeholder="users/create"
+                  value={pathForm.value}
+                  onChange={(e) => setPathForm({ ...pathForm, value: e.target.value })}
+                  onKeyDown={(e) => e.key === "Escape" && setPathForm(null)}
+                  autoFocus
+                />
               </form>
             )}
-            <div className="tree-wrap">
-              <FileTree files={project.files} selected={selected} onSelect={select} />
+            <div className="tree-wrap" onContextMenu={(e) => openMenu(e, null)}>
+              <FileTree files={project.files} selected={selected} onSelect={select} onMenu={openMenu} />
             </div>
           </>
         )}
 
-        <UpdateBanner />
+        <UpdateBanner updates={updates} />
         {project && (
           <div className="side-foot">
             {secretForm && (
@@ -354,9 +540,13 @@ export default function App() {
                       ) : (
                         <>
                           <button onClick={save} disabled={!dirty} title="Ctrl+S">Save</button>
-                          <button className="primary" onClick={send} disabled={sending || !!parseError} title="Ctrl+Enter">
-                            {sending ? "Sending…" : "Send"}
-                          </button>
+                          {run?.pending ? (
+                            <button onClick={cancel} title="Cancel the request">Cancel</button>
+                          ) : (
+                            <button className="primary" onClick={send} disabled={!!parseError} title="Ctrl+Enter">
+                              Send
+                            </button>
+                          )}
                         </>
                       )}
                     </div>
@@ -384,31 +574,72 @@ export default function App() {
               </section>
 
               <section className="panel result">
-                {isConfig ? (
-                  <>
-                    <div className="pane-head">
-                      <span className="pane-title">Reference</span>
-                    </div>
-                    <div className="tab-body config-help">
-                      <p>
-                        Shared variables go in <code>[vars]</code>, per-environment values in <code>[env.name]</code>;
-                        they override the shared ones. <code>default</code> is the default environment.
-                      </p>
-                      <pre>{CONFIG_EXAMPLE}</pre>
-                      <p>
-                        Don't put tokens or passwords here — they belong in the system keychain: "Add secret" at the bottom
-                        left, or a <code>ROUTY_NAME</code> environment variable.
-                      </p>
-                    </div>
-                  </>
+                <div className="pane-head">
+                  <div className="seg views">
+                    <button className={view === "response" ? "active" : ""} onClick={() => setView("response")}>
+                      {isConfig ? "Reference" : "Response"}
+                      {run?.pending !== undefined && <span className="spinner" aria-label="Sending" />}
+                    </button>
+                    <button className={view === "history" ? "active" : ""} onClick={() => setView("history")}>
+                      History
+                    </button>
+                    <button className={view === "vars" ? "active" : ""} onClick={() => setView("vars")}>
+                      Variables
+                    </button>
+                  </div>
+                  <span className="spacer" />
+                  {view === "response" && opened && (
+                    <span className="from-history">
+                      <span className="muted">from history</span>
+                      <button className="ghost" onClick={() => setOpened(null)}>Latest</button>
+                    </span>
+                  )}
+                </div>
+                {view === "history" ? (
+                  <HistoryList
+                    key={selected ?? ""}
+                    entries={history}
+                    file={selected && !isConfig ? selected : null}
+                    openedId={shown?.id ?? null}
+                    persistent={persistHistory}
+                    onOpen={(e) => {
+                      setOpened(e);
+                      setView("response");
+                    }}
+                    onClear={clearHistory}
+                  />
+                ) : view === "vars" ? (
+                  <VarsPanel env={env} vars={varList} onClearSaved={clearSaved} onSetSecret={(name) => setSecretForm({ name, value: "" })} />
+                ) : isConfig ? (
+                  <div className="tab-body config-help">
+                    <p>
+                      Shared variables go in <code>[vars]</code>, per-environment values in <code>[env.name]</code>;
+                      they override the shared ones. <code>default</code> is the default environment.
+                    </p>
+                    <pre>{CONFIG_EXAMPLE}</pre>
+                    <p>
+                      Don't put tokens or passwords here — they belong in the system keychain: "Add secret" at the bottom
+                      left, or a <code>ROUTY_NAME</code> environment variable. List their names in <code>secrets</code> and
+                      the Variables tab will show which ones are missing.
+                    </p>
+                  </div>
                 ) : (
                   <>
-                    {!outcome && <div className="pane-head" />}
-                    {sendError && <div className="send-error">{sendError}</div>}
-                    {outcome ? <ResponseView outcome={outcome} /> : !sendError && (
-                      <p className="hint">
-                        {sending ? "Sending…" : <>The response will appear here — <kbd>Ctrl</kbd> <kbd>Enter</kbd></>}
-                      </p>
+                    {run?.error && !opened && <div className="send-error">{run.error}</div>}
+                    {shown && (opened || !run?.error) ? (
+                      <ResponseView key={shown.id} entry={shown} onError={setError} />
+                    ) : (
+                      !run?.error && (
+                        <p className="hint">
+                          {!selected ? (
+                            "Responses appear here"
+                          ) : run?.pending ? (
+                            "Sending…"
+                          ) : (
+                            <>The response will appear here — <kbd>Ctrl</kbd> <kbd>Enter</kbd></>
+                          )}
+                        </p>
+                      )
                     )}
                   </>
                 )}

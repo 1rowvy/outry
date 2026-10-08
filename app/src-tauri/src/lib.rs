@@ -4,12 +4,15 @@
 use std::collections::HashMap;
 use std::path::{Component, Path, PathBuf};
 
+use base64::Engine;
 use notify::{RecursiveMode, Watcher};
-use routy_core::runner::{Options, RunOutcome};
-use routy_core::{Project, Runner, discover};
+use routy_core::history::{Entry, History, history_path};
+use routy_core::runner::Options;
+use routy_core::vars::{VarInfo, mask};
+use routy_core::{Project, Runner, discover, dynamic};
 use serde::Serialize;
 use tauri::{Emitter, State};
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, oneshot};
 
 type CmdResult<T> = Result<T, String>;
 
@@ -21,6 +24,7 @@ struct Session {
     project: Project,
     /// Раннер на окружение: в нём живут значения `> save` между запросами.
     runners: HashMap<String, Runner>,
+    history: History,
     _watcher: Option<notify::RecommendedWatcher>,
 }
 
@@ -39,7 +43,12 @@ impl Session {
 }
 
 #[derive(Default)]
-struct AppState(Mutex<Option<Session>>);
+struct AppState {
+    session: Mutex<Option<Session>>,
+    /// Запросы в полёте (id от фронта → отмена). Отдельно от сессии: её блокировка
+    /// на время HTTP не держится, поэтому запросы идут параллельно.
+    inflight: std::sync::Mutex<HashMap<u64, oneshot::Sender<()>>>,
+}
 
 #[derive(Serialize)]
 struct ProjectInfo {
@@ -106,9 +115,10 @@ async fn open(app: tauri::AppHandle, state: &AppState, dir: &Path) -> CmdResult<
     let project = Project::discover(dir).map_err(err)?;
     let info = project_info(&project)?;
     let watcher = watch(app, &project.root);
-    *state.0.lock().await = Some(Session {
+    *state.session.lock().await = Some(Session {
         project,
         runners: HashMap::new(),
+        history: History::default(),
         _watcher: watcher,
     });
     Ok(info)
@@ -128,7 +138,7 @@ async fn open_project(
 #[tauri::command]
 async fn init_project(app: tauri::AppHandle, state: State<'_, AppState>) -> CmdResult<ProjectInfo> {
     let root = {
-        let guard = state.0.lock().await;
+        let guard = state.session.lock().await;
         let s = guard.as_ref().ok_or("no project open")?;
         if s.project.has_config() {
             return Err("project already has env.toml".into());
@@ -142,10 +152,11 @@ async fn init_project(app: tauri::AppHandle, state: State<'_, AppState>) -> CmdR
 /// Перечитать список файлов и env.toml, не пересоздавая слежение.
 #[tauri::command]
 async fn refresh_project(state: State<'_, AppState>) -> CmdResult<ProjectInfo> {
-    let mut guard = state.0.lock().await;
+    let mut guard = state.session.lock().await;
     let s = guard.as_mut().ok_or("no project open")?;
     let project = Project::load(&s.project.root).map_err(err)?;
-    if project.config.env != s.project.config.env || project.config.vars != s.project.config.vars {
+    let c = (&project.config, &s.project.config);
+    if c.0.env != c.1.env || c.0.vars != c.1.vars || c.0.secrets != c.1.secrets {
         s.runners.clear();
     }
     s.project = project;
@@ -154,20 +165,75 @@ async fn refresh_project(state: State<'_, AppState>) -> CmdResult<ProjectInfo> {
 
 #[tauri::command]
 async fn read_request(state: State<'_, AppState>, path: String) -> CmdResult<String> {
-    let guard = state.0.lock().await;
+    let guard = state.session.lock().await;
     let s = guard.as_ref().ok_or("no project open")?;
     std::fs::read_to_string(inside(&s.project.root, &path)?).map_err(err)
 }
 
 #[tauri::command]
 async fn write_request(state: State<'_, AppState>, path: String, content: String) -> CmdResult<()> {
-    let guard = state.0.lock().await;
+    let guard = state.session.lock().await;
     let s = guard.as_ref().ok_or("no project open")?;
     let full = inside(&s.project.root, &path)?;
     if let Some(dir) = full.parent() {
         std::fs::create_dir_all(dir).map_err(err)?;
     }
     std::fs::write(full, content).map_err(err)
+}
+
+/// Переименование или перенос файла запроса или каталога. Цель не перезаписывается.
+#[tauri::command]
+async fn rename_path(state: State<'_, AppState>, from: String, to: String) -> CmdResult<()> {
+    let guard = state.session.lock().await;
+    let s = guard.as_ref().ok_or("no project open")?;
+    let root = &s.project.root;
+    let (src, dst) = (inside(root, &from)?, inside(root, &to)?);
+    if dst.exists() {
+        return Err(format!("{to} already exists"));
+    }
+    if dst.starts_with(&src) {
+        return Err("can't move a folder into itself".into());
+    }
+    if let Some(dir) = dst.parent() {
+        std::fs::create_dir_all(dir).map_err(err)?;
+    }
+    std::fs::rename(&src, &dst).map_err(err)?;
+    prune_empty(root, src.parent());
+    Ok(())
+}
+
+/// Удаляет файл запроса или все `*.http` в каталоге. Прочие файлы не трогаем:
+/// каталог исчезает, только если в нём больше ничего не осталось.
+#[tauri::command]
+async fn delete_path(state: State<'_, AppState>, path: String) -> CmdResult<()> {
+    let guard = state.session.lock().await;
+    let s = guard.as_ref().ok_or("no project open")?;
+    let root = &s.project.root;
+    let full = inside(root, &path)?;
+    if full.is_dir() {
+        for f in discover::request_files(&full).map_err(err)? {
+            let f = full.join(f);
+            std::fs::remove_file(&f).map_err(err)?;
+            prune_empty(&full, f.parent());
+        }
+        prune_empty(root, Some(&full));
+    } else if full.extension().is_some_and(|e| e == discover::EXTENSION) {
+        std::fs::remove_file(&full).map_err(err)?;
+        prune_empty(root, full.parent());
+    } else {
+        return Err(format!("not a request file: {path}"));
+    }
+    Ok(())
+}
+
+/// Удаляет пустые каталоги от `dir` вверх, не выше `root` (и не сам `root`).
+fn prune_empty(root: &Path, mut dir: Option<&Path>) {
+    while let Some(d) = dir {
+        if d == root || !d.starts_with(root) || std::fs::remove_dir(d).is_err() {
+            break;
+        }
+        dir = d.parent();
+    }
 }
 
 #[derive(Serialize)]
@@ -203,39 +269,165 @@ fn check_config(content: String) -> Option<ParseError> {
         .map(parse_error)
 }
 
-/// Отправляет текущее содержимое редактора (даже несохранённое).
+/// Отправляет текущее содержимое редактора (даже несохранённое). Сессия заблокирована
+/// только на подстановку переменных и разбор ответа — HTTP идёт без неё.
 #[tauri::command]
 async fn send_request(
     state: State<'_, AppState>,
+    id: u64,
     env: Option<String>,
+    path: String,
     content: String,
-) -> CmdResult<RunOutcome> {
+) -> CmdResult<Entry> {
     let file = routy_core::parse(&content).map_err(err)?;
-    let mut guard = state.0.lock().await;
+    let (client, request) = {
+        let mut guard = state.session.lock().await;
+        let s = guard.as_mut().ok_or("no project open")?;
+        let runner = s.runner(env.as_deref())?;
+        (runner.client(), runner.resolve(&file).map_err(err)?)
+    };
+
+    let (cancel, cancelled) = oneshot::channel();
+    state.inflight.lock().unwrap().insert(id, cancel);
+    let result = tokio::select! {
+        r = routy_core::runner::send(&client, &request) => Some(r),
+        _ = cancelled => None,
+    };
+    state.inflight.lock().unwrap().remove(&id);
+    let response = result.ok_or("cancelled")?.map_err(err)?;
+
+    let mut guard = state.session.lock().await;
     let s = guard.as_mut().ok_or("no project open")?;
     let runner = s.runner(env.as_deref())?;
-    let outcome = runner.run(&file).await.map_err(err)?;
+    let outcome = runner.apply(&file, request, response);
     if !outcome.saved.is_empty() {
         runner.persist_saved().map_err(err)?;
     }
-    Ok(outcome)
+    let env = runner.env.clone();
+    s.history.push(&path, &env, outcome).cloned().map_err(err)
+}
+
+#[tauri::command]
+fn cancel_request(state: State<'_, AppState>, id: u64) {
+    if let Some(cancel) = state.inflight.lock().unwrap().remove(&id) {
+        let _ = cancel.send(());
+    }
+}
+
+/// История ответов, новые сверху.
+#[tauri::command]
+async fn history(state: State<'_, AppState>) -> CmdResult<Vec<Entry>> {
+    let guard = state.session.lock().await;
+    let s = guard.as_ref().ok_or("no project open")?;
+    Ok(s.history.entries().iter().rev().cloned().collect())
+}
+
+#[tauri::command]
+async fn clear_history(state: State<'_, AppState>) -> CmdResult<()> {
+    let mut guard = state.session.lock().await;
+    let s = guard.as_mut().ok_or("no project open")?;
+    s.history.clear().map_err(err)
+}
+
+/// Хранить ли историю на диске (вне репозитория). Выключение удаляет файл.
+#[tauri::command]
+async fn set_history_persist(state: State<'_, AppState>, persist: bool) -> CmdResult<()> {
+    let mut guard = state.session.lock().await;
+    let s = guard.as_mut().ok_or("no project open")?;
+    if !persist {
+        return s.history.stop_persisting().map_err(err);
+    }
+    let path = history_path(&s.project.root).ok_or("no data directory")?;
+    s.history.persist_to(path).map_err(err)
+}
+
+/// Картинка из ответа как data: URL. Сырые байты есть только у ответов этой сессии.
+#[tauri::command]
+async fn response_image(state: State<'_, AppState>, id: u64) -> CmdResult<Option<String>> {
+    let guard = state.session.lock().await;
+    let s = guard.as_ref().ok_or("no project open")?;
+    let Some(e) = s.history.get(id) else {
+        return Ok(None);
+    };
+    let r = &e.outcome.response;
+    let mime = r
+        .headers
+        .iter()
+        .find(|h| h.name.eq_ignore_ascii_case("content-type"))
+        .map(|h| {
+            h.value
+                .split(';')
+                .next()
+                .unwrap_or_default()
+                .trim()
+                .to_string()
+        })
+        .filter(|m| m.starts_with("image/"));
+    Ok(match mime {
+        Some(mime) if !r.raw.is_empty() => Some(format!(
+            "data:{mime};base64,{}",
+            base64::engine::general_purpose::STANDARD.encode(&r.raw)
+        )),
+        _ => None,
+    })
+}
+
+/// Сохраняет тело ответа в выбранный пользователем файл (путь — из диалога сохранения).
+#[tauri::command]
+async fn save_body(state: State<'_, AppState>, id: u64, dest: PathBuf) -> CmdResult<()> {
+    let guard = state.session.lock().await;
+    let s = guard.as_ref().ok_or("no project open")?;
+    let r = &s
+        .history
+        .get(id)
+        .ok_or("response is no longer in history")?
+        .outcome
+        .response;
+    let bytes = if r.raw.is_empty() {
+        r.body.as_bytes()
+    } else {
+        &r.raw
+    };
+    std::fs::write(dest, bytes).map_err(err)
+}
+
+/// Переменные окружения с источниками для панели. Секреты — только маской.
+#[tauri::command]
+async fn variables(state: State<'_, AppState>, env: Option<String>) -> CmdResult<Vec<VarInfo>> {
+    let mut guard = state.session.lock().await;
+    let s = guard.as_mut().ok_or("no project open")?;
+    let mut list = s.runner(env.as_deref())?.variables().map_err(err)?;
+    for v in list.iter_mut().filter(|v| v.secret) {
+        v.value = v.value.as_deref().map(mask);
+    }
+    Ok(list)
+}
+
+/// Забыть значения `> save` окружения.
+#[tauri::command]
+async fn clear_saved(state: State<'_, AppState>, env: Option<String>) -> CmdResult<()> {
+    let mut guard = state.session.lock().await;
+    let s = guard.as_mut().ok_or("no project open")?;
+    s.runner(env.as_deref())?.clear_saved().map_err(err)
 }
 
 #[derive(Serialize)]
 struct VarName {
     name: String,
-    /// `"env"` — из env.toml, `"saved"` — из `> save`.
+    /// `"env"` — из env.toml, `"saved"` — из `> save`, `"secret"` — объявлен в `secrets`,
+    /// `"dynamic"` — `$uuid` и т.п.
     source: &'static str,
-    /// Значение только для env.toml: в saved часто токены.
+    /// Значение только для env.toml, для `dynamic` — описание: в saved часто токены.
     value: Option<String>,
 }
 
 /// Известные имена переменных окружения — для автодополнения `{{var}}`.
-/// Секреты из хранилища перечислить нельзя, их здесь нет.
+/// Секреты из хранилища перечислить нельзя — только объявленные в `secrets`.
 #[tauri::command]
 async fn var_names(state: State<'_, AppState>, env: Option<String>) -> CmdResult<Vec<VarName>> {
-    let mut guard = state.0.lock().await;
+    let mut guard = state.session.lock().await;
     let s = guard.as_mut().ok_or("no project open")?;
+    let declared = s.project.config.secrets.clone();
     let vars = &s.runner(env.as_deref())?.vars;
     let saved = vars.saved.keys().map(|name| VarName {
         name: name.clone(),
@@ -251,7 +443,24 @@ async fn var_names(state: State<'_, AppState>, env: Option<String>) -> CmdResult
             source: "env",
             value: Some(value.clone()),
         });
-    Ok(saved.chain(from_env).collect())
+    let secrets = declared
+        .into_iter()
+        .filter(|name| !vars.saved.contains_key(name) && !vars.env.contains_key(name))
+        .map(|name| VarName {
+            name,
+            source: "secret",
+            value: None,
+        });
+    let dynamic = dynamic::NAMES.iter().map(|(name, about)| VarName {
+        name: name.to_string(),
+        source: "dynamic",
+        value: Some(about.to_string()),
+    });
+    Ok(saved
+        .chain(from_env)
+        .chain(secrets)
+        .chain(dynamic)
+        .collect())
 }
 
 #[tauri::command]
@@ -261,7 +470,7 @@ async fn set_secret(
     name: String,
     value: String,
 ) -> CmdResult<()> {
-    let guard = state.0.lock().await;
+    let guard = state.session.lock().await;
     let s = guard.as_ref().ok_or("no project open")?;
     let env = s.project.resolve_env(env.as_deref()).map_err(err)?;
     let store = routy_core::runner::secret_store(&s.project, &env)
@@ -288,7 +497,17 @@ pub fn run() {
             write_request,
             check_request,
             check_config,
+            rename_path,
+            delete_path,
             send_request,
+            cancel_request,
+            history,
+            clear_history,
+            set_history_persist,
+            response_image,
+            save_body,
+            variables,
+            clear_saved,
             var_names,
             set_secret,
         ])

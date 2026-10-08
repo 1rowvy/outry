@@ -5,9 +5,14 @@
 //! 3. переменные окружения процесса `ROUTY_<NAME>` (удобно для секретов в CI);
 //! 4. активное окружение из `env.toml`, затем общая секция `[vars]`;
 //! 5. системное хранилище паролей (секреты).
+//!
+//! Имена на `$` — динамические (`{{$uuid}}`), см. `dynamic.rs`.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
+use serde::Serialize;
+
+use crate::dynamic;
 use crate::error::Result;
 use crate::secrets::SecretStore;
 
@@ -21,23 +26,92 @@ pub struct Vars {
     pub process_env: bool,
 }
 
+/// Откуда пришло значение переменной.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Source {
+    Override,
+    Saved,
+    ProcessEnv,
+    Env,
+    Secret,
+    Dynamic,
+}
+
+/// Переменная для панели в GUI и `routy vars`.
+#[derive(Debug, Clone, Serialize)]
+pub struct VarInfo {
+    pub name: String,
+    /// `None` — значения нет (объявленный, но не заданный секрет).
+    pub value: Option<String>,
+    pub source: Option<Source>,
+    /// Значение не показывать целиком: из хранилища паролей или объявлено в `secrets`.
+    pub secret: bool,
+}
+
 impl Vars {
     pub fn get(&self, name: &str) -> Result<Option<String>> {
-        if let Some(v) = self.overrides.get(name).or_else(|| self.saved.get(name)) {
-            return Ok(Some(v.clone()));
+        Ok(self.lookup(name)?.map(|(v, _)| v))
+    }
+
+    /// Значение вместе с источником.
+    pub fn lookup(&self, name: &str) -> Result<Option<(String, Source)>> {
+        if dynamic::is_dynamic(name) {
+            return Ok(Some((dynamic::eval(name)?, Source::Dynamic)));
+        }
+        if let Some(v) = self.overrides.get(name) {
+            return Ok(Some((v.clone(), Source::Override)));
+        }
+        if let Some(v) = self.saved.get(name) {
+            return Ok(Some((v.clone(), Source::Saved)));
         }
         if self.process_env {
             if let Ok(v) = std::env::var(process_env_name(name)) {
-                return Ok(Some(v));
+                return Ok(Some((v, Source::ProcessEnv)));
             }
         }
         if let Some(v) = self.env.get(name) {
-            return Ok(Some(v.clone()));
+            return Ok(Some((v.clone(), Source::Env)));
         }
         match &self.secrets {
-            Some(store) => store.get(name),
+            Some(store) => Ok(store.get(name)?.map(|v| (v, Source::Secret))),
             None => Ok(None),
         }
+    }
+
+    /// Все известные переменные: из `--var`, `> save`, `env.toml` и объявленные секреты.
+    /// `ROUTY_*` и хранилище паролей перечислить нельзя — они видны только для этих имён.
+    pub fn list(&self, declared_secrets: &[String]) -> Result<Vec<VarInfo>> {
+        let names: BTreeSet<&String> = self
+            .overrides
+            .keys()
+            .chain(self.saved.keys())
+            .chain(self.env.keys())
+            .chain(declared_secrets)
+            .collect();
+        names
+            .into_iter()
+            .map(|name| {
+                let found = self.lookup(name)?;
+                Ok(VarInfo {
+                    name: name.clone(),
+                    secret: declared_secrets.contains(name)
+                        || matches!(found, Some((_, Source::Secret))),
+                    source: found.as_ref().map(|(_, s)| *s),
+                    value: found.map(|(v, _)| v),
+                })
+            })
+            .collect()
+    }
+}
+
+/// Значение секрета для показа: первые символы и длина.
+pub fn mask(value: &str) -> String {
+    let n = value.chars().count();
+    if n <= 8 {
+        "•".repeat(n.max(1))
+    } else {
+        format!("{}…({n} chars)", value.chars().take(3).collect::<String>())
     }
 }
 
@@ -74,6 +148,27 @@ mod tests {
         v.overrides.insert("a".into(), "cli".into());
         assert_eq!(v.get("a").unwrap().as_deref(), Some("cli"));
         assert_eq!(v.get("zzz").unwrap(), None);
+    }
+
+    #[test]
+    fn sources_and_list() {
+        let mut v = Vars::default();
+        v.env.insert("base".into(), "http://x".into());
+        v.saved.insert("id".into(), "7".into());
+        v.secrets = Some(Box::new(MemoryStore::from([("token", "abcdefghijk")])));
+        assert_eq!(v.lookup("id").unwrap().unwrap().1, Source::Saved);
+        assert_eq!(v.lookup("$uuid").unwrap().unwrap().1, Source::Dynamic);
+        assert!(v.lookup("$nope").is_err());
+
+        let list = v.list(&["token".into(), "missing".into()]).unwrap();
+        let names: Vec<_> = list.iter().map(|i| i.name.as_str()).collect();
+        assert_eq!(names, ["base", "id", "missing", "token"]);
+        assert_eq!(list[0].source, Some(Source::Env));
+        assert!(!list[0].secret);
+        assert_eq!((list[2].source, list[2].secret), (None, true));
+        assert_eq!(list[3].source, Some(Source::Secret));
+        assert_eq!(mask(list[3].value.as_deref().unwrap()), "abc…(11 chars)");
+        assert_eq!(mask("abc"), "•••");
     }
 
     #[test]

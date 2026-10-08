@@ -20,10 +20,14 @@ The app remembers the last project and reopens it on start.
 
 - The left panel shows every `.http` file in the project; **+** next to **Requests** creates a new one
   (`users/create` becomes `users/create.http`).
+- Right-click a request or a folder to open, duplicate, rename or delete it. **Rename / Move…** takes a
+  path, so `users/create` → `admin/users/create` moves the file to another folder. Deleting a folder
+  removes only the `.http` files in it; other files stay.
 - The editor highlights `.http` syntax and checks it as you type: the line with an error is underlined,
   and the message is shown below the editor.
-- After `{{` the editor suggests variables of the current environment (from `env.toml` and `> save`);
-  on `>` lines it suggests directives, paths and operators.
+- After `{{` the editor suggests variables of the current environment (from `env.toml`, `> save`,
+  the `secrets` list and [dynamic variables](/routy/guides/variables/#dynamic-variables)); on `>` lines
+  it suggests directives, paths and operators.
 - The switcher under the project name selects an environment from `env.toml`.
 - **Add secret** at the bottom left stores a value in the system keychain for the current environment.
 
@@ -36,6 +40,9 @@ The app remembers the last project and reopens it on start.
 
 The editor's current text is sent, even if it is not saved yet — handy for quick experiments.
 
+While a request is in flight, **Send** turns into **Cancel**. You can switch to another request and send
+it in the meantime: requests run in parallel, and each file keeps its own last response.
+
 ## Editing env.toml
 
 Click **env.toml** under the environment switcher to open the project's
@@ -45,12 +52,32 @@ used by the next request. Keep tokens and passwords out of this file — use **A
 
 ## Response
 
-The response panel has four tabs:
+The right panel has three tabs: **Response**, **History** and **Variables**. The response itself has
+these views:
 
-- **body** — pretty-printed JSON or the raw body;
+- **body** — pretty-printed and highlighted JSON, HTML or XML; the search button (or
+  <kbd>Ctrl</kbd>/<kbd>⌘</kbd> + <kbd>F</kbd> inside the body) finds text in it;
+- **preview** — for images and HTML pages; HTML is rendered without running its scripts;
 - **headers** — response headers;
 - **tests** — the result of every `> assert` and `> save`;
 - **request** — the request exactly as it was sent, after variable substitution.
+
+The download button saves the body to a file, byte for byte.
+
+## History
+
+**History** lists the last 100 responses of the project — for the open request or for all of them.
+Click one to view it again. History is kept in memory until the app is closed; turn on **Keep response
+history on disk** in the menu (☰ in the title bar) to keep it between launches. It is stored outside the
+repository, next to saved values, and responses may contain tokens — **Clear** removes it.
+
+## Variables
+
+**Variables** shows every variable of the selected environment, its final value and where it comes
+from — `env.toml`, `saved`, `ROUTY_*` or `keychain` — like [`routy vars`](/routy/reference/cli/#routy-vars).
+Secrets are masked. Secrets listed in [`secrets`](/routy/reference/env-toml/) but not set anywhere are
+marked **missing**, with a button to add them. **Clear saved** forgets the values captured by `> save`
+in this environment.
 
 ## Live reload
 
@@ -61,6 +88,10 @@ immediately. If you have unsaved changes in the app, the open file is not overwr
 
 On start the app checks for a new version. When one is available, a button in the sidebar downloads
 it, installs it and restarts the app. Updates are signed and verified before installing.
+
+The menu (☰ in the title bar) has **Check for updates** and **Install updates automatically**: with the
+latter on, a new version is downloaded and installed in the background and used after the next
+restart.
 
 <Aside>
 On Linux only the AppImage build updates itself. For `.deb` and `.rpm`, install the new package from

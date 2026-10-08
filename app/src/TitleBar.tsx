@@ -1,13 +1,13 @@
 // Своя шапка окна вместо системной: окно без декораций (на macOS — Overlay со
 // штатными кнопками-светофором поверх, см. tauri.macos.conf.json).
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import logo from "../app-icon.svg";
 
 const isMac = navigator.userAgent.includes("Mac");
 const win = getCurrentWindow();
 
-export function TitleBar({ version }: { version: string | null }) {
+export function TitleBar({ version, menu }: { version: string | null; menu?: ReactNode }) {
   const [maximized, setMaximized] = useState(false);
 
   useEffect(() => {
@@ -27,6 +27,7 @@ export function TitleBar({ version }: { version: string | null }) {
         <span>routy</span>
         {version && <span className="version">v{version}</span>}
       </div>
+      {menu}
       {!isMac && (
         <div className="window-controls">
           <button onClick={() => win.minimize()} title="Minimize" aria-label="Minimize">

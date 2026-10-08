@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 use std::path::Path;
 use std::time::{Duration, Instant};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::error::{Error, Result};
@@ -13,7 +13,7 @@ use crate::parser::{Directive, Header, RequestFile};
 use crate::project::Project;
 use crate::state::{State, state_path};
 use crate::template::render;
-use crate::vars::Vars;
+use crate::vars::{VarInfo, Vars};
 
 #[derive(Debug, Clone)]
 pub struct Options {
@@ -34,7 +34,7 @@ impl Default for Options {
     }
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ResolvedRequest {
     pub method: String,
     pub url: String,
@@ -42,7 +42,7 @@ pub struct ResolvedRequest {
     pub body: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Response {
     pub status: u16,
     pub status_text: String,
@@ -50,6 +50,9 @@ pub struct Response {
     pub body: String,
     #[serde(skip)]
     pub json: Option<Value>,
+    /// Тело как есть — для картинок и сохранения в файл; `body` — его текст (lossy UTF-8).
+    #[serde(skip)]
+    pub raw: Vec<u8>,
     pub duration_ms: u64,
     pub size: usize,
 }
@@ -75,7 +78,7 @@ impl Subject for Response {
     }
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RunOutcome {
     pub request: ResolvedRequest,
     pub response: Response,
@@ -199,47 +202,30 @@ impl Runner {
         })
     }
 
+    /// HTTP-клиент раннера: дешёвый клон, чтобы отправлять запрос, не держа сам раннер
+    /// (в GUI — без блокировки сессии, параллельно с другими запросами).
+    pub fn client(&self) -> reqwest::Client {
+        self.client.clone()
+    }
+
     pub async fn send(&self, req: &ResolvedRequest) -> Result<Response> {
-        let method = reqwest::Method::from_bytes(req.method.as_bytes())
-            .map_err(|_| Error::expr(&req.method, "invalid HTTP method"))?;
-        let mut builder = self.client.request(method, &req.url);
-        for h in &req.headers {
-            builder = builder.header(&h.name, &h.value);
-        }
-        if let Some(body) = &req.body {
-            builder = builder.body(body.clone());
-        }
-
-        let started = Instant::now();
-        let resp = builder.send().await?;
-        let status = resp.status();
-        let headers = resp
-            .headers()
-            .iter()
-            .map(|(k, v)| Header {
-                name: k.to_string(),
-                value: String::from_utf8_lossy(v.as_bytes()).into_owned(),
-            })
-            .collect();
-        let bytes = resp.bytes().await?;
-        let duration_ms = started.elapsed().as_millis() as u64;
-
-        Ok(Response {
-            status: status.as_u16(),
-            status_text: status.canonical_reason().unwrap_or("").to_string(),
-            headers,
-            json: serde_json::from_slice(&bytes).ok(),
-            body: String::from_utf8_lossy(&bytes).into_owned(),
-            duration_ms,
-            size: bytes.len(),
-        })
+        send(&self.client, req).await
     }
 
     /// Запрос целиком. Сохранённые значения сразу доступны следующим запросам этого раннера.
     pub async fn run(&mut self, file: &RequestFile) -> Result<RunOutcome> {
         let request = self.resolve(file)?;
         let response = self.send(&request).await?;
+        Ok(self.apply(file, request, response))
+    }
 
+    /// `> save` и `> assert` по полученному ответу.
+    pub fn apply(
+        &mut self,
+        file: &RequestFile,
+        request: ResolvedRequest,
+        response: Response,
+    ) -> RunOutcome {
         let mut saved = BTreeMap::new();
         let mut save_misses = Vec::new();
         let mut asserts = Vec::new();
@@ -256,13 +242,13 @@ impl Runner {
                 Directive::Assert(a) => asserts.push(a.check(&response)),
             }
         }
-        Ok(RunOutcome {
+        RunOutcome {
             request,
             response,
             saved,
             asserts,
             save_misses,
-        })
+        }
     }
 
     pub async fn run_path(&mut self, path: &Path) -> Result<RunOutcome> {
@@ -270,6 +256,54 @@ impl Runner {
         let file = crate::parse(&src).map_err(|e| e.in_file(path))?;
         self.run(&file).await.map_err(|e| e.in_file(path))
     }
+
+    /// Итоговые значения переменных с источниками, включая объявленные в `secrets`.
+    pub fn variables(&self) -> Result<Vec<VarInfo>> {
+        self.vars.list(&self.project.config.secrets)
+    }
+
+    /// Забыть все значения `> save` этого окружения (и на диске).
+    pub fn clear_saved(&mut self) -> Result<()> {
+        self.vars.saved.clear();
+        self.persist_saved()
+    }
+}
+
+pub async fn send(client: &reqwest::Client, req: &ResolvedRequest) -> Result<Response> {
+    let method = reqwest::Method::from_bytes(req.method.as_bytes())
+        .map_err(|_| Error::expr(&req.method, "invalid HTTP method"))?;
+    let mut builder = client.request(method, &req.url);
+    for h in &req.headers {
+        builder = builder.header(&h.name, &h.value);
+    }
+    if let Some(body) = &req.body {
+        builder = builder.body(body.clone());
+    }
+
+    let started = Instant::now();
+    let resp = builder.send().await?;
+    let status = resp.status();
+    let headers = resp
+        .headers()
+        .iter()
+        .map(|(k, v)| Header {
+            name: k.to_string(),
+            value: String::from_utf8_lossy(v.as_bytes()).into_owned(),
+        })
+        .collect();
+    let bytes = resp.bytes().await?;
+    let duration_ms = started.elapsed().as_millis() as u64;
+
+    Ok(Response {
+        status: status.as_u16(),
+        status_text: status.canonical_reason().unwrap_or("").to_string(),
+        headers,
+        json: serde_json::from_slice(&bytes).ok(),
+        body: String::from_utf8_lossy(&bytes).into_owned(),
+        raw: bytes.to_vec(),
+        duration_ms,
+        size: bytes.len(),
+    })
 }
 
 #[cfg(feature = "secrets")]

@@ -173,7 +173,7 @@ pub struct Assertion {
     pub expected: Value,
 }
 
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct AssertOutcome {
     pub source: String,
     pub passed: bool,

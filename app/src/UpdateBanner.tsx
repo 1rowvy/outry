@@ -1,37 +1,39 @@
-import { useEffect, useState } from "react";
-import type { Update } from "@tauri-apps/plugin-updater";
-import { findUpdate, installUpdate } from "./updater";
+import type { Updates } from "./updater";
 
-export function UpdateBanner() {
-  const [update, setUpdate] = useState<Update | null>(null);
-  const [progress, setProgress] = useState<number | null | undefined>(undefined);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    findUpdate().then(setUpdate);
-  }, []);
-
-  if (!update) return null;
-
-  const install = async () => {
-    setError(null);
-    try {
-      await installUpdate(update, setProgress);
-    } catch (e) {
-      setProgress(undefined);
-      setError(String(e));
-    }
-  };
-
-  return (
-    <div className="update-banner">
-      <span>Version {update.version} is available</span>
-      {progress === undefined ? (
-        <button onClick={install}>Update and restart</button>
-      ) : (
-        <span className="muted">{progress === null ? "Downloading…" : `Downloading ${progress}%`}</span>
-      )}
-      {error && <span className="bad">{error}</span>}
-    </div>
-  );
+export function UpdateBanner({ updates }: { updates: Updates }) {
+  const s = updates.state;
+  if (s.kind === "available") {
+    return (
+      <div className="update-banner">
+        <span>Version {s.update.version} is available</span>
+        <button onClick={updates.install}>Update and restart</button>
+      </div>
+    );
+  }
+  if (s.kind === "downloading") {
+    return (
+      <div className="update-banner">
+        <span>Version {s.update.version}</span>
+        <span className="muted">{s.percent === null ? "Downloading…" : `Downloading ${s.percent}%`}</span>
+      </div>
+    );
+  }
+  if (s.kind === "ready") {
+    return (
+      <div className="update-banner">
+        <span>Version {s.update.version} is installed</span>
+        <button onClick={updates.restart}>Restart now</button>
+      </div>
+    );
+  }
+  if (s.kind === "error" && s.update) {
+    return (
+      <div className="update-banner">
+        <span>Version {s.update.version} is available</span>
+        <button onClick={updates.install}>Retry</button>
+        <span className="bad">{s.message}</span>
+      </div>
+    );
+  }
+  return null;
 }

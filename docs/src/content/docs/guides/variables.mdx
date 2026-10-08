@@ -54,6 +54,36 @@ If any variables are missing, the request is not sent and all missing names are 
     api/users/get.http: undefined variable(s): base, id
 ```
 
+## Dynamic variables
+
+Names starting with `$` are generated on every substitution, so each request (and each occurrence)
+gets a fresh value:
+
+| Variable | Value |
+|----------|-------|
+| `{{$uuid}}` | A random UUID v4 |
+| `{{$timestamp}}` | Current Unix time in seconds |
+| `{{$randomInt}}` | A random integer from 0 to 999 |
+| `{{$randomInt 1 100}}` | A random integer from `min` (inclusive) to `max` (exclusive) |
+
+```http
+POST {{base}}/orders
+Idempotency-Key: {{$uuid}}
+
+{"amount": {{$randomInt 1 100}}, "created": {{$timestamp}}}
+```
+
+## Inspecting variables
+
+`routy vars` prints the final value of every variable and its source; secrets are masked:
+
+```sh
+routy vars --env prod
+```
+
+In the desktop app the **Variables** tab of the right panel shows the same list for the selected
+environment. See [`routy vars`](/routy/reference/cli/#routy-vars).
+
 ## Saved values
 
 Values captured with `> save` are available to the following requests in the same run **and** are
@@ -65,6 +95,8 @@ Run with `--fresh` to ignore and not update saved values:
 ```sh
 routy run api --fresh
 ```
+
+To forget saved values for good, use **Clear saved** on the **Variables** tab in the app.
 
 ## How the project is found
 

@@ -40,6 +40,34 @@ Parse files without sending anything. Exit code `1` if any file has an error.
 routy check <PATHS>...
 ```
 
+## `routy vars`
+
+Show the final value of every variable in an environment and where it comes from. Secret values (from
+the keychain or listed in `secrets`) are masked.
+
+```sh
+routy vars [-e <ENV>] [--project <DIR>] [--var <NAME=VALUE>]...
+```
+
+```txt
+project billing-api · env dev
+base     env.toml   http://localhost:8080
+token    keychain   eyJ…(212 chars)
+api_key  missing    not set: routy secret set api_key --env dev
+user_id  saved      42
+```
+
+| Flag | Description |
+|------|-------------|
+| `--var <NAME=VALUE>` | Override a variable, as in `routy run` |
+| `--fresh` | Ignore values saved by `> save` |
+| `--no-keyring` | Do not look up secrets in the system keychain |
+| `--reveal` | Print secret values in full |
+| `--json` | Print a JSON array |
+
+Variables from `ROUTY_*` and the keychain are only listed for names that appear in `env.toml`
+(including `secrets`) or in saved values.
+
 ## `routy envs`
 
 List the project's environments; `*` marks the default.

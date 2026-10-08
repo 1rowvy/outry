@@ -127,7 +127,7 @@ Authorization: Bearer {{token}}
 | Request line | `METHOD URL`. The method is optional and defaults to `GET` |
 | Headers | `Name: value`, one per line, until the first blank line |
 | Body | Everything after the blank line. JSON bodies get `Content-Type: application/json` automatically |
-| Variables | `{{name}}` anywhere: URL, headers, body |
+| Variables | `{{name}}` anywhere: URL, headers, body. `{{$uuid}}`, `{{$timestamp}}`, `{{$randomInt 1 100}}` are generated per request |
 | Directives | Lines starting with `>` at the end of the file, run after the response arrives |
 
 **Directives**
@@ -166,6 +166,7 @@ When Routy resolves `{{name}}`, the first match wins:
 5. the system keychain
 
 If any variable is missing, the request is not sent, and every missing name is reported at once.
+`routy vars` shows the final value of every variable and where it came from (secrets masked).
 
 ### Secrets
 
@@ -175,6 +176,9 @@ Secret Service on Linux):
 ```sh
 routy secret set token --env dev     # value is read from stdin
 ```
+
+List secret names in `env.toml` (`secrets = ["token"]`) and `routy vars` and the app will point out the
+ones that are missing.
 
 In the app, use **Add secret** at the bottom of the sidebar. In CI, set `ROUTY_TOKEN=...` instead.
 
@@ -209,6 +213,7 @@ routy run <PATHS>...                   # send requests; folders run alphabetical
     --fresh                            #   ignore values saved by previous runs
     --no-keyring                       #   secrets only from ROUTY_*
 routy check <PATHS>...                 # syntax check, nothing is sent
+routy vars [-e ENV] [--reveal]         # final variable values and their sources
 routy envs                             # list environments (* = default)
 routy secret set|rm <NAME> [-e ENV]    # manage keychain secrets
 routy update [--check]                 # self-update from GitHub releases
@@ -218,9 +223,12 @@ All commands and flags: [CLI reference](https://1rowvy.github.io/routy/reference
 
 ## Desktop app
 
-- A file tree of every `*.http` in the project, plus an environment switcher
+- A file tree of every `*.http` in the project with rename / move / delete, plus an environment switcher
 - An editor with live syntax checking. <kbd>Ctrl</kbd>+<kbd>Enter</kbd> sends, <kbd>Ctrl</kbd>+<kbd>S</kbd> saves
-- The response shows body, headers, test results and the exact request that was sent
+- Requests run in parallel and can be cancelled
+- The response shows highlighted, searchable body, image and HTML previews, headers, test results and the
+  exact request that was sent; the body can be saved to a file
+- Response history (in memory, or on disk outside the repo) and a variables panel showing where every value comes from
 - A built-in `env.toml` editor with TOML validation
 - Changes made outside the app (VS Code, `git pull`) show up immediately
 

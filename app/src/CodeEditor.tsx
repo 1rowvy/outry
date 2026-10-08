@@ -57,7 +57,7 @@ function completions(vars: () => VarName[]) {
         options: vars().map((x) => ({
           label: x.name,
           type: "variable",
-          detail: x.source === "saved" ? "saved" : x.value ?? undefined,
+          detail: x.source === "saved" || x.source === "secret" ? x.source : x.value ?? undefined,
           apply: closed ? x.name : `${x.name}}}`,
         })),
         validFor: /^[\w$.-]*$/,
@@ -78,7 +78,7 @@ function completions(vars: () => VarName[]) {
   };
 }
 
-const highlight = HighlightStyle.define([
+export const highlight = HighlightStyle.define([
   { tag: tags.keyword, color: "var(--accent)", fontWeight: "600" },
   { tag: tags.url, color: "var(--text)" },
   { tag: tags.special(tags.variableName), color: "var(--m-patch)", backgroundColor: "color-mix(in srgb, var(--m-patch) 12%, transparent)", borderRadius: "3px" },
@@ -89,7 +89,7 @@ const highlight = HighlightStyle.define([
   { tag: tags.comment, color: "var(--faint)", fontStyle: "italic" },
 ]);
 
-const theme = EditorView.theme({
+export const theme = EditorView.theme({
   "&": { height: "100%", backgroundColor: "transparent", color: "var(--text)" },
   "&.cm-focused": { outline: "none" },
   ".cm-scroller": { fontFamily: "var(--mono)", fontSize: "12.5px", lineHeight: "1.65" },
@@ -136,9 +136,22 @@ const theme = EditorView.theme({
   ".cm-diagnostic-error": { borderLeft: "3px solid var(--bad)" },
   ".cm-panels": { backgroundColor: "var(--panel)", color: "var(--text)" },
   ".cm-panels.cm-panels-bottom": { borderTop: "1px solid var(--line)" },
-  ".cm-search": { fontFamily: "var(--sans)", fontSize: "12px" },
-  ".cm-search input, .cm-search button": { padding: "2px 8px", fontSize: "12px" },
-  ".cm-search label": { color: "var(--muted)" },
+  ".cm-panels.cm-panels-top": { borderBottom: "1px solid var(--line)" },
+  ".cm-search": { fontFamily: "var(--sans)", fontSize: "12px", display: "flex", flexWrap: "wrap", alignItems: "center", gap: "4px 6px", padding: "6px 28px 6px 10px" },
+  ".cm-search br": { display: "none" },
+  ".cm-search input, .cm-search button": { margin: "0", padding: "2px 8px", fontSize: "12px" },
+  ".cm-textfield, .cm-button": {
+    backgroundColor: "var(--panel)",
+    backgroundImage: "none",
+    color: "var(--text)",
+    border: "1px solid var(--line)",
+    borderRadius: "6px",
+  },
+  ".cm-textfield:focus": { borderColor: "var(--accent)", outline: "none" },
+  ".cm-button:active": { backgroundImage: "none", backgroundColor: "var(--hover)" },
+  ".cm-search label": { display: "inline-flex", alignItems: "center", gap: "3px", color: "var(--muted)", fontSize: "12px" },
+  ".cm-search label input": { accentColor: "var(--accent)" },
+  ".cm-panel.cm-search [name=close]": { color: "var(--muted)", fontSize: "16px", top: "4px", right: "6px" },
 });
 
 function diagnostics(state: EditorState, error: ParseError | null): Diagnostic[] {

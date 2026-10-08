@@ -9,6 +9,7 @@ use std::time::Duration;
 use anyhow::{Context, bail};
 use clap::{Parser, Subcommand};
 use routy_core::runner::{Options, RunOutcome};
+use routy_core::vars::{self, Source};
 use routy_core::{Project, Runner, discover};
 
 #[derive(Parser)]
@@ -56,6 +57,26 @@ enum Cmd {
     Check {
         #[arg(required = true)]
         paths: Vec<PathBuf>,
+    },
+    /// Показать итоговые значения переменных и откуда они взялись (секреты замаскированы)
+    Vars {
+        #[command(flatten)]
+        env: EnvArgs,
+        /// Переопределить переменную: --var id=42 (можно несколько раз)
+        #[arg(long = "var", value_name = "NAME=VALUE", value_parser = parse_kv)]
+        vars: Vec<(String, String)>,
+        /// Не учитывать значения `> save` из прошлых запусков
+        #[arg(long)]
+        fresh: bool,
+        /// Не обращаться к системному хранилищу паролей
+        #[arg(long)]
+        no_keyring: bool,
+        /// Показать значения секретов целиком
+        #[arg(long)]
+        reveal: bool,
+        /// Вывод в JSON
+        #[arg(long)]
+        json: bool,
     },
     /// Показать окружения проекта
     Envs {
@@ -182,6 +203,27 @@ fn real_main(cmd: Cmd) -> anyhow::Result<ExitCode> {
             } else {
                 ExitCode::FAILURE
             })
+        }
+        Cmd::Vars {
+            env,
+            vars,
+            fresh,
+            no_keyring,
+            reveal,
+            json,
+        } => {
+            let project = find_project(env.project.as_deref(), Path::new("."))?;
+            let opts = Options {
+                use_keyring: !no_keyring,
+                ..Options::default()
+            };
+            let mut runner = Runner::new(project, env.env.as_deref(), opts)?;
+            if !fresh {
+                runner.load_saved()?;
+            }
+            runner.vars.overrides.extend(vars);
+            print_vars(&runner, reveal, json)?;
+            Ok(ExitCode::SUCCESS)
         }
         Cmd::Envs { dir } => {
             let p = Project::discover(&dir)?;
@@ -349,6 +391,53 @@ fn print_outcome(st: &Style, file: &Path, o: &RunOutcome, verbose: bool) {
             println!("    {line}");
         }
     }
+}
+
+fn print_vars(runner: &Runner, reveal: bool, json: bool) -> anyhow::Result<()> {
+    let mut list = runner.variables()?;
+    if !reveal {
+        for v in list.iter_mut().filter(|v| v.secret) {
+            v.value = v.value.as_deref().map(vars::mask);
+        }
+    }
+    if json {
+        println!("{}", serde_json::to_string_pretty(&list)?);
+        return Ok(());
+    }
+    let st = Style::stdout();
+    println!(
+        "{}",
+        st.dim(&format!(
+            "project {} · env {}",
+            runner.project.id(),
+            runner.env
+        ))
+    );
+    let width = list.iter().map(|v| v.name.len()).max().unwrap_or(0);
+    for v in &list {
+        let source = match v.source {
+            Some(Source::Override) => "--var",
+            Some(Source::Saved) => "saved",
+            Some(Source::ProcessEnv) => "ROUTY_*",
+            Some(Source::Env) => "env.toml",
+            Some(Source::Secret) => "keychain",
+            Some(Source::Dynamic) => "dynamic",
+            None => "missing",
+        };
+        let value = match &v.value {
+            Some(value) => value.clone(),
+            None => st.red(&format!(
+                "not set: routy secret set {} --env {}",
+                v.name, runner.env
+            )),
+        };
+        println!(
+            "{:width$}  {}  {value}",
+            v.name,
+            st.dim(&format!("{source:9}"))
+        );
+    }
+    Ok(())
 }
 
 fn secret(cmd: SecretCmd) -> anyhow::Result<ExitCode> {

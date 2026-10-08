@@ -110,3 +110,19 @@ async fn missing_vars_are_all_reported() {
     let err = r.run(&req).await.unwrap_err().to_string();
     assert!(err.contains("a, b"), "{err}");
 }
+
+#[tokio::test]
+async fn dynamic_vars_are_fresh_each_time() {
+    let base = echo_server();
+    let mut r = runner(&base);
+    let req = parse(
+        "POST {{base}}/items/{{ $randomInt 7 8 }}\n\n{\"a\": \"{{$uuid}}\", \"b\": \"{{$uuid}}\"}\n\n> assert body.path == /items/7\n",
+    )
+    .unwrap();
+    let out = r.run(&req).await.unwrap();
+    assert!(out.passed(), "{:?}", out.asserts);
+    let body: serde_json::Value =
+        serde_json::from_str(out.request.body.as_deref().unwrap()).unwrap();
+    assert_eq!(body["a"].as_str().unwrap().len(), 36);
+    assert_ne!(body["a"], body["b"]);
+}

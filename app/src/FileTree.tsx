@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, type MouseEvent } from "react";
 
 interface Node {
   name: string;
@@ -30,11 +30,27 @@ function buildTree(files: string[]): Node[] {
   return root.children;
 }
 
+export interface TreeTarget {
+  path: string;
+  isFile: boolean;
+  /** Файлов внутри (для каталога) */
+  count: number;
+}
+
+export type OnMenu = (e: MouseEvent, target: TreeTarget) => void;
+
 function countFiles(node: Node): number {
   return node.isFile ? 1 : node.children.reduce((n, c) => n + countFiles(c), 0);
 }
 
-export function FileTree(props: { files: string[]; selected: string | null; onSelect: (path: string) => void }) {
+interface Props {
+  files: string[];
+  selected: string | null;
+  onSelect: (path: string) => void;
+  onMenu: OnMenu;
+}
+
+export function FileTree(props: Props) {
   const tree = useMemo(() => buildTree(props.files), [props.files]);
   if (props.files.length === 0) {
     return <p className="muted pad">No *.http files</p>;
@@ -42,7 +58,7 @@ export function FileTree(props: { files: string[]; selected: string | null; onSe
   return <ul className="tree">{tree.map((n) => <TreeNode key={n.path} node={n} {...props} />)}</ul>;
 }
 
-function TreeNode(props: { node: Node; selected: string | null; onSelect: (path: string) => void }) {
+function TreeNode(props: Omit<Props, "files"> & { node: Node }) {
   const { node } = props;
   if (node.isFile) {
     return (
@@ -50,6 +66,7 @@ function TreeNode(props: { node: Node; selected: string | null; onSelect: (path:
         <button
           className={"tree-file" + (props.selected === node.path ? " active" : "")}
           onClick={() => props.onSelect(node.path)}
+          onContextMenu={(e) => props.onMenu(e, { path: node.path, isFile: true, count: 1 })}
           title={node.path}
         >
           {node.name.replace(/\.http$/, "")}
@@ -60,7 +77,7 @@ function TreeNode(props: { node: Node; selected: string | null; onSelect: (path:
   return (
     <li>
       <details open>
-        <summary>
+        <summary onContextMenu={(e) => props.onMenu(e, { path: node.path, isFile: false, count: countFiles(node) })}>
           <span className="ellipsis">{node.name}</span>
           <span className="muted">{countFiles(node)}</span>
         </summary>

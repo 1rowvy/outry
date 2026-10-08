@@ -3,6 +3,7 @@
 //! ```toml
 //! project = "my-api"   # пространство имён для секретов; по умолчанию — имя каталога
 //! default = "dev"      # окружение по умолчанию
+//! secrets = ["token"]  # какие переменные — секреты: GUI подскажет, если их нет
 //!
 //! [vars]               # общие для всех окружений
 //! version = "v1"
@@ -30,6 +31,9 @@ pub const CONFIG_FILE: &str = "env.toml";
 pub struct Config {
     pub project: Option<String>,
     pub default: Option<String>,
+    /// Имена секретов. Значения — в хранилище паролей или `ROUTY_*`, не в файле.
+    #[serde(default)]
+    pub secrets: Vec<String>,
     #[serde(default)]
     pub vars: BTreeMap<String, toml::Value>,
     #[serde(default)]
@@ -152,8 +156,9 @@ pub fn check_config(src: &str) -> Result<()> {
 }
 
 const INIT_CONFIG: &str = "\
-# Routy environments. Secrets don't go here: `routy secret set token --env dev`.
+# Routy environments. Secret values don't go here: `routy secret set token --env dev`.
 default = \"dev\"
+# secrets = [\"token\"]
 
 [env.dev]
 base = \"http://localhost:8080\"
@@ -213,6 +218,7 @@ mod tests {
         let p = project(
             r#"
             default = "dev"
+            secrets = ["token"]
             [vars]
             version = "v1"
             port = 8080
@@ -230,6 +236,7 @@ mod tests {
         assert_eq!(prod["base"], "https://prod");
         assert_eq!(prod["version"], "v2");
         assert_eq!(prod["port"], "8080");
+        assert_eq!(p.config.secrets, ["token"]);
     }
 
     #[test]
