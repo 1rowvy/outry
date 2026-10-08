@@ -10,7 +10,7 @@ A desktop app for clicking through requests and a CLI for running them as tests 
 [![CI](https://github.com/1rowvy/routy/actions/workflows/ci.yml/badge.svg)](https://github.com/1rowvy/routy/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/1rowvy/routy)](https://github.com/1rowvy/routy/releases/latest)
 [![Docs](https://img.shields.io/badge/docs-1rowvy.github.io%2Frouty-blue)](https://1rowvy.github.io/routy/)
-[![License: MIT](https://img.shields.io/badge/license-MIT-green)](Cargo.toml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
 [Documentation](https://1rowvy.github.io/routy/) · [Getting started](https://1rowvy.github.io/routy/getting-started/) · [Releases](https://github.com/1rowvy/routy/releases/latest) · [На русском](https://1rowvy.github.io/routy/ru/)
 
@@ -266,4 +266,4 @@ The roadmap and the release process are in [PLAN.md](PLAN.md).
 
 ## License
 
-[MIT](Cargo.toml)
+[MIT](LICENSE)

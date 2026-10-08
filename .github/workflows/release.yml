@@ -170,7 +170,7 @@ jobs:
           name="routy-cli-${TAG}-${{ matrix.target }}"
           dir="target/${{ matrix.target }}/release"
           mkdir -p "dist/$name"
-          cp README.md "dist/$name/"
+          cp README.md LICENSE "dist/$name/"
           if [ "$RUNNER_OS" = "Windows" ]; then
             cp "$dir/routy.exe" "dist/$name/"
             (cd dist && 7z a "$name.zip" "$name" >/dev/null)
