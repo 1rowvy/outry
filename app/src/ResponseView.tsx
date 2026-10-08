@@ -23,23 +23,31 @@ export function ResponseView({ outcome }: { outcome: RunOutcome }) {
 
   return (
     <div className="response">
-      <div className="response-meta">
+      <div className="response-head">
         <span className={"status " + (r.status < 400 ? "ok" : "bad")}>
-          {r.status} {r.status_text}
+          <b>{r.status}</b> {r.status_text}
         </span>
-        <span className="muted">{r.duration_ms} ms</span>
-        <span className="muted">{formatSize(r.size)}</span>
-        {Object.keys(outcome.saved).length > 0 && (
-          <span className="muted">saved: {Object.keys(outcome.saved).join(", ")}</span>
-        )}
+        <span className="metric">{r.duration_ms} ms</span>
+        <span className="metric">{formatSize(r.size)}</span>
+        <span className="spacer" />
+        <div className="seg">
+          {(["body", "headers", "tests", "request"] as Tab[]).map((t) => (
+            <button key={t} className={tab === t ? "active" : ""} onClick={() => setTab(t)}>
+              {t}
+              {t === "tests" && checks > 0 && (
+                <span className={"tab-count " + (failed ? "bad" : "ok")}>
+                  {checks - failed}/{checks}
+                </span>
+              )}
+            </button>
+          ))}
+        </div>
       </div>
-      <div className="tabs">
-        {(["body", "headers", "tests", "request"] as Tab[]).map((t) => (
-          <button key={t} className={tab === t ? "active" : ""} onClick={() => setTab(t)}>
-            {t === "tests" && checks > 0 ? `tests ${checks - failed}/${checks}` : t}
-          </button>
-        ))}
-      </div>
+      {Object.keys(outcome.saved).length > 0 && (
+        <div className="saved">
+          сохранено: {Object.keys(outcome.saved).map((k) => <code key={k}>{k}</code>)}
+        </div>
+      )}
       <div className="tab-body">
         {tab === "body" && <pre>{prettyBody(r.body)}</pre>}
         {tab === "headers" && <HeaderTable headers={r.headers} />}

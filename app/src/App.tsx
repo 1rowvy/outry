@@ -10,6 +10,16 @@ import { UpdateBanner } from "./UpdateBanner";
 const LAST_PROJECT_KEY = "routy.lastProject";
 const NEW_REQUEST = "GET {{base}}/\n\n> assert status == 200\n";
 
+// Метод из строки запроса — только для метки в шапке; разбирает ядро.
+function requestMethod(text: string): string {
+  for (const line of text.split("\n")) {
+    const t = line.trim();
+    if (!t || t.startsWith("#") || t.startsWith("//")) continue;
+    return /^([A-Z]+)\s/.exec(t)?.[1] ?? "GET";
+  }
+  return "GET";
+}
+
 function storage(key: string, value?: string | null): string | null {
   try {
     if (value === undefined) return localStorage.getItem(key);
@@ -37,6 +47,10 @@ export default function App() {
   const [version, setVersion] = useState<string | null>(null);
 
   const dirty = content !== savedContent;
+  const method = requestMethod(content);
+  const cut = (selected ?? "").lastIndexOf("/") + 1;
+  const dir = (selected ?? "").slice(0, cut);
+  const name = (selected ?? "").slice(cut).replace(/\.http$/, "");
   // Для обработчика событий файловой системы нужны актуальные значения без переподписки.
   const live = useRef({ selected, dirty });
   live.current = { selected, dirty };
@@ -209,35 +223,18 @@ export default function App() {
         </div>
 
         <div className="project">
-          <button className="field" onClick={pickFolder} title={project?.root}>
-            <span className="label">проект</span>
-            <span className="ellipsis">{project ? project.id : "открыть…"}</span>
+          <button className="project-name" onClick={pickFolder} title={project ? `${project.root}\nОткрыть другой проект` : undefined}>
+            <span className="ellipsis">{project ? project.id : "Открыть проект…"}</span>
+            {project && <span className="muted">сменить</span>}
           </button>
           {project && project.envs.length > 0 && (
-            <label className="field">
-              <span className="label">env</span>
-              <select value={env ?? ""} onChange={(e) => setEnv(e.target.value)}>
-                {project.envs.map((e) => (
-                  <option key={e}>{e}</option>
-                ))}
-              </select>
-            </label>
-          )}
-          {project && (
-            <button
-              className="link"
-              onClick={() => setSecretForm(secretForm ? null : { name: "", value: "" })}
-              title="Секреты хранятся в системном хранилище паролей"
-            >
-              {secretForm ? "отмена" : "добавить секрет"}
-            </button>
-          )}
-          {secretForm && (
-            <form className="stack" onSubmit={(e) => (e.preventDefault(), saveSecret())}>
-              <input placeholder="имя" value={secretForm.name} onChange={(e) => setSecretForm({ ...secretForm, name: e.target.value })} autoFocus />
-              <input placeholder="значение" type="password" value={secretForm.value} onChange={(e) => setSecretForm({ ...secretForm, value: e.target.value })} />
-              <button type="submit">Сохранить для {env ?? "default"}</button>
-            </form>
+            <div className="seg envs" role="radiogroup" aria-label="Окружение">
+              {project.envs.map((e) => (
+                <button key={e} role="radio" aria-checked={e === env} className={e === env ? "active" : ""} onClick={() => setEnv(e)}>
+                  {e}
+                </button>
+              ))}
+            </div>
           )}
         </div>
 
@@ -260,8 +257,25 @@ export default function App() {
           </>
         )}
 
-        <span className="spacer" />
         <UpdateBanner />
+        {project && (
+          <div className="side-foot">
+            {secretForm && (
+              <form className="stack" onSubmit={(e) => (e.preventDefault(), saveSecret())}>
+                <input placeholder="имя" value={secretForm.name} onChange={(e) => setSecretForm({ ...secretForm, name: e.target.value })} autoFocus />
+                <input placeholder="значение" type="password" value={secretForm.value} onChange={(e) => setSecretForm({ ...secretForm, value: e.target.value })} />
+                <button type="submit">Сохранить для {env ?? "default"}</button>
+              </form>
+            )}
+            <button
+              className="ghost"
+              onClick={() => setSecretForm(secretForm ? null : { name: "", value: "" })}
+              title="Секреты хранятся в системном хранилище паролей"
+            >
+              {secretForm ? "Отмена" : "Добавить секрет"}
+            </button>
+          </div>
+        )}
       </aside>
 
       <main className="main">
@@ -272,9 +286,12 @@ export default function App() {
         )}
 
         {!project ? (
-          <div className="empty">
-            <p>Откройте каталог проекта — Routy найдёт <code>api/env.toml</code> и все <code>*.http</code> файлы.</p>
-            <button className="primary" onClick={pickFolder}>Открыть проект</button>
+          <div className="panel empty">
+            <h1>Откройте проект</h1>
+            <p>
+              Routy найдёт <code>api/env.toml</code> и все <code>*.http</code> файлы в каталоге.
+            </p>
+            <button className="primary" onClick={pickFolder}>Выбрать каталог</button>
           </div>
         ) : (
           <>
@@ -290,18 +307,20 @@ export default function App() {
               </div>
             )}
             <div className="layout">
-              <section className="editor">
+              <section className="panel editor">
                 {selected ? (
                   <>
                     <div className="pane-head">
-                      <span className="pane-title ellipsis">
-                        {selected}
-                        {dirty && <span className="dirty"> ●</span>}
+                      <span className={"method m-" + method.toLowerCase()}>{method}</span>
+                      <span className="pane-title ellipsis" title={selected}>
+                        <span className="muted">{dir}</span>
+                        {name}
                       </span>
+                      {dirty && <span className="dirty" title="Не сохранено" />}
                       <span className="spacer" />
                       <button onClick={save} disabled={!dirty} title="Ctrl+S">Сохранить</button>
                       <button className="primary" onClick={send} disabled={sending || !!parseError} title="Ctrl+Enter">
-                        {sending ? "…" : "Отправить"}
+                        {sending ? "Отправка…" : "Отправить"}
                       </button>
                     </div>
                     <textarea value={content} onChange={(e) => setContent(e.target.value)} spellCheck={false} />
@@ -313,13 +332,21 @@ export default function App() {
                     )}
                   </>
                 ) : (
-                  <p className="muted pad">Выберите запрос слева</p>
+                  <>
+                    <div className="pane-head" />
+                    <p className="hint">Выберите запрос слева</p>
+                  </>
                 )}
               </section>
 
-              <section className="result">
+              <section className="panel result">
+                {!outcome && <div className="pane-head" />}
                 {sendError && <div className="send-error">{sendError}</div>}
-                {outcome ? <ResponseView outcome={outcome} /> : !sendError && <p className="muted pad">Ответ появится здесь</p>}
+                {outcome ? <ResponseView outcome={outcome} /> : !sendError && (
+                  <p className="hint">
+                    {sending ? "Отправка…" : <>Ответ появится здесь — <kbd>Ctrl</kbd> <kbd>Enter</kbd></>}
+                  </p>
+                )}
               </section>
             </div>
           </>
