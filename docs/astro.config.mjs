@@ -50,6 +50,7 @@ export default defineConfig({
 						{ slug: 'guides/ci' },
 						{ slug: 'guides/import-go' },
 						{ slug: 'guides/desktop-app' },
+						{ slug: 'guides/editors' },
 						{ slug: 'guides/request-format' },
 					],
 				},

@@ -56,3 +56,19 @@ jobs:
       - run: npm run build
         working-directory: app
       - run: cargo clippy -p routy-app --all-targets -- -D warnings
+
+  grammar:
+    name: tree-sitter grammar
+    runs-on: ubuntu-22.04
+    defaults:
+      run:
+        working-directory: editors/tree-sitter-routy
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      # src/ сгенерирован и лежит в репозитории (его собирают Neovim и Helix): он должен совпадать с grammar.js.
+      - run: npx --yes tree-sitter-cli@0.25.10 generate
+      - run: git diff --exit-code -- src
+      - run: npx --yes tree-sitter-cli@0.25.10 test

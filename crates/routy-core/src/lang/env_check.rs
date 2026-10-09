@@ -4,10 +4,8 @@
 use std::collections::BTreeSet;
 
 use super::ast::*;
+use super::scope::{Binding, Ref, Scope};
 use super::{Diagnostic, ItemRef, Source, Workspace, distance};
-
-/// Имена ответа в `expect`, `save` и `poll`.
-const RESPONSE: [&str; 5] = ["status", "headers", "body", "duration", "cookies"];
 
 impl Workspace {
     /// `has_var` — есть ли переменная в цепочке окружения (`--var`, `ROUTY_*`, `env.toml`, keychain).
@@ -38,24 +36,12 @@ impl Workspace {
         let mut defined = |name: &str| saved.contains(name) || has_var(name);
 
         for (fi, s) in self.sources.iter().enumerate() {
-            let mut scope = Scope::default();
-            scope.push("env");
-            for item in &s.file.items {
-                if let Item::Let(l) = item {
-                    let before = scope.missing.len();
-                    scope.expr(&l.value);
-                    scope.report(s, before, &mut defined, env, &mut out);
-                    scope.push(&l.name);
-                }
-            }
-            let file_scope = scope.names.clone();
+            let top = Scope::file(&s.file);
+            report(s, &top.refs, &mut defined, env, &mut out);
 
             for (ii, item) in s.file.items.iter().enumerate() {
                 let me = ItemRef { file: fi, item: ii };
-                let mut scope = Scope {
-                    names: file_scope.clone(),
-                    ..Scope::default()
-                };
+                let mut scope = top.child();
                 match item {
                     Item::Request(r) => {
                         if let Some(only) = &r.fields.only {
@@ -92,7 +78,7 @@ impl Workspace {
                     Item::Flow(f) => scope.flow(f),
                     _ => continue,
                 }
-                scope.report(s, 0, &mut defined, env, &mut out);
+                report(s, &scope.refs, &mut defined, env, &mut out);
                 self.check_calls(me, &scope.calls, env, &mut defined, &mut out);
             }
         }
@@ -162,156 +148,21 @@ impl Workspace {
     }
 }
 
-/// Свободные имена выражений с учётом областей видимости: что не объявлено, то ищется в переменных.
-#[derive(Default)]
-struct Scope {
-    names: Vec<String>,
-    missing: Vec<(String, Span)>,
-    calls: Vec<(Call, Span)>,
-}
-
-impl Scope {
-    fn push(&mut self, n: &str) {
-        self.names.push(n.to_string());
-    }
-
-    fn has(&self, n: &str) -> bool {
-        self.names.iter().any(|x| x == n)
-    }
-
-    fn report(
-        &mut self,
-        s: &Source,
-        from: usize,
-        defined: &mut dyn FnMut(&str) -> bool,
-        env: &str,
-        out: &mut Vec<Diagnostic>,
-    ) {
-        let mut seen = BTreeSet::new();
-        for (name, span) in self.missing.drain(from..) {
-            if seen.insert(name.clone()) && !defined(&name) {
-                out.push(s.error_at(
-                    span.start,
-                    format!("variable `{name}` is not defined in {env}"),
-                ));
-            }
-        }
-    }
-
-    fn params(&mut self, params: &[Param]) {
-        for p in params {
-            if let Some(d) = &p.default {
-                self.expr(d);
-            }
-        }
-        for p in params {
-            self.push(&p.name);
-        }
-    }
-
-    fn request(&mut self, r: &Request) {
-        for p in &r.target.parts {
-            if let TargetPart::Param(n, _) = p {
-                self.push(n);
-            }
-        }
-        self.params(&r.fields.params);
-        for p in &r.target.parts {
-            if let TargetPart::Expr(e) = p {
-                self.expr(e);
-            }
-        }
-        let fl = &r.fields;
-        for e in fl.query.iter().chain(&fl.headers) {
-            self.expr(&e.value);
-        }
-        match &fl.body {
-            Some(Body::Value(e)) => self.expr(e),
-            Some(Body::Form(es) | Body::Multipart(es)) => {
-                es.iter().for_each(|e| self.expr(&e.value))
-            }
-            None => {}
-        }
-        for n in RESPONSE {
-            self.push(n);
-        }
-        if let Some(p) = &fl.poll {
-            self.expr(&p.until);
-        }
-        fl.expect.iter().for_each(|e| self.expr(e));
-        fl.saves.iter().for_each(|s| self.expr(&s.value));
-    }
-
-    fn flow(&mut self, f: &Flow) {
-        self.params(&f.params);
-        for step in &f.steps {
-            match step {
-                Step::Bind { name, value, .. } => {
-                    self.expr(value);
-                    self.push(name);
-                }
-                Step::Do(e) => self.expr(e),
-                Step::Expect(es, _) => es.iter().for_each(|e| self.expr(e)),
-                Step::Save(s) => {
-                    self.expr(&s.value);
-                    self.push(&s.name);
-                }
-            }
-        }
-    }
-
-    fn expr(&mut self, e: &Expr) {
-        match &e.kind {
-            ExprKind::Ident(n) => {
-                if !self.has(n) {
-                    self.missing.push((n.clone(), e.span));
-                }
-            }
-            ExprKind::Index(base, idx) if matches!(&base.kind, ExprKind::Ident(n) if n == "vars" && !self.has(n)) => {
-                match &idx.kind {
-                    ExprKind::Str(parts) => match parts.as_slice() {
-                        [StrPart::Lit(n)] => self.missing.push((n.clone(), e.span)),
-                        [] => {}
-                        _ => parts.iter().for_each(|p| {
-                            if let StrPart::Expr(x) = p {
-                                self.expr(x);
-                            }
-                        }),
-                    },
-                    _ => self.expr(idx),
-                }
-            }
-            ExprKind::Lambda(p, body) => {
-                self.push(p);
-                self.expr(body);
-                self.names.pop();
-            }
-            ExprKind::Call(c) => {
-                self.calls.push((c.clone(), e.span));
-                c.args.iter().for_each(|(_, x)| self.expr(x));
-            }
-            ExprKind::Str(parts) => {
-                for p in parts {
-                    if let StrPart::Expr(x) = p {
-                        self.expr(x);
-                    }
-                }
-            }
-            ExprKind::Array(items) => items.iter().for_each(|x| self.expr(x)),
-            ExprKind::Object(fields) => fields.iter().for_each(|(_, x)| self.expr(x)),
-            ExprKind::Member(x, _) | ExprKind::Unary(_, x) | ExprKind::Matches(x, _) => {
-                self.expr(x)
-            }
-            ExprKind::Index(a, b) | ExprKind::Binary(_, a, b) => {
-                self.expr(a);
-                self.expr(b);
-            }
-            ExprKind::Builtin(_, args) => args.iter().for_each(|x| self.expr(x)),
-            ExprKind::Method(recv, _, args) => {
-                self.expr(recv);
-                args.iter().for_each(|x| self.expr(x));
-            }
-            ExprKind::Null | ExprKind::Bool(_) | ExprKind::Num(_) => {}
+/// Переменные, которых нет в окружении: по одной ошибке на имя.
+fn report(
+    s: &Source,
+    refs: &[Ref],
+    defined: &mut dyn FnMut(&str) -> bool,
+    env: &str,
+    out: &mut Vec<Diagnostic>,
+) {
+    let mut seen = BTreeSet::new();
+    for r in refs.iter().filter(|r| r.binding == Binding::Var) {
+        if seen.insert(r.name.as_str()) && !defined(&r.name) {
+            out.push(s.error_at(
+                r.span.start,
+                format!("variable `{}` is not defined in {env}", r.name),
+            ));
         }
     }
 }

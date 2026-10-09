@@ -115,7 +115,7 @@ pub enum JsonType {
     Object,
 }
 
-#[derive(Debug, Default, Serialize)]
+#[derive(Debug, Default, Clone, Serialize)]
 pub struct Scan {
     /// Сколько файлов разобрано
     pub files: usize,
@@ -221,7 +221,12 @@ struct Project {
 }
 
 /// Запросы из `*.http` (`{{base}}/…`) и `*.routy` (`/…`) проекта, объявления shape.
-fn scan_project(project_root: &Path, base: &str) -> Result<Project> {
+/// Текст файла из `overlay` (путь относительно корня) — вместо того, что на диске.
+fn scan_project(
+    project_root: &Path,
+    base: &str,
+    overlay: &HashMap<PathBuf, String>,
+) -> Result<Project> {
     let prefix = format!("{{{{{base}}}}}");
     let mut p = Project::default();
     let exts = [discover::EXTENSION, discover::ROUTY_EXTENSION];
@@ -230,7 +235,11 @@ fn scan_project(project_root: &Path, base: &str) -> Result<Project> {
         p.taken
             .insert(rel.with_extension(discover::ROUTY_EXTENSION));
         p.taken.insert(rel.clone());
-        let Ok(src) = std::fs::read_to_string(project_root.join(&rel)) else {
+        let Some(src) = overlay
+            .get(&rel)
+            .cloned()
+            .or_else(|| std::fs::read_to_string(project_root.join(&rel)).ok())
+        else {
             continue;
         };
         p.sources.insert(rel.clone(), src.clone());
@@ -341,6 +350,17 @@ pub fn plan_go(
 /// Раскладывает найденные роуты на новые и уже существующие, сравнивает существующие с кодом,
 /// находит файлы без роутов и shape, которых не хватает.
 pub fn plan(project_root: &Path, scan: Scan, base: &str) -> Result<Plan> {
+    plan_with(project_root, scan, base, &HashMap::new())
+}
+
+/// [`plan`] по текстам из редактора: файлы из `overlay` (пути относительно корня) берутся
+/// оттуда, а не с диска. Правки ([`fixes`]) считаются по этим текстам.
+pub fn plan_with(
+    project_root: &Path,
+    scan: Scan,
+    base: &str,
+    overlay: &HashMap<PathBuf, String>,
+) -> Result<Plan> {
     let Project {
         known,
         shapes,
@@ -348,7 +368,7 @@ pub fn plan(project_root: &Path, scan: Scan, base: &str) -> Result<Plan> {
         mut taken,
         sources,
         warnings,
-    } = scan_project(project_root, base)?;
+    } = scan_project(project_root, base, overlay)?;
 
     let shapes_file = shapes
         .first()

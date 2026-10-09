@@ -20,7 +20,11 @@ reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tokio = { workspace = true, features = ["time"] }
+crossbeam-channel = "0.5"
 flate2 = "1"
+# `routy lsp`: протокол поверх stdio; lsp-types 0.95 — последняя с `url::Url` в типах.
+lsp-server = "0.7"
+lsp-types = "0.95"
 self-replace = "1"
 sha2 = "0.10"
 tar = "0.4"

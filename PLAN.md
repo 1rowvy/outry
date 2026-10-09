@@ -127,20 +127,26 @@ flow Checkout {
   файлы, где все запросы — к пропавшим роутам
 - [x] `--format github` — аннотации на строках `.routy`/Go; `--format json` / `--json`
 - [x] GUI: во вкладке Routes бейдж «changed», diff и «Apply» на каждое изменение, «Fix N», «Remove N files»
-- [ ] LSP: диагностика в `.routy` («path changed in code: …») + Quick Fix — на этапе 3; данные готовы:
-  у `Change` есть строка/столбец и `Edit`
+- [x] LSP: диагностика в `.routy` («path changed in code: …») + Quick Fix — `routy lsp` (этап 3)
 - [x] `.http`: сопоставление по методу и пути; сравниваются тело (если валидный JSON), query и заголовки, без правок
 - [x] `body matches Order` по Go-структуре: импорт генерирует shape из типа ответа
 
 ### 3. Редакторы без GUI: `routy lsp`
-- [ ] `routy lsp` (stdio, `tower-lsp` или `lsp-server`) внутри того же бинаря
-- [ ] Диагностика как `routy check`; автодополнение переменных (`Vars::list`), встроенных функций и имён запросов
-- [ ] Расхождения с кодом (`import::Plan::changes`, этап 2) как диагностика, `Edit` — как Quick Fix
-- [ ] Hover: значение и источник переменной (`Vars::lookup`, секреты замаскированы), сигнатура вызываемого запроса
-- [ ] Go to definition: переменная → строка в `env.toml`, `Login()` → его файл, `Order` → Go-структура
-- [ ] Code lens «Send» / «Run flow» → ответ в отдельном буфере
-- [ ] Грамматика tree-sitter для `*.routy` (подсветка в Neovim, Helix, Zed)
-- [ ] Страница в docs: настройка редакторов
+Протокол — `crates/routy-cli/src/lsp.rs` (`lsp-server` + `lsp-types`), подсказки — `lang/ide.rs`,
+области видимости имён — `lang/scope.rs` (общие с `check --env`).
+- [x] `routy lsp` (stdio, `lsp-server`) внутри того же бинаря; настройки `env`, `keyring`, `import`, `goDir`
+- [x] Диагностика как `routy check` + `check --env` текущего окружения (предупреждения); автодополнение
+  переменных (`Vars::list`), встроенных функций, имён запросов с аргументами, полей, форм, окружений в `only`
+- [x] Расхождения с кодом (`import::plan_with` по текстам из редактора) как диагностика со ссылкой на Go,
+  `Edit` — как Quick Fix и «Fix all»; «did you mean» — тоже Quick Fix
+- [x] Hover: значение и источник переменной (секреты замаскированы), сигнатура вызываемого запроса, форма
+- [x] Go to definition: переменная → строка в `env.toml` и `save`, `Login()` → его файл, `Order` → объявление
+  → Go-структура, `handler:` → роут
+- [x] Code lens «Send» / «Run flow» (и то же в code actions — для Helix) → ответ в
+  `~/.cache/routy/responses/<Name>.http` через `window/showDocument`; `confirm` — `showMessageRequest`
+- [x] Грамматика tree-sitter `editors/tree-sitter-routy` + запросы подсветки (Neovim/Zed и Helix), проверка в CI
+- [x] Страница в docs: настройка редакторов (Neovim, Helix, остальные)
+- [ ] Расширение для Zed (грамматика + запуск `routy lsp`) — вместе с этапом 4
 
 ### 4. VS Code-расширение
 LSP-клиент + интерфейс; логика вся в `routy`, своих правил в расширении нет.

@@ -20,8 +20,10 @@ mod env_check;
 pub mod eval;
 pub mod exec;
 pub mod fmt;
+pub mod ide;
 pub mod parse;
 pub mod schema;
+pub mod scope;
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
@@ -114,7 +116,7 @@ fn absolute_schemas(s: &mut Shape, dir: &Path) {
 }
 
 /// Все `*.routy` проекта: по ним разрешаются имена вызовов и форм.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct Workspace {
     pub root: PathBuf,
     pub sources: Vec<Source>,

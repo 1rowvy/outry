@@ -1,3 +1,4 @@
+mod lsp;
 mod notifier;
 mod update;
 
@@ -140,6 +141,20 @@ enum Cmd {
         #[command(subcommand)]
         cmd: ImportCmd,
     },
+    /// Языковой сервер (LSP) для *.routy через stdin/stdout: ошибки `routy check` и расхождения
+    /// с Go-кодом, автодополнение, подсказки, переход к определению, «Send» над запросом.
+    /// Запускается редактором, см. https://1rowvy.github.io/routy/guides/editors/
+    Lsp {
+        /// Окружение для переменных и запусков (по умолчанию — `default` из env.toml)
+        #[arg(long)]
+        env: Option<String>,
+        /// Не обращаться к системному хранилищу паролей
+        #[arg(long)]
+        no_keyring: bool,
+        /// Для совместимости с клиентами, которые передают --stdio; другого транспорта нет
+        #[arg(long, hide = true)]
+        stdio: bool,
+    },
     /// Создать api/env.toml и пример запроса
     Init {
         #[arg(default_value = ".")]
@@ -228,7 +243,10 @@ fn parse_kv(s: &str) -> Result<(String, String), String> {
 
 fn main() -> ExitCode {
     let cmd = Cli::parse().cmd;
-    let notify = !matches!(cmd, Cmd::Update { .. } | Cmd::RefreshUpdateCache);
+    let notify = !matches!(
+        cmd,
+        Cmd::Update { .. } | Cmd::RefreshUpdateCache | Cmd::Lsp { .. }
+    );
     let code = match real_main(cmd) {
         Ok(code) => code,
         Err(e) => {
@@ -390,6 +408,12 @@ fn real_main(cmd: Cmd) -> anyhow::Result<ExitCode> {
         Cmd::Secret { cmd } => secret(cmd),
         Cmd::Import { cmd } => import(cmd),
         Cmd::Init { dir } => init(&dir),
+        Cmd::Lsp {
+            env, no_keyring, ..
+        } => {
+            lsp::run(lsp::Opts { env, no_keyring })?;
+            Ok(ExitCode::SUCCESS)
+        }
         Cmd::Fmt { paths, check } => fmt(&paths, check),
         Cmd::Convert { paths, dry_run, rm } => convert(&paths, dry_run, rm),
         Cmd::Update { check } => {

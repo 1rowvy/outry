@@ -163,6 +163,21 @@ project found from the current folder; it must have an `env.toml`.
 | `--project <DIR>` | Project folder with `env.toml` |
 | `--json` | Same as `--format json` |
 
+## `routy lsp`
+
+The language server for `.routy` files over stdin/stdout: `routy check` errors, environment warnings,
+differences from the Go code with quick fixes, completion, hover, go to definition, formatting and
+“▶ Send” code lenses. Editors start it themselves — see [Editors](/routy/guides/editors/).
+
+```sh
+routy lsp [--env <ENV>] [--no-keyring]
+```
+
+| Flag | Description |
+|------|-------------|
+| `--env <ENV>` | Environment for variables and sending, default: `default` from `env.toml` |
+| `--no-keyring` | Don't read secrets from the system keychain |
+
 ## `routy update`
 
 Update the CLI to the latest GitHub release. The archive's SHA-256 checksum is verified before the

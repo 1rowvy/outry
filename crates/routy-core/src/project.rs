@@ -142,6 +142,38 @@ impl Project {
     pub fn has_config(&self) -> bool {
         self.root.join(CONFIG_FILE).is_file()
     }
+
+    /// Строка (с 1) в `env.toml`, где задана переменная `name` для окружения `env`:
+    /// `[env.<env>]`, иначе `[vars]`, иначе список `secrets`.
+    pub fn var_line(&self, env: &str, name: &str) -> Option<usize> {
+        let text = std::fs::read_to_string(self.root.join(CONFIG_FILE)).ok()?;
+        var_line(&text, env, name)
+    }
+}
+
+fn var_line(text: &str, env: &str, name: &str) -> Option<usize> {
+    let unquote = |s: &str| s.trim().trim_matches(['"', '\'']).to_string();
+    let mut section = String::new();
+    let (mut in_env, mut in_vars, mut in_secrets) = (None, None, None);
+    for (i, line) in text.lines().enumerate() {
+        let t = line.split('#').next().unwrap_or_default().trim();
+        if let Some(s) = t.strip_prefix('[').and_then(|s| s.strip_suffix(']')) {
+            section = s.split('.').map(unquote).collect::<Vec<_>>().join(".");
+            continue;
+        }
+        let Some((key, value)) = t.split_once('=') else {
+            continue;
+        };
+        let key = unquote(key);
+        if section.is_empty() && key == "secrets" && value.contains(&format!("\"{name}\"")) {
+            in_secrets.get_or_insert(i + 1);
+        } else if key == name && section == format!("env.{env}") {
+            in_env.get_or_insert(i + 1);
+        } else if key == name && section == "vars" {
+            in_vars.get_or_insert(i + 1);
+        }
+    }
+    in_env.or(in_vars).or(in_secrets)
 }
 
 /// Проверяет текст `env.toml`, ничего не загружая — для редактора в GUI.
@@ -204,6 +236,16 @@ fn toml_to_string(v: &toml::Value) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn var_lines() {
+        let src = "secrets = [\"token\"]\n[vars]\nbase = \"a\"\nv = 1\n\n[env.dev]\nbase = \"b\" # local\n[env.\"prod\"]\nx = 2\n";
+        assert_eq!(var_line(src, "dev", "base"), Some(7));
+        assert_eq!(var_line(src, "prod", "base"), Some(3));
+        assert_eq!(var_line(src, "prod", "x"), Some(9));
+        assert_eq!(var_line(src, "dev", "token"), Some(1));
+        assert_eq!(var_line(src, "dev", "nope"), None);
+    }
 
     fn project(src: &str) -> Project {
         Project {

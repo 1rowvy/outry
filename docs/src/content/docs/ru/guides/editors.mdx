@@ -1,0 +1,157 @@
+---
+title: Редакторы
+description: Правка .routy в Neovim, Helix и любом редакторе с LSP-клиентом — ошибки, автодополнение, переход к определению и отправка запросов из `routy lsp`.
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+`routy lsp` — языковой сервер, встроенный в CLI: те же проверки, имена и переменные, что в
+`routy check` и приложении, но в вашем редакторе. Подойдёт любой редактор с LSP-клиентом; подсветку
+даёт грамматика tree-sitter из
+[`editors/tree-sitter-routy`](https://github.com/1rowvy/routy/tree/master/editors/tree-sitter-routy).
+
+## Что умеет
+
+- **Ошибки по мере набора** — всё, что показывает [`routy check`](/routy/ru/reference/cli/#routy-check):
+  синтаксис, неизвестные запросы и формы (с исправлением «did you mean»), аргументы вызовов, циклы.
+- **Предупреждения окружения** — то, что показывает `routy check --env` для текущего окружения:
+  неопределённые переменные и вызовы запросов, закрытых `only`.
+- **Расхождения с Go-кодом** — в Go-проекте то, что показывает
+  [`routy import go --check`](/routy/ru/guides/import-go/#расхождения-с-кодом), на строках запроса и со
+  ссылкой на обработчик. У расхождений, которые исправляет `--fix`, есть Quick Fix, а «Fix all differences
+  with the code» правит весь файл. Несохранённые правки учитываются.
+- **Автодополнение** — поля запроса в начале строки, запросы и сценарии с параметрами, аргументы вызова,
+  переменные текущего окружения (секреты замаскированы), сохранённые значения, `let` файла, параметры,
+  встроенные функции, методы значений после `.`, формы после `matches`, окружения в `only: [...]`,
+  частые заголовки.
+- **Подсказка при наведении** — значение переменной и откуда оно (`env.toml`, хранилище паролей,
+  `ROUTY_*`, `save`; секреты замаскированы), метод, путь, описание и параметры вызываемого запроса, поля
+  формы.
+- **Переход к определению** — вызов → запрос или сценарий; переменная → её строка в `env.toml` и `save`,
+  которые её задают; форма → её объявление, а из объявления → Go-структура; `handler:` → роут в Go.
+- **Отправка** — code lens «▶ Send · dev» над каждым запросом («▶ Run flow» над сценариями) и то же в
+  меню действий. Ответ пишется в `~/.cache/routy/responses/<Name>.http` и открывается рядом с запросом,
+  итог — сообщением. Вызовы, кеш прогона, cookies и сохранённые значения работают как в приложении;
+  `confirm: true` сначала спрашивает.
+- **Форматирование** — `routy fmt` как форматирование документа.
+- **Outline** — запросы, сценарии, формы и `let` файла.
+
+## Neovim
+
+Neovim 0.11 или новее:
+
+```lua
+vim.filetype.add({ extension = { routy = "routy" } })
+
+vim.lsp.config("routy", {
+  cmd = { "routy", "lsp" },
+  filetypes = { "routy" },
+  root_markers = { "env.toml", ".git" },
+  -- init_options = { env = "dev" },
+  handlers = {
+    -- Перечитать файл ответа, если он уже открыт.
+    ["window/showDocument"] = function(err, params, ctx)
+      local result = vim.lsp.handlers["window/showDocument"](err, params, ctx)
+      vim.cmd.checktime()
+      return result
+    end,
+  },
+})
+vim.lsp.enable("routy")
+
+-- Code lens: обновлять и отправлять запрос под курсором.
+vim.api.nvim_create_autocmd({ "LspAttach", "BufEnter", "InsertLeave" }, {
+  pattern = "*.routy",
+  callback = function(ev) vim.lsp.codelens.refresh({ bufnr = ev.buf }) end,
+})
+vim.keymap.set("n", "<leader>rs", vim.lsp.codelens.run, { desc = "Routy: send" })
+```
+
+Подсветка: соберите парсер и скопируйте запросы (Neovim берёт `parser/` и `queries/` из runtimepath):
+
+```sh
+git clone --depth 1 https://github.com/1rowvy/routy /tmp/routy
+cd /tmp/routy/editors/tree-sitter-routy
+mkdir -p ~/.local/share/nvim/site/parser ~/.config/nvim/queries/routy
+cc -shared -fPIC -O2 -I src -o ~/.local/share/nvim/site/parser/routy.so src/parser.c
+cp queries/highlights.scm ~/.config/nvim/queries/routy/
+```
+
+```lua
+vim.api.nvim_create_autocmd("FileType", {
+  pattern = "routy",
+  callback = function() vim.treesitter.start() end,
+})
+```
+
+## Helix
+
+В `~/.config/helix/languages.toml`:
+
+```toml
+[language-server.routy]
+command = "routy"
+args = ["lsp"]
+
+[[language]]
+name = "routy"
+scope = "source.routy"
+file-types = ["routy"]
+roots = ["env.toml"]
+comment-token = "//"
+block-comment-tokens = { start = "/*", end = "*/" }
+indent = { tab-width = 2, unit = "  " }
+language-servers = ["routy"]
+
+[[grammar]]
+name = "routy"
+# rev: ветка, тег или коммит репозитория routy
+source = { git = "https://github.com/1rowvy/routy", rev = "master", subpath = "editors/tree-sitter-routy" }
+```
+
+```sh
+hx --grammar fetch && hx --grammar build
+mkdir -p ~/.config/helix/runtime/queries/routy
+curl -fsSL https://raw.githubusercontent.com/1rowvy/routy/master/editors/tree-sitter-routy/queries/helix/highlights.scm \
+  -o ~/.config/helix/runtime/queries/routy/highlights.scm
+```
+
+В Helix нет code lens: **Send** — в меню действий (<kbd>Space</kbd> <kbd>a</kbd>) на любой строке
+запроса. Если файл ответа уже открыт, новый ответ покажет `:reload`.
+
+## Другие редакторы
+
+Подойдёт любой LSP-клиент: команда `routy lsp`, транспорт stdio (`--stdio` принимается и ничего не
+меняет), язык `routy`, файлы `*.routy`. Расширение для VS Code в планах; пока можно запустить
+`routy lsp` из любого расширения-LSP-клиента.
+
+Грамматику из `editors/tree-sitter-routy` (`queries/highlights.scm` — в именах захватов nvim-treesitter и
+Zed) можно подключить в любом редакторе, который загружает грамматики tree-sitter.
+
+## Настройки
+
+Передаются в `initializationOptions` (`init_options` в Neovim) или позже через
+`workspace/didChangeConfiguration` как `{ "routy": { … } }`:
+
+| Настройка | По умолчанию | Что делает |
+|-----------|--------------|------------|
+| `env` | `default` из `env.toml` | Окружение для переменных, предупреждений и **Send** |
+| `keyring` | `true` | Брать секреты из системного хранилища паролей |
+| `import` | `true` | Сравнивать запросы с Go-кодом |
+| `goDir` | родитель `api/`, иначе папка проекта | Папка с Go-кодом относительно корня рабочей папки |
+
+`routy lsp --env <ENV>` и `--no-keyring` делают то же из командной строки.
+
+Команды (`workspace/executeCommand`) — для сочетаний клавиш и расширений редакторов:
+
+| Команда | Аргументы | |
+|---------|-----------|---|
+| `routy.run` | `[uri, line]` | Отправить запрос или запустить сценарий на строке `line` (с 1). Возвращает итог в JSON |
+| `routy.selectEnv` | `[env]` или ничего | Сменить окружение; без аргумента редактор предложит выбор |
+
+Если окружений несколько, code lens «env: dev» над первым запросом вызывает `routy.selectEnv`.
+
+<Aside>
+Проект ищется так же, как в CLI: от рабочей папки вверх до `env.toml` или `api/env.toml`. Значения,
+сохранённые через **Send**, попадают в тот же файл состояния, что у `routy run` и приложения, — они общие.
+</Aside>

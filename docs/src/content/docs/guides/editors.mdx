@@ -1,0 +1,160 @@
+---
+title: Editors
+description: Edit .routy files in Neovim, Helix or any editor with an LSP client — errors, completion, go to definition and sending requests come from `routy lsp`.
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+`routy lsp` is a language server built into the CLI: the same checks, names and variables as
+`routy check` and the desktop app, in your own editor. Any editor with an LSP client can use it;
+syntax highlighting comes from the tree-sitter grammar in
+[`editors/tree-sitter-routy`](https://github.com/1rowvy/routy/tree/master/editors/tree-sitter-routy).
+
+## What you get
+
+- **Errors as you type** — everything [`routy check`](/routy/reference/cli/#routy-check) reports: syntax,
+  unknown requests and shapes (with a quick fix for “did you mean”), call arguments, cycles.
+- **Environment warnings** — what `routy check --env` reports for the current environment: variables
+  that aren't defined and calls to requests limited by `only`.
+- **Differences from the Go code** — in a Go project, what
+  [`routy import go --check`](/routy/guides/import-go/#differences-from-the-code) reports, on the lines of
+  the request, with a link to the handler. Differences that `--fix` can fix have a quick fix, and
+  “Fix all differences with the code” fixes the whole file. Unsaved edits count.
+- **Completion** — request fields at the start of a line, requests and flows with their parameters,
+  call arguments, variables of the current environment (secrets masked), saved values, file `let`s,
+  parameters, built-in functions, value methods after `.`, shapes after `matches`, environments in
+  `only: [...]`, common header names.
+- **Hover** — a variable's value and where it comes from (`env.toml`, keychain, `ROUTY_*`, `save`;
+  secrets masked), a called request's method, path, description and parameters, a shape's fields.
+- **Go to definition** — a call → the request or flow; a variable → its line in `env.toml` and the
+  `save`s that set it; a shape → its declaration, and from the declaration → the Go struct; `handler:` →
+  the route in Go.
+- **Send** — a code lens “▶ Send · dev” above every request (“▶ Run flow” above flows), and the same
+  in the code actions menu. The response is written to `~/.cache/routy/responses/<Name>.http` and opened
+  next to the request; the result is shown as a message. Calls, the run cache, cookies and saved values
+  work as in the app; `confirm: true` asks first.
+- **Format** — `routy fmt` as document formatting.
+- **Outline** — requests, flows, shapes and `let`s of the file.
+
+## Neovim
+
+Neovim 0.11 or newer:
+
+```lua
+vim.filetype.add({ extension = { routy = "routy" } })
+
+vim.lsp.config("routy", {
+  cmd = { "routy", "lsp" },
+  filetypes = { "routy" },
+  root_markers = { "env.toml", ".git" },
+  -- init_options = { env = "dev" },
+  handlers = {
+    -- Re-read the response file when it is already open.
+    ["window/showDocument"] = function(err, params, ctx)
+      local result = vim.lsp.handlers["window/showDocument"](err, params, ctx)
+      vim.cmd.checktime()
+      return result
+    end,
+  },
+})
+vim.lsp.enable("routy")
+
+-- Code lenses: keep them fresh and send the request under the cursor.
+vim.api.nvim_create_autocmd({ "LspAttach", "BufEnter", "InsertLeave" }, {
+  pattern = "*.routy",
+  callback = function(ev) vim.lsp.codelens.refresh({ bufnr = ev.buf }) end,
+})
+vim.keymap.set("n", "<leader>rs", vim.lsp.codelens.run, { desc = "Routy: send" })
+```
+
+Highlighting: build the parser and copy the queries (Neovim reads `parser/` and `queries/` from its
+runtime path):
+
+```sh
+git clone --depth 1 https://github.com/1rowvy/routy /tmp/routy
+cd /tmp/routy/editors/tree-sitter-routy
+mkdir -p ~/.local/share/nvim/site/parser ~/.config/nvim/queries/routy
+cc -shared -fPIC -O2 -I src -o ~/.local/share/nvim/site/parser/routy.so src/parser.c
+cp queries/highlights.scm ~/.config/nvim/queries/routy/
+```
+
+```lua
+vim.api.nvim_create_autocmd("FileType", {
+  pattern = "routy",
+  callback = function() vim.treesitter.start() end,
+})
+```
+
+## Helix
+
+In `~/.config/helix/languages.toml`:
+
+```toml
+[language-server.routy]
+command = "routy"
+args = ["lsp"]
+
+[[language]]
+name = "routy"
+scope = "source.routy"
+file-types = ["routy"]
+roots = ["env.toml"]
+comment-token = "//"
+block-comment-tokens = { start = "/*", end = "*/" }
+indent = { tab-width = 2, unit = "  " }
+language-servers = ["routy"]
+
+[[grammar]]
+name = "routy"
+# rev: a branch, tag or commit of the routy repository
+source = { git = "https://github.com/1rowvy/routy", rev = "master", subpath = "editors/tree-sitter-routy" }
+```
+
+```sh
+hx --grammar fetch && hx --grammar build
+mkdir -p ~/.config/helix/runtime/queries/routy
+curl -fsSL https://raw.githubusercontent.com/1rowvy/routy/master/editors/tree-sitter-routy/queries/helix/highlights.scm \
+  -o ~/.config/helix/runtime/queries/routy/highlights.scm
+```
+
+Helix has no code lenses: **Send** is in the code actions menu (<kbd>Space</kbd> <kbd>a</kbd>) on any
+line of a request. If the response file is already open, `:reload` shows the new response.
+
+## Other editors
+
+Any LSP client works: the command is `routy lsp` over stdio (`--stdio` is accepted and ignored), the
+language id is `routy`, files are `*.routy`. A VS Code extension is planned; until then, a generic LSP
+client extension can start `routy lsp`.
+
+The grammar in `editors/tree-sitter-routy` (with `queries/highlights.scm` in the capture names of
+nvim-treesitter and Zed) can be used by any editor that loads tree-sitter grammars.
+
+## Settings
+
+Pass them as `initializationOptions` (`init_options` in Neovim), or later with
+`workspace/didChangeConfiguration` as `{ "routy": { … } }`:
+
+| Setting | Default | Meaning |
+|---------|---------|---------|
+| `env` | `default` from `env.toml` | Environment for variables, warnings and **Send** |
+| `keyring` | `true` | Read secrets from the system keychain |
+| `import` | `true` | Compare requests with the Go code |
+| `goDir` | the parent of `api/`, else the project folder | Folder with the Go code, relative to the workspace root |
+
+`routy lsp --env <ENV>` and `--no-keyring` do the same from the command line.
+
+Commands (`workspace/executeCommand`), for key bindings and editor extensions:
+
+| Command | Arguments | |
+|---------|-----------|---|
+| `routy.run` | `[uri, line]` | Send the request or run the flow at `line` (1-based). Returns the outcome as JSON |
+| `routy.selectEnv` | `[env]` or none | Switch the environment; without an argument the editor shows a choice |
+
+When the project has several environments, the code lens “env: dev” above the first request runs
+`routy.selectEnv`.
+
+<Aside>
+The project is found the same way as by the CLI: from the workspace folder up to `env.toml` or
+`api/env.toml`. Values saved by **Send** go to the same state file as `routy run` and the app use, so
+they are shared.
+</Aside>

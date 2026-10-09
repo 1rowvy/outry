@@ -1,0 +1,350 @@
+===============
+Minimal request
+===============
+
+GET /health
+
+---
+
+(source_file
+  (request
+    (method)
+    (path
+      (path_text))))
+
+=================================
+Path parameters and interpolation
+=================================
+
+GET /orders/{id}/items?x=${page + 1} {
+  query { page: 1, tags: ["a"] }
+}
+
+---
+
+(source_file
+  (request
+    (method)
+    (path
+      (path_text)
+      (path_param
+        (identifier))
+      (path_text)
+      (interpolation
+        (binary_expression
+          (identifier)
+          (number))))
+    (request_block
+      (entries_field
+        (entry
+          (property)
+          (number))
+        (entry
+          (property)
+          (array
+            (string)))))))
+
+==============================
+Absolute URL and string target
+==============================
+
+GET https://example.com/a/{id}
+POST "${auth_url}/token"
+
+---
+
+(source_file
+  (request
+    (method)
+    (url
+      (path_text)
+      (path_param
+        (identifier))))
+  (request
+    (method)
+    (string
+      (interpolation
+        (identifier)))))
+
+======
+Fields
+======
+
+// Create order
+// Creates an order.
+POST /orders/{shop} {
+  handler: orders.Create
+  params {
+    email: "a@b.c"
+    password
+  }
+  only: [dev, staging]
+  confirm: true
+  timeout: 10s
+  headers {
+    Authorization: "Bearer ${Login().body.token}"
+    Idempotency-Key: uuid()
+  }
+  body { email, items: [{ sku: "A-1", qty: 2 }], }
+  poll body.status == "paid" every 1s for 30s
+  expect {
+    status == 201
+    headers.content-type.contains("json")
+    body matches Order
+    body.id matches /^\d+$/i
+  }
+  save order_id = body.id
+}
+
+---
+
+(source_file
+  (comment)
+  (comment)
+  (request
+    (method)
+    (path
+      (path_text)
+      (path_param
+        (identifier)))
+    (request_block
+      (handler_field
+        (handler
+          (identifier)
+          (identifier)))
+      (params_field
+        (param
+          (identifier)
+          (string))
+        (param
+          (identifier)))
+      (only_field
+        (identifier)
+        (identifier))
+      (flag_field
+        (true))
+      (duration_field
+        (duration))
+      (entries_field
+        (entry
+          (property)
+          (string
+            (interpolation
+              (member_expression
+                (member_expression
+                  (call_expression
+                    (identifier)
+                    (arguments))
+                  (property))
+                (property)))))
+        (entry
+          (property)
+          (call_expression
+            (identifier)
+            (arguments))))
+      (body_field
+        (object
+          (identifier)
+          (pair
+            (property)
+            (array
+              (object
+                (pair
+                  (property)
+                  (string))
+                (pair
+                  (property)
+                  (number)))))))
+      (poll_statement
+        (binary_expression
+          (member_expression
+            (identifier)
+            (property))
+          (string))
+        (duration)
+        (duration))
+      (expect_block
+        (binary_expression
+          (identifier)
+          (number))
+        (call_expression
+          (member_expression
+            (member_expression
+              (identifier)
+              (property))
+            (property))
+          (arguments
+            (string)))
+        (matches_expression
+          (identifier)
+          (type))
+        (matches_expression
+          (member_expression
+            (identifier)
+            (property))
+          (regex)))
+      (save_statement
+        (identifier)
+        (member_expression
+          (identifier)
+          (property))))))
+
+===========
+Expressions
+===========
+
+let x = !a && b || typeof c == "string"
+let y = fresh users.Create(name: "Bob").body.items.map(i => i.id)[0]
+let z = vars["x-y"] in [1, -2.5, 1e3]
+
+---
+
+(source_file
+  (let_declaration
+    (identifier)
+    (binary_expression
+      (binary_expression
+        (unary_expression
+          (identifier))
+        (identifier))
+      (binary_expression
+        (unary_expression
+          (identifier))
+        (string))))
+  (let_declaration
+    (identifier)
+    (unary_expression
+      (index_expression
+        (call_expression
+          (member_expression
+            (member_expression
+              (member_expression
+                (call_expression
+                  (member_expression
+                    (identifier)
+                    (property))
+                  (arguments
+                    (argument
+                      (identifier)
+                      (string))))
+                (property))
+              (property))
+            (property))
+          (arguments
+            (lambda
+              (identifier)
+              (member_expression
+                (identifier)
+                (property)))))
+        (number))))
+  (let_declaration
+    (identifier)
+    (binary_expression
+      (index_expression
+        (identifier)
+        (string))
+      (array
+        (number)
+        (unary_expression
+          (number))
+        (number)))))
+
+=========================
+Flows, shapes and strings
+=========================
+
+flow Checkout {
+  params { shop: "main" }
+  order = CreateOrder(shop)
+  Pay(order: order.body.id)
+  expect { GetOrder(id: order.body.id).body.status == "paid" }
+  save last = order.body.id
+}
+
+shape Order { id: string, note?: string | null, items: [Item] }
+shape Raw = schema("./raw.json")
+
+let s = """
+  multi "line" ${x}
+  """
+let t = 'it\'s ${y}'
+
+---
+
+(source_file
+  (flow
+    (identifier)
+    (params_field
+      (param
+        (identifier)
+        (string)))
+    (flow_binding
+      (identifier)
+      (call_expression
+        (identifier)
+        (arguments
+          (identifier))))
+    (call_expression
+      (identifier)
+      (arguments
+        (argument
+          (identifier)
+          (member_expression
+            (member_expression
+              (identifier)
+              (property))
+            (property)))))
+    (expect_block
+      (binary_expression
+        (member_expression
+          (member_expression
+            (call_expression
+              (identifier)
+              (arguments
+                (argument
+                  (identifier)
+                  (member_expression
+                    (member_expression
+                      (identifier)
+                      (property))
+                    (property)))))
+            (property))
+          (property))
+        (string)))
+    (save_statement
+      (identifier)
+      (member_expression
+        (member_expression
+          (identifier)
+          (property))
+        (property))))
+  (shape_declaration
+    (identifier)
+    (shape_object
+      (shape_field
+        (property)
+        (type))
+      (shape_field
+        (property)
+        (shape_union
+          (type)
+          (null)))
+      (shape_field
+        (property)
+        (shape_array
+          (type)))))
+  (shape_declaration
+    (identifier)
+    (schema
+      (string)))
+  (let_declaration
+    (identifier)
+    (string
+      (interpolation
+        (identifier))))
+  (let_declaration
+    (identifier)
+    (string
+      (escape_sequence)
+      (interpolation
+        (identifier)))))
