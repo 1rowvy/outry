@@ -1057,6 +1057,12 @@ impl Server {
                     ast::Item::Let(l) => (l.name.clone(), Some("let".into()), SymbolKind::VARIABLE),
                 };
                 let range = Range::new(position(&text, span.start), position(&text, span.end));
+                let selection_range = match item {
+                    ast::Item::Request(ast::Request {
+                        name_span: Some(n), ..
+                    }) => Range::new(position(&text, n.start), position(&text, n.end)),
+                    _ => Range::new(range.start, range.start),
+                };
                 DocumentSymbol {
                     name,
                     detail,
@@ -1064,7 +1070,7 @@ impl Server {
                     tags: None,
                     deprecated: None,
                     range,
-                    selection_range: Range::new(range.start, range.start),
+                    selection_range,
                     children: None,
                 }
             })

@@ -219,7 +219,7 @@ base = \"http://localhost:8080\"
 base = \"https://api.example.com\"
 ";
 
-const INIT_EXAMPLE: &str = "// Health\nGET /health {\n  expect { status == 200 }\n}\n";
+const INIT_EXAMPLE: &str = "Health: GET /health {\n  expect { status == 200 }\n}\n";
 
 /// Создаёт `api/env.toml` и пример запроса. Если `dir` сам называется `api`,
 /// файлы кладутся прямо в него. Возвращает каталог проекта (тот, где `env.toml`).

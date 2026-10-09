@@ -77,7 +77,6 @@ Routy также читает обработчик и показывает, чт
   становится [shape](#shape-ответов).
 
 ```routy title="api/users/post.routy"
-// Создать пользователя
 // Отправляет приветственное письмо.
 // chi internal/http/users.go:42 → h.CreateUser
 //
@@ -86,21 +85,20 @@ Routy также читает обработчик и показывает, чт
 //   name          string  required  ФИО
 //   email         string  required
 //   address.city  string
-POST /users {
+CreateUser: POST /users {
   handler: h.CreateUser
   body { name: "", email: "", address: { city: "" } }
 }
 ```
 
 ```routy title="api/users/get.routy"
-// List users
 // ListUsers returns a page of users.
 // chi internal/http/users.go:22 → h.ListUsers
 //
 // Query:
 //   page   string
 //   limit  string
-GET /users {
+ListUsers: GET /users {
   handler: h.ListUsers
 
   params {
@@ -115,9 +113,9 @@ GET /users {
 }
 ```
 
-- **Имя** — из doc-комментария: короткий `@Summary` или первая строка и есть имя; комментарий в стиле Go
-  (`ListUsers returns …`) даёт имя функции (`List users`), а сам уходит в описание. Без комментария имя
-  берётся из обработчика (`h.GetUser` → `Get user`).
+- **Имя** (`ListUsers:`) — из doc-комментария: короткий `@Summary` или первая строка и есть имя;
+  комментарий в стиле Go (`ListUsers returns …`) даёт имя функции, а сам уходит в описание. Без
+  комментария имя берётся из обработчика (`h.GetUser` → `GetUser`).
 - **`handler:`** связывает запрос с кодом: запрос узнаётся и после того, как поменялся путь.
 - **Query-параметры** становятся `params` со значением `null` по умолчанию, так что `ListUsers(page: 2)`
   отправит `?page=2`, а `ListUsers()` — ничего.
@@ -154,10 +152,9 @@ AuthRequired = { headers = { Authorization = "Bearer ${Login().body.token}" } }
 ```
 
 ```routy title="api/orders/get.routy"
-// List orders
 // gin internal/router/router.go:31 → h.Orders.List
 // middleware: middleware.AuthRequired()
-GET /orders {
+ListOrders: GET /orders {
   handler: h.Orders.List
   headers { Authorization: "Bearer ${Login().body.token}" }
 }

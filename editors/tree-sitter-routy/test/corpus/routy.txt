@@ -12,6 +12,37 @@ GET /health
     (path
       (path_text))))
 
+=============
+Named request
+=============
+
+// Logs in.
+Login: POST /login {
+  expect { status == 200 }
+}
+
+Health: GET /health
+
+---
+
+(source_file
+  (comment)
+  (request
+    (identifier)
+    (method)
+    (path
+      (path_text))
+    (request_block
+      (expect_block
+        (binary_expression
+          (identifier)
+          (number)))))
+  (request
+    (identifier)
+    (method)
+    (path
+      (path_text))))
+
 =================================
 Path parameters and interpolation
 =================================

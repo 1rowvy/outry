@@ -26,9 +26,8 @@ CLI (`run`, `check`, `fmt`, `convert`, `import go`) и приложение чи
 ## Коротко
 
 ```routy title="api/orders/create.routy"
-// Create order
 // Creates an order for the current user.
-POST /orders/{shop} {
+CreateOrder: POST /orders/{shop} {
   only: [dev, staging]
   query { page: 1 }
 
@@ -90,7 +89,7 @@ GET /health
 
 ```txt
 [doc-комментарий]
-МЕТОД адрес [{ поля }]
+[Имя:] МЕТОД адрес [{ поля }]
 ```
 
 ### Метод
@@ -117,14 +116,25 @@ GET /health
 
 ### Имя и описание
 
-Doc-комментарий — подряд идущие строки `//` прямо над запросом.
+```routy
+// Creates an order for the current user.
+// Prices come from the catalog.
+CreateOrder: POST /orders {
+  body { sku: "A-1", qty: 2 }
+}
+```
 
-- **Первая строка** — имя запроса: слова склеиваются в PascalCase, `// Create order` → `CreateOrder`.
-  По нему запрос [вызывают](#вызов-запросов), запускают через `routy run`, показывают в дереве
-  приложения и в отчётах.
-- **Остальное** — описание, оно видно в приложении и в `routy run -v`.
-- Без doc-комментария запрос называется по файлу (`create-order.routy` → `CreateOrder`), если он в
-  файле один; иначе у него нет имени и вызвать его нельзя.
+- **Имя** пишется перед методом, сразу за ним `:` — `CreateOrder: POST …`. Оно начинается с заглавной
+  буквы и уникально в проекте. По нему запрос [вызывают](#вызов-запросов), запускают через
+  `routy run`, показывают в дереве приложения и в отчётах.
+- **Doc-комментарий** — подряд идущие строки `//` прямо над запросом — это описание; оно видно в
+  подсказке при наведении, в приложении и в `routy run -v`.
+- Запрос без имени `routy run` тоже отправит, но вызвать его из других запросов нельзя. Единственный
+  запрос файла без имени и без комментария называется по файлу (`create-order.routy` → `CreateOrder`).
+
+В файлах, написанных до появления имён, имя запроса — первая строка комментария
+(`// Create order` → `CreateOrder`). Это по-прежнему работает; `routy fmt` переписывает такие запросы
+в `CreateOrder: POST …`, а остаток комментария оставляет описанием.
 
 ### Поля
 
@@ -375,8 +385,7 @@ save first_sku = body.items[0].sku
 - **объявленные параметры** — в `params`, со значением по умолчанию или без.
 
 ```routy
-// Login
-POST /auth/login {
+Login: POST /auth/login {
   params {
     email: "dev@example.com"
     password // без значения по умолчанию
@@ -456,8 +465,7 @@ expect {
 ## Опрос
 
 ```routy
-// Wait until paid
-GET /orders/{id} {
+WaitUntilPaid: GET /orders/{id} {
   poll body.status == "paid" every 1s for 30s
   expect { body.paid_at != null }
 }
@@ -510,8 +518,7 @@ let admin = { email: "admin@example.com", role: "admin" }
 `routy import` записывает обработчик в каждый созданный запрос:
 
 ```routy
-// Get user
-GET /users/{id} {
+GetUser: GET /users/{id} {
   handler: users.GetUser
   expect { body matches User }
 }
@@ -587,6 +594,6 @@ routy fmt --check api/    # CI: код выхода 1, если что-то не
 | `> assert body.id exists` | `body.id != null` |
 | `> assert body.tags contains "a"` | `body.tags.contains("a")` |
 | `> assert headers.content-length < 1000` | `number(headers.content-length) < 1000` |
-| `# комментарий` над запросом | `// комментарий` — первая строка становится именем, если в ней до четырёх слов, иначе имя берётся из имени файла |
+| `# комментарий` над запросом | `Имя:` из первой строки комментария, если в ней до четырёх слов (остальное остаётся комментарием `//`), иначе из имени файла |
 | `{{$uuid}}`, `{{$timestamp}}`, `{{$randomInt 1 10}}` | `uuid()`, `now()`, `randomInt(1, 9)` (в `.routy` верхняя граница включается) |
 | `{{x-y}}` | `vars["x-y"]` |

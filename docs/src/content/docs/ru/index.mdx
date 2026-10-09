@@ -27,8 +27,7 @@ curl -fsSL https://raw.githubusercontent.com/1rowvy/routy/master/install.sh | sh
 ```
 
 ```routy title="api/orders/create.routy"
-// Create order
-POST /v1/orders {
+CreateOrder: POST /v1/orders {
   headers { Authorization: "Bearer ${Login().body.token}" }
   body { user_id: CreateUser().body.id, items: [{ sku: "BOOK-1", qty: 2 }] }
 

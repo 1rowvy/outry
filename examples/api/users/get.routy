@@ -1,5 +1,4 @@
-// Get user
-GET /anything/users/{id} {
+GetUser: GET /anything/users/{id} {
   params { id: 42 }
   headers { Accept: "application/json" }
 

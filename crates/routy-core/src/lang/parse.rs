@@ -21,12 +21,16 @@ pub fn parse(src: &str, stem: Option<&str>) -> Result<File> {
             Tok::Ident(w) if w == "let" => Item::Let(p.let_decl()?),
             Tok::Ident(w) if w == "shape" => Item::Shape(p.shape_decl()?),
             Tok::Ident(w) if w == "flow" => Item::Flow(p.flow(doc)?),
+            // `Login: POST /auth/login` — имя запроса перед методом.
+            Tok::Ident(_) if p.src[span.end..].starts_with(':') => {
+                Item::Request(p.named_request(doc)?)
+            }
             Tok::Ident(w) if is_method(&w) => Item::Request(p.request(doc)?),
             other => {
                 return p.err(
                     span.start,
                     format!(
-                        "expected a request (`GET /path`), `flow`, `shape` or `let`, got {}",
+                        "expected a request (`GET /path`, `Name: GET /path`), `flow`, `shape` or `let`, got {}",
                         describe(&other)
                     ),
                 );
@@ -599,14 +603,24 @@ impl<'a> Parser<'a> {
             if line + 1 != want || !own_line {
                 break;
             }
-            lines.push(c.text.strip_prefix(' ').unwrap_or(&c.text).to_string());
+            lines.push((
+                c.text.strip_prefix(' ').unwrap_or(&c.text).to_string(),
+                c.span,
+            ));
             want = line;
         }
         lines.reverse();
         let mut lines = lines.into_iter();
+        let first = lines.next().filter(|(t, _)| !t.trim().is_empty());
         Doc {
-            title: lines.next().filter(|t| !t.trim().is_empty()),
-            description: lines.collect::<Vec<_>>().join("\n").trim().to_string(),
+            title_span: first.as_ref().map(|(_, s)| *s),
+            title: first.map(|(t, _)| t),
+            description: lines
+                .map(|(t, _)| t)
+                .collect::<Vec<_>>()
+                .join("\n")
+                .trim()
+                .to_string(),
         }
     }
 
@@ -706,6 +720,30 @@ impl<'a> Parser<'a> {
         })
     }
 
+    /// `Name: METHOD target { … }`.
+    fn named_request(&mut self, doc: Doc) -> Result<Request> {
+        let (name, at) = self.ident("a request name")?;
+        if !starts_upper(&name) {
+            return self.err(at.start, "request names start with an upper-case letter");
+        }
+        self.expect(":")?;
+        let (tok, span) = self.peek()?;
+        if !matches!(&tok, Tok::Ident(w) if is_method(w)) {
+            return self.err(
+                span.start,
+                format!(
+                    "expected a method after `{name}:` (`GET`, `POST`, …), got {}",
+                    describe(&tok)
+                ),
+            );
+        }
+        let mut r = self.request(doc)?;
+        r.span.start = at.start;
+        r.name = Some(name);
+        r.name_span = Some(at);
+        Ok(r)
+    }
+
     fn request(&mut self, doc: Doc) -> Result<Request> {
         let (tok, start) = self.next()?;
         let Tok::Ident(method) = tok else {
@@ -719,6 +757,7 @@ impl<'a> Parser<'a> {
         Ok(Request {
             span: Span::new(start.start, self.pos),
             name: doc.title.as_deref().and_then(pascal_case),
+            name_span: None,
             doc,
             method,
             target,
@@ -1700,6 +1739,31 @@ POST /orders/{shop} {
   save order_id = body.id
 }
 "#;
+
+    #[test]
+    fn explicit_names() {
+        let src = "// Logs in.\n// Twice.\nLogin: POST /login { expect { status == 200 } }\n";
+        let r = one(src);
+        assert_eq!(r.name.as_deref(), Some("Login"));
+        assert_eq!(r.name_span.map(|s| s.text(src)), Some("Login"));
+        assert!(r.span.text(src).starts_with("Login: POST"));
+        assert_eq!(r.method, "POST");
+        // Комментарий — только описание.
+        assert_eq!(r.doc.title.as_deref(), Some("Logs in."));
+
+        // Имя — PascalCase-слово сразу перед `:`, дальше метод.
+        let err = |src: &str| parse(src, None).unwrap_err().to_string();
+        assert!(err("login: GET /x\n").contains("upper-case"));
+        assert!(err("Login: /x\n").contains("expected a method after `Login:`"));
+        assert!(err("Login : GET /x\n").contains("expected a request"));
+        // Без имени по-старому: из комментария или имени файла.
+        assert_eq!(
+            one("// Get user\nGET /u\n").name.as_deref(),
+            Some("GetUser")
+        );
+        let f = parse("GET /u\n", Some("health")).unwrap();
+        assert_eq!(f.items[0].name(), Some("Health"));
+    }
 
     #[test]
     fn spec_example() {

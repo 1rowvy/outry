@@ -6,7 +6,9 @@ interface Node {
   children: Node[];
   isFile: boolean;
   method: string;
-  /** Подпись файла: имя без префикса метода (`get-by-id` → `by-id`) или имя папки */
+  /** Имена запросов и сценариев файла (`Login`) — подпись вместо имени файла */
+  names: string[];
+  /** Подпись файла: имена запросов, иначе имя без префикса метода (`get-by-id` → `by-id`) */
   label: string;
 }
 
@@ -15,8 +17,8 @@ const SHORT: Record<string, string> = { DELETE: "DEL", PATCH: "PTCH", OPTIONS: "
 /** Фильтр показывается, когда файлов больше этого */
 const FILTER_FROM = 8;
 
-function buildTree(files: string[], methods: Record<string, string>): Node[] {
-  const root: Node = { name: "", path: "", children: [], isFile: false, method: "", label: "" };
+function buildTree(files: string[], methods: Record<string, string>, names: Record<string, string[]>): Node[] {
+  const root: Node = { name: "", path: "", children: [], isFile: false, method: "", names: [], label: "" };
   for (const file of files) {
     let cur = root;
     const parts = file.split("/");
@@ -25,7 +27,8 @@ function buildTree(files: string[], methods: Record<string, string>): Node[] {
       let next = cur.children.find((c) => c.name === part && c.isFile === isFile);
       if (!next) {
         const method = isFile ? (methods[file] ?? "GET") : "";
-        next = { name: part, path: parts.slice(0, i + 1).join("/"), children: [], isFile, method, label: "" };
+        const own = isFile ? (names[file] ?? []) : [];
+        next = { name: part, path: parts.slice(0, i + 1).join("/"), children: [], isFile, method, names: own, label: "" };
         cur.children.push(next);
       }
       cur = next;
@@ -36,6 +39,7 @@ function buildTree(files: string[], methods: Record<string, string>): Node[] {
 
 /** `users/get.routy` → `users`, `users/get-by-id.routy` → `by-id`, `users/create.http` → `create`. */
 function fileLabel(node: Node, parent: string): string {
+  if (node.names.length) return node.names.join(", ");
   const base = node.name.replace(/\.(http|routy)$/, "");
   const m = node.method.toLowerCase();
   if (base === m) return parent || base;
@@ -58,6 +62,7 @@ function compact(nodes: Node[], parent: string): Node[] {
     }
     if (dir.children.length === 1) {
       const file = dir.children[0];
+      if (file.names.length) return { ...file, label: fileLabel(file, "") };
       const own = fileLabel(file, "");
       const label = own === file.method.toLowerCase() ? name : `${name} / ${own}`;
       return { ...file, label };
@@ -92,6 +97,7 @@ function countFiles(node: Node): number {
 interface Props {
   files: string[];
   methods: Record<string, string>;
+  names: Record<string, string[]>;
   selected: string | null;
   onSelect: (path: string) => void;
   onMenu: OnMenu;
@@ -103,11 +109,11 @@ export function FileTree(props: Props) {
   const shown = useMemo(() => {
     const terms = filter.toLowerCase().split(/\s+/).filter(Boolean);
     return props.files.filter((f) => {
-      const hay = `${props.methods[f] ?? ""} ${f}`.toLowerCase();
+      const hay = `${props.methods[f] ?? ""} ${f} ${(props.names[f] ?? []).join(" ")}`.toLowerCase();
       return terms.every((t) => hay.includes(t));
     });
-  }, [props.files, props.methods, filter]);
-  const tree = useMemo(() => buildTree(shown, props.methods), [shown, props.methods]);
+  }, [props.files, props.methods, props.names, filter]);
+  const tree = useMemo(() => buildTree(shown, props.methods, props.names), [shown, props.methods, props.names]);
   if (props.files.length === 0) {
     return <p className="muted pad">No *.routy or *.http files</p>;
   }
@@ -136,7 +142,7 @@ export function FileTree(props: Props) {
   );
 }
 
-function TreeNode(props: Omit<Props, "files" | "methods"> & { node: Node }) {
+function TreeNode(props: Omit<Props, "files" | "methods" | "names"> & { node: Node }) {
   const { node } = props;
   if (node.isFile) {
     return (

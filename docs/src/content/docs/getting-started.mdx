@@ -37,11 +37,10 @@ import { Steps, Aside } from '@astrojs/starlight/components';
    base = "https://api.example.com"
    ```
 
-4. Write a request. The path is appended to `base`; the comment above is the request's name:
+4. Write a request. The name comes before the method, the path is appended to `base`:
 
    ```routy title="api/users/list.routy"
-   // List users
-   GET /users {
+   ListUsers: GET /users {
      query { page: 1 }
 
      expect {

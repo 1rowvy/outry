@@ -26,9 +26,8 @@ The older format is described in [.http files](/routy/guides/request-format/). D
 ## At a glance
 
 ```routy title="api/orders/create.routy"
-// Create order
 // Creates an order for the current user.
-POST /orders/{shop} {
+CreateOrder: POST /orders/{shop} {
   only: [dev, staging]
   query { page: 1 }
 
@@ -90,7 +89,7 @@ They cannot be used as variable or request names.
 
 ```txt
 [doc comment]
-METHOD target [{ fields }]
+[Name:] METHOD target [{ fields }]
 ```
 
 ### Method
@@ -118,14 +117,26 @@ The block `{` must be separated from the target by a space: `/orders/{shop} {`.
 
 ### Name and description
 
-The doc comment is the run of `//` lines right above the request.
+```routy
+// Creates an order for the current user.
+// Prices come from the catalog.
+CreateOrder: POST /orders {
+  body { sku: "A-1", qty: 2 }
+}
+```
 
-- The **first line** is the request's name: words are joined in PascalCase, so `// Create order`
-  becomes `CreateOrder`. It is used to [call the request](#calling-requests), in `routy run`, in the
-  app's tree and in reports.
-- **The rest** is the description, shown in the app and in `routy run -v`.
-- Without a doc comment the request is named after the file (`create-order.routy` → `CreateOrder`) if
-  it is the only request in the file; otherwise it is unnamed and cannot be called.
+- **The name** goes before the method, followed by `:` right after it: `CreateOrder: POST …`. It starts
+  with an upper-case letter and is unique in the project. It is used to
+  [call the request](#calling-requests), in `routy run`, in the app's tree and in reports.
+- **The doc comment** — the run of `//` lines right above — is the description, shown in hover, in the
+  app and in `routy run -v`.
+- A request without a name is still sent by `routy run`, but it can't be called by other requests.
+  The only request of a file without a name and a comment is named after the file
+  (`create-order.routy` → `CreateOrder`).
+
+Files written before names existed name a request by the first line of its comment
+(`// Create order` → `CreateOrder`). That still works; `routy fmt` rewrites such requests to
+`CreateOrder: POST …` and keeps the rest of the comment as the description.
 
 ### Fields
 
@@ -376,8 +387,7 @@ A request can be called with arguments. Its parameters are:
 - **declared parameters** — in `params`, with or without a default.
 
 ```routy
-// Login
-POST /auth/login {
+Login: POST /auth/login {
   params {
     email: "dev@example.com"
     password // no default
@@ -457,8 +467,7 @@ A `Cookie` header in `headers` is sent as written, in addition to the jar's cook
 ## Polling
 
 ```routy
-// Wait until paid
-GET /orders/{id} {
+WaitUntilPaid: GET /orders/{id} {
   poll body.status == "paid" every 1s for 30s
   expect { body.paid_at != null }
 }
@@ -510,8 +519,7 @@ resolution. Use `env.toml` for values shared across files.
 `routy import` writes the handler into each generated request:
 
 ```routy
-// Get user
-GET /users/{id} {
+GetUser: GET /users/{id} {
   handler: users.GetUser
   expect { body matches User }
 }
@@ -587,6 +595,6 @@ routy fmt --check api/    # CI: exit code 1 if anything is not formatted
 | `> assert body.id exists` | `body.id != null` |
 | `> assert body.tags contains "a"` | `body.tags.contains("a")` |
 | `> assert headers.content-length < 1000` | `number(headers.content-length) < 1000` |
-| `# comment` above the request | `// comment` — the first line becomes the name if it is up to four words, otherwise the name comes from the file name |
+| `# comment` above the request | `Name:` from the comment's first line if it is up to four words (the rest stays as a `//` comment), otherwise from the file name |
 | `{{$uuid}}`, `{{$timestamp}}`, `{{$randomInt 1 10}}` | `uuid()`, `now()`, `randomInt(1, 9)` (the upper bound is inclusive in `.routy`) |
 | `{{x-y}}` | `vars["x-y"]` |

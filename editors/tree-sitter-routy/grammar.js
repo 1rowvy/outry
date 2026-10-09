@@ -44,10 +44,17 @@ module.exports = grammar({
 
     // ---------- requests ----------
 
+    // `Login: POST /login { … }` — the name is optional (older files name requests by comment).
     request: ($) =>
-      seq(field('method', $.method), field('target', $._target), optional($.request_block)),
+      seq(
+        optional(seq(field('name', $.identifier), token.immediate(':'))),
+        field('method', $.method),
+        field('target', $._target),
+        optional($.request_block),
+      ),
 
-    method: (_) => /[A-Z][A-Z0-9_-]+/,
+    // Wins over `identifier` for all-caps words: `GET` is a method, not a request name.
+    method: (_) => token(prec(1, /[A-Z][A-Z0-9_-]+/)),
 
     _target: ($) => choice($.path, $.url, $.string),
 

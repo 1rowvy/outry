@@ -78,14 +78,19 @@ pub struct Doc {
     pub title: Option<String>,
     /// Остальные строки.
     pub description: String,
+    /// Комментарий с первой строкой.
+    pub title_span: Option<Span>,
 }
 
 #[derive(Debug, Clone)]
 pub struct Request {
     pub span: Span,
     pub doc: Doc,
-    /// `CreateOrder` — из первой строки комментария или имени файла.
+    /// `CreateOrder`: `CreateOrder: POST …`, иначе (старые файлы) из первой строки комментария
+    /// или имени файла.
     pub name: Option<String>,
+    /// Где написано имя, если оно задано явно (`Login:`); `span` тогда начинается с него.
+    pub name_span: Option<Span>,
     pub method: String,
     pub target: Target,
     pub fields: Fields,

@@ -14,6 +14,8 @@ interface State {
   matches: boolean;
   /** После `.` — имя поля или метода. */
   member: boolean;
+  /** После имени запроса `Login` в `Login: POST …` — ждём `:` и метод. */
+  named: boolean;
 }
 
 export const KEYWORDS = ["let", "shape", "flow", "fresh", "save", "expect", "poll", "every", "for", "matches", "in", "typeof"];
@@ -129,7 +131,7 @@ function blockComment(stream: StringStream, state: State): string {
 
 export const routyLanguage = StreamLanguage.define<State>({
   name: "routy",
-  startState: () => ({ stack: [], comment: false, target: 0, matches: false, member: false }),
+  startState: () => ({ stack: [], comment: false, target: 0, matches: false, member: false, named: false }),
   copyState: (s) => ({ ...s, stack: s.stack.map((f) => ({ ...f })) }),
   token(stream, state) {
     if (stream.sol()) state.target = 0;
@@ -141,6 +143,19 @@ export const routyLanguage = StreamLanguage.define<State>({
         return "interp";
       }
       return stringToken(stream, state, t.quote);
+    }
+    if (stream.sol() && !t && stream.match(/^[\p{L}_][\p{L}\p{N}_]*(?=:\s+[A-Z]{2,}(?:\s|$))/u)) {
+      state.named = true;
+      return "requestName";
+    }
+    if (state.named) {
+      if (stream.eat(":")) return "punctuation";
+      if (stream.eatSpace()) return null;
+      state.named = false;
+      if (stream.match(/^[A-Z]{2,}(?=\s|$)/)) {
+        state.target = 1;
+        return "httpMethod";
+      }
     }
     if (stream.sol() && !t && stream.match(/^[A-Z]{2,}(?=\s|$)/)) {
       state.target = 1;
@@ -155,6 +170,7 @@ export const routyLanguage = StreamLanguage.define<State>({
   },
   tokenTable: {
     httpMethod: tags.keyword,
+    requestName: tags.definition(tags.function(tags.variableName)),
     url: tags.url,
     param: tags.special(tags.variableName),
     interp: tags.special(tags.brace),

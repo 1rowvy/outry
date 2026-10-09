@@ -36,11 +36,10 @@ import { Steps, Aside } from '@astrojs/starlight/components';
    base = "https://api.example.com"
    ```
 
-4. Напишите запрос. Путь дописывается к `base`, комментарий над запросом — его имя:
+4. Напишите запрос. Имя пишется перед методом, путь дописывается к `base`:
 
    ```routy title="api/users/list.routy"
-   // List users
-   GET /users {
+   ListUsers: GET /users {
      query { page: 1 }
 
      expect {

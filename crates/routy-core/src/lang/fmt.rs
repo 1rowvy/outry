@@ -332,6 +332,16 @@ impl Printer<'_> {
     // ---- файл и элементы ----
 
     fn file(&mut self, f: &File) -> String {
+        // Старый вид: имя из первой строки комментария. Оно переезжает в `Name: METHOD`,
+        // а сама строка комментария больше не печатается.
+        for item in &f.items {
+            if let Item::Request(r) = item
+                && let Some(span) = legacy_title(r)
+                && let Some(ci) = self.comments.iter().position(|c| c.span == span)
+            {
+                self.used[ci] = true;
+            }
+        }
         let mut els = Vec::new();
         let mut prev: Option<&Item> = None;
         for item in &f.items {
@@ -386,7 +396,11 @@ impl Printer<'_> {
     }
 
     fn request(&mut self, r: &Request) -> String {
-        let head = format!("{} {}", r.method, self.text(r.target.span));
+        let name = match (&r.name, r.name_span.is_some() || legacy_title(r).is_some()) {
+            (Some(n), true) => format!("{n}: "),
+            _ => String::new(),
+        };
+        let head = format!("{name}{} {}", r.method, self.text(r.target.span));
         let range = Span::new(r.target.span.end, r.span.end);
         let fl = &r.fields;
         let mut order: Vec<(&str, Span)> = fl.order.clone();
@@ -951,6 +965,19 @@ impl Printer<'_> {
     }
 }
 
+/// Комментарий, из первой строки которого взято имя запроса без `Name:` (старые файлы).
+pub(crate) fn legacy_title(r: &Request) -> Option<Span> {
+    let from_title = r.name_span.is_none()
+        && r.name.is_some()
+        && r.name.as_deref()
+            == r.doc
+                .title
+                .as_deref()
+                .and_then(super::parse::pascal_case)
+                .as_deref();
+    from_title.then_some(r.doc.title_span).flatten()
+}
+
 /// Тот же элемент и те же комментарии — без учёта позиций и порядка полей.
 fn same_meaning(a: &str, b: &str) -> bool {
     match (parse(a, None), parse(b, None)) {
@@ -967,6 +994,10 @@ fn normalized(f: &File) -> (String, Vec<String>) {
         .map(|mut i| {
             if let Item::Request(r) = &mut i {
                 r.fields.order.clear();
+                // Имя проверяется отдельно: элемент разбирается без комментария над ним, а
+                // старое имя из комментария печатается как `Name:`.
+                r.name = None;
+                r.name_span = None;
             }
             if let Item::Flow(fl) = &mut i {
                 fl.params_span = None;
@@ -1016,9 +1047,8 @@ POST /orders/{shop}   {
 }
 GET /health
 "#;
-        let want = r#"// Create order
-// Creates an order.
-POST /orders/{shop} {
+        let want = r#"// Creates an order.
+CreateOrder: POST /orders/{shop} {
   only: [dev, staging]
   timeout: 10s
 
@@ -1062,8 +1092,7 @@ let admin = {
   permissions: ["read", "write", "delete"],
 }
 
-// Login
-POST /login {
+Login: POST /login {
   body {
     // who
     email: admin.email,
@@ -1100,8 +1129,7 @@ flow Buy {
 }
 shape Item = {sku: string} | null
 "#;
-        let want = r#"// X
-GET /x {
+        let want = r#"X: GET /x {
   poll body.done every 1500ms for 2m
 
   expect {
@@ -1127,9 +1155,25 @@ shape Item = { sku: string } | null
     }
 
     #[test]
+    fn explicit_names() {
+        // Явное имя остаётся, комментарий над ним — описание.
+        let src =
+            "// Logs in.\nLogin:   POST /login {\n  expect {status==200}\n}\nHealth: GET /health\n";
+        let want = "// Logs in.\nLogin: POST /login {\n  expect { status == 200 }\n}\n\nHealth: GET /health\n";
+        assert_eq!(fmt(src), want);
+        // Старый вид: имя из первой строки комментария переезжает в `Name:`, остальное остаётся;
+        // безымянный запрос из одного `GET` не трогается.
+        let src = "// Get user\n// By id.\nGET /users/{id}\n\nGET /health\n";
+        assert_eq!(
+            fmt(src),
+            "// By id.\nGetUser: GET /users/{id}\n\nGET /health\n"
+        );
+    }
+
+    #[test]
     fn triple_strings_are_reindented() {
         let src = "// T\nPOST /t {\n      body \"\"\"\n          hello\n            ${name}\n          \"\"\"\n}\n";
-        let want = "// T\nPOST /t {\n  body \"\"\"\n    hello\n      ${name}\n  \"\"\"\n}\n";
+        let want = "T: POST /t {\n  body \"\"\"\n    hello\n      ${name}\n  \"\"\"\n}\n";
         assert_eq!(fmt(src), want);
     }
 

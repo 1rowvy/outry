@@ -6,8 +6,7 @@ editor for them: everything it shows comes from `routy lsp`, the same checks and
 `routy check`, the CLI and the desktop app.
 
 ```routy
-// Create order
-POST /orders {
+CreateOrder: POST /orders {
   headers { Authorization: "Bearer ${Login().body.token}" }
   body { sku: "A-1", qty: 2 }
   expect { status == 201 }

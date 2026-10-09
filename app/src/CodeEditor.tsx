@@ -168,8 +168,8 @@ class RunMarker extends GutterMarker {
   }
 }
 const runMarker = new RunMarker();
-/** Строка, с которой начинается запрос (`GET /x`) или сценарий (`flow X {`). */
-const RUNNABLE = /^([A-Z]{2,}\s|flow\s)/;
+/** Строка, с которой начинается запрос (`GET /x`, `Login: POST /login`) или сценарий (`flow X {`). */
+const RUNNABLE = /^(([\p{L}_][\p{L}\p{N}_]*:\s+)?[A-Z]{2,}\s|flow\s)/u;
 
 function diagnostics(state: EditorState, errors: ParseError[]): Diagnostic[] {
   return errors

@@ -1,5 +1,4 @@
-// Create user
-POST /anything/users {
+CreateUser: POST /anything/users {
   params { name: "Viktor" }
 
   headers {

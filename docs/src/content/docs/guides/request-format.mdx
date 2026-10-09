@@ -94,8 +94,7 @@ X-Request-Id: {{$uuid}}
 ```
 
 ```routy title="api/auth/login.routy"
-// Login
-POST /auth/login {
+Login: POST /auth/login {
   headers { X-Request-Id: uuid() }
   body { email, password, remember: true }
 
@@ -108,8 +107,8 @@ POST /auth/login {
 }
 ```
 
-- The first comment line becomes the request's name if it is short (up to four words); otherwise a name
-  is made from the file name and the comment becomes the description.
+- The first comment line becomes the request's name (`Login: POST …`) if it is short (up to four words);
+  otherwise the name is made from the file name and the comment becomes the description.
 - `{{base}}/…` becomes a path, `{{x}}` in it a [parameter](/routy/reference/routy-format/#parameters)
   `{x}`; other URLs stay as they are.
 - A JSON body stays JSON: `"{{x}}"` becomes the variable `x`, `{{x}}` outside quotes becomes `number(x)`.

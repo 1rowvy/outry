@@ -56,7 +56,7 @@ function requestMethod(text: string, routy: boolean, cursor: number): string {
   if (routy) {
     let found = "";
     for (let i = 0; i < lines.length; i++) {
-      const m = /^([A-Z]{2,})\s|^(flow)\s/.exec(lines[i]);
+      const m = /^(?:[\p{L}_][\p{L}\p{N}_]*:\s+)?([A-Z]{2,})\s|^(flow)\s/u.exec(lines[i]);
       if (!m) continue;
       if (i + 1 > cursor && found) break;
       found = m[1] ?? "FLOW";
@@ -611,7 +611,7 @@ export default function App() {
               </form>
             )}
             <div className="tree-wrap" onContextMenu={(e) => openMenu(e, null)}>
-              <FileTree files={project.files} methods={project.methods} selected={selected} onSelect={select} onMenu={openMenu} />
+              <FileTree files={project.files} methods={project.methods} names={project.names} selected={selected} onSelect={select} onMenu={openMenu} />
             </div>
           </>
         )}

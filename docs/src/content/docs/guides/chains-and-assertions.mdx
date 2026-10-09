@@ -8,8 +8,7 @@ import { Aside } from '@astrojs/starlight/components';
 ## `expect` — check the response
 
 ```routy title="api/users/create.routy"
-// Create user
-POST /users {
+CreateUser: POST /users {
   body { name: "Viktor" }
 
   expect {
@@ -42,8 +41,7 @@ or a JSON Schema file. All operators and methods: [Expressions](/routy/reference
 A request is a function: call it by name, and the result is its response.
 
 ```routy title="api/auth/login.routy"
-// Login
-POST /auth/login {
+Login: POST /auth/login {
   params {
     email: "dev@example.com"
     password
@@ -55,8 +53,7 @@ POST /auth/login {
 ```
 
 ```routy title="api/users/me.routy"
-// Me
-GET /me {
+Me: GET /me {
   headers { Authorization: "Bearer ${Login().body.token}" }
   expect { status == 200 }
 }

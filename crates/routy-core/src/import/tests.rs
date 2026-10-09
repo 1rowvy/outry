@@ -425,10 +425,10 @@ fn plan_creates_only_missing_files() {
     let post = &plan.new[1].content;
     assert_eq!(
         post,
-        "// Get\n// chi main.go:7 → h.Get\nPOST /users {\n  handler: h.Get\n  body {}\n}\n"
+        "// chi main.go:7 → h.Get\nGet: POST /users {\n  handler: h.Get\n  body {}\n}\n"
     );
     let any = &plan.new[2].content;
-    assert!(any.contains("// any method\nGET / {\n"), "{any}");
+    assert!(any.contains("// any method\nGet: GET / {\n"), "{any}");
     for f in &plan.new {
         crate::lang::parse::parse(&f.content, None).unwrap();
     }
@@ -619,7 +619,7 @@ fn describes_handlers() {
         .find(|r| r.method == "POST" && r.path == "/users")
         .unwrap();
     let text = content(route, DEFAULT_BASE, &[], &[]);
-    assert!(text.starts_with("// Create user\n// CreateUser creates a user.\n// Sends a welcome email.\n// chi main.go:14 → h.CreateUser\n//\n"), "{text}");
+    assert!(text.starts_with("// CreateUser creates a user.\n// Sends a welcome email.\n// chi main.go:14 → h.CreateUser\n//\n"), "{text}");
     assert!(
         text.contains("// Headers: X-Tenant-ID\n// Body: dto.CreateUser\n"),
         "{text}"
@@ -648,7 +648,7 @@ fn describes_handlers() {
         text.contains("GET /users {\n  handler: h.ListUsers\n\n  params {\n    page: null\n    limit: null\n  }\n\n  query {\n    page\n    limit\n  }\n}\n"),
         "{text}"
     );
-    assert!(text.starts_with("// List users\n"), "{text}");
+    assert!(text.contains("\nListUsers: GET /users {\n"), "{text}");
 }
 
 #[test]
@@ -1036,8 +1036,7 @@ PUT /orders/{id} {
     );
 }
 
-const FIXED_ORDERS: &str = r#"// Create
-POST /v2/orders {
+const FIXED_ORDERS: &str = r#"Create: POST /v2/orders {
   handler: createOrder
   headers { x-tenant: "t1" }
 
@@ -1064,8 +1063,7 @@ GET /orders/{id}?full=1 {
   handler: getOrder
 }
 
-// Update
-PUT /orders/{id} {
+Update: PUT /orders/{id} {
   handler: updateOrder
 
   body {
@@ -1280,7 +1278,7 @@ func createOrder(w http.ResponseWriter, r *http.Request) {
     );
     assert_eq!(
         fixed[0].after,
-        "// Get order\nGET /orders/{id} {\n  expect {\n    status == 200\n    body matches Order\n  }\n}\n"
+        "GetOrder: GET /orders/{id} {\n  expect {\n    status == 200\n    body matches Order\n  }\n}\n"
     );
     assert_eq!(
         fixed[1].after,
@@ -1397,7 +1395,7 @@ fn middleware_headers_from_env_toml() {
     .unwrap();
     assert_eq!(
         fixed[0].after,
-        "// List\nGET /orders {\n  handler: h.List\n  headers { Authorization: \"Bearer ${Login().body.token}\" }\n}\n\n// One\nGET /orders/{id} {\n  handler: h.One\n\n  headers {\n    Accept: \"application/json\"\n    Authorization: \"Bearer ${Login().body.token}\"\n  }\n}\n\n// No token\nGET /orders { expect { status == 401 } }\n"
+        "List: GET /orders {\n  handler: h.List\n  headers { Authorization: \"Bearer ${Login().body.token}\" }\n}\n\nOne: GET /orders/{id} {\n  handler: h.One\n\n  headers {\n    Accept: \"application/json\"\n    Authorization: \"Bearer ${Login().body.token}\"\n  }\n}\n\n// No token\nGET /orders { expect { status == 401 } }\n"
     );
 }
 

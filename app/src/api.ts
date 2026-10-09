@@ -15,6 +15,8 @@ export interface ProjectInfo {
   files: string[];
   /** путь → метод из строки запроса */
   methods: Record<string, string>;
+  /** путь `*.routy` → имена запросов и сценариев */
+  names: Record<string, string[]>;
 }
 
 /** Результат запуска *.routy: ответ запроса или итог сценария. */

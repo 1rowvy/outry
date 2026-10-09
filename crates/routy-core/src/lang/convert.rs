@@ -417,9 +417,8 @@ X-Trace: {{trace-id}}
 > assert headers.content-length < 1000
 > assert body.items[0]["a b"] exists
 "#;
-        let want = r#"// Login
-// Login: httpbin echoes the request body back.
-POST /anything/login/{id}?x={q} {
+        let want = r#"// Login: httpbin echoes the request body back.
+Login: POST /anything/login/{id}?x={q} {
   headers {
     // a header comment
     Authorization: "Bearer ${token}"
@@ -451,7 +450,7 @@ POST /anything/login/{id}?x={q} {
     #[test]
     fn short_comment_is_the_name_and_text_bodies() {
         let src = "# Get user\nGET https://example.com/users/{{id}}\n\nline one\n{{name}} here\n";
-        let want = "// Get user\nGET https://example.com/users/{id} {\n  body \"\"\"\n    line one\n    ${name} here\n  \"\"\"\n}\n";
+        let want = "GetUser: GET https://example.com/users/{id} {\n  body \"\"\"\n    line one\n    ${name} here\n  \"\"\"\n}\n";
         assert_eq!(convert(src, "get").unwrap(), want);
 
         let src = "GET {{auth_url}}/token\n\n> assert status == 200\n";

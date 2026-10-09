@@ -78,7 +78,6 @@ Routy also reads the handler to show what the request expects:
   becomes a [shape](#response-shapes).
 
 ```routy title="api/users/post.routy"
-// Create a user
 // Sends a welcome email.
 // chi internal/http/users.go:42 → h.CreateUser
 //
@@ -87,21 +86,20 @@ Routy also reads the handler to show what the request expects:
 //   name          string  required  full name
 //   email         string  required
 //   address.city  string
-POST /users {
+CreateUser: POST /users {
   handler: h.CreateUser
   body { name: "", email: "", address: { city: "" } }
 }
 ```
 
 ```routy title="api/users/get.routy"
-// List users
 // ListUsers returns a page of users.
 // chi internal/http/users.go:22 → h.ListUsers
 //
 // Query:
 //   page   string
 //   limit  string
-GET /users {
+ListUsers: GET /users {
   handler: h.ListUsers
 
   params {
@@ -116,9 +114,9 @@ GET /users {
 }
 ```
 
-- **The name** comes from the doc comment: a short `@Summary` or first line is the name itself; a Go-style
-  comment (`ListUsers returns …`) gives the name of the function (`List users`), the comment goes to the
-  description. Without a comment the name is the handler's (`h.GetUser` → `Get user`).
+- **The name** (`ListUsers:`) comes from the doc comment: a short `@Summary` or first line is the name
+  itself; a Go-style comment (`ListUsers returns …`) gives the name of the function, the comment goes to
+  the description. Without a comment the name is the handler's (`h.GetUser` → `GetUser`).
 - **`handler:`** links the request to the code, so the request is recognised after its path changes.
 - **Query parameters** become `params` with a `null` default, so `ListUsers(page: 2)` sends `?page=2`
   and `ListUsers()` sends none.
@@ -156,10 +154,9 @@ AuthRequired = { headers = { Authorization = "Bearer ${Login().body.token}" } }
 ```
 
 ```routy title="api/orders/get.routy"
-// List orders
 // gin internal/router/router.go:31 → h.Orders.List
 // middleware: middleware.AuthRequired()
-GET /orders {
+ListOrders: GET /orders {
   handler: h.Orders.List
   headers { Authorization: "Bearer ${Login().body.token}" }
 }

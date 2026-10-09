@@ -24,6 +24,7 @@
 (argument name: (identifier) @variable.parameter)
 
 (flow name: (identifier) @function)
+(request name: (identifier) @function)
 
 ; Built-in functions before requests and flows: `uuid()` vs `Login()`.
 (call_expression function: (identifier) @function.builtin

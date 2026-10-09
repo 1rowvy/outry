@@ -94,6 +94,8 @@ struct ProjectInfo {
     files: Vec<String>,
     /// Метод каждого файла (для значков в дереве)
     methods: HashMap<String, String>,
+    /// Имена запросов и сценариев `*.routy` (подпись в дереве вместо имени файла)
+    names: HashMap<String, Vec<String>>,
 }
 
 /// Метод из строки запроса без полного разбора: файл с ошибкой тоже получает значок.
@@ -106,7 +108,13 @@ fn request_method(src: &str, routy: bool) -> String {
         .filter(|l| !l.is_empty() && !l.starts_with('#') && !l.starts_with("//"));
     let is_method = |w: &str| w.len() >= 2 && w.bytes().all(|b| b.is_ascii_uppercase());
     if routy {
-        let words: Vec<String> = lines.map(word).collect();
+        // `Login: POST /login` — метод после имени.
+        let words: Vec<String> = lines
+            .map(|l| match l.split_once(':') {
+                Some((name, rest)) if !name.contains(char::is_whitespace) => word(rest),
+                _ => word(l),
+            })
+            .collect();
         return match words.iter().find(|w| is_method(w)) {
             Some(m) => m.clone(),
             None if words.iter().any(|w| w == "flow") => "FLOW".into(),
@@ -121,6 +129,32 @@ fn request_method(src: &str, routy: bool) -> String {
         .unwrap_or_else(|| "GET".into())
 }
 
+/// Имена запросов и сценариев файла. Файл с ошибкой — по строкам `Name: METHOD …`.
+fn item_names(src: &str, file: &str) -> Vec<String> {
+    let stem = Path::new(file).file_stem().and_then(|s| s.to_str());
+    match routy_core::lang::parse::parse(src, stem) {
+        Ok(f) => f
+            .items
+            .iter()
+            .filter(|i| matches!(i, Item::Request(_) | Item::Flow(_)))
+            .filter_map(|i| i.name())
+            .map(String::from)
+            .collect(),
+        Err(_) => src
+            .lines()
+            .filter_map(|l| l.split_once(':'))
+            .filter(|(name, rest)| {
+                name.chars().next().is_some_and(char::is_uppercase)
+                    && name.chars().all(|c| c.is_alphanumeric() || c == '_')
+                    && rest
+                        .trim_start()
+                        .starts_with(|c: char| c.is_ascii_uppercase())
+            })
+            .map(|(name, _)| name.to_string())
+            .collect(),
+    }
+}
+
 fn project_info(p: &Project) -> CmdResult<ProjectInfo> {
     let exts = [discover::EXTENSION, discover::ROUTY_EXTENSION];
     let files: Vec<String> = discover::files(&p.root, &exts)
@@ -128,13 +162,15 @@ fn project_info(p: &Project) -> CmdResult<ProjectInfo> {
         .into_iter()
         .map(|f| f.to_string_lossy().replace('\\', "/"))
         .collect();
-    let methods = files
-        .iter()
-        .map(|f| {
-            let src = std::fs::read_to_string(p.root.join(f)).unwrap_or_default();
-            (f.clone(), request_method(&src, is_routy(f)))
-        })
-        .collect();
+    let mut methods = HashMap::new();
+    let mut names = HashMap::new();
+    for f in &files {
+        let src = std::fs::read_to_string(p.root.join(f)).unwrap_or_default();
+        methods.insert(f.clone(), request_method(&src, is_routy(f)));
+        if is_routy(f) {
+            names.insert(f.clone(), item_names(&src, f));
+        }
+    }
     Ok(ProjectInfo {
         root: p.root.clone(),
         id: p.id(),
@@ -143,6 +179,7 @@ fn project_info(p: &Project) -> CmdResult<ProjectInfo> {
         has_config: p.has_config(),
         files,
         methods,
+        names,
     })
 }
 

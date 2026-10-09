@@ -30,6 +30,7 @@
 (argument name: (identifier) @variable.parameter)
 
 (flow name: (identifier) @function)
+(request name: (identifier) @function)
 
 ; `Login()` — a request or flow; lower-case names are built-in functions.
 (call_expression function: (identifier) @function.call)

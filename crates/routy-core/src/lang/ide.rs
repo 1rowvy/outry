@@ -318,7 +318,12 @@ enum ItemKind {
 
 fn item_kind(text: &str, open: usize) -> ItemKind {
     let line = line_before(text, open).trim_start();
-    let first = line.split_whitespace().next().unwrap_or("");
+    let mut words = line.split_whitespace();
+    let mut first = words.next().unwrap_or("");
+    // `Login: POST /login {` — запрос с именем.
+    if first.len() > 1 && first.ends_with(':') {
+        first = words.next().unwrap_or("");
+    }
     if first == "flow" {
         ItemKind::Flow
     } else if first == "shape" {
@@ -368,9 +373,25 @@ pub fn complete(
 
     // Верхний уровень: методы и объявления.
     if opens.is_empty() && !in_interp {
+        // `Login: |` — после имени запроса только метод.
+        let named = before
+            .trim()
+            .strip_suffix(':')
+            .is_some_and(|n| !n.is_empty() && n.chars().all(|c| c.is_alphanumeric() || c == '_'));
+        if named {
+            for m in METHODS {
+                out.push(Completion::new(m, Kind::Keyword).snippet(format!("{m} /$1")));
+            }
+            return Some((start, out));
+        }
         if !line_start {
             return None;
         }
+        out.push(
+            Completion::new("request", Kind::Keyword)
+                .detail("named request")
+                .snippet("${1:Name}: ${2:GET} /$0"),
+        );
         for m in METHODS {
             out.push(Completion::new(m, Kind::Keyword).snippet(format!("{m} /$1")));
         }
@@ -856,9 +877,20 @@ pub fn symbol_at(ws: &Workspace, file: usize, offset: usize) -> Option<Symbol> {
         }
     };
 
-    for item in &src.file.items {
+    for (index, item) in src.file.items.iter().enumerate() {
         if !inside(item.span()) {
             continue;
+        }
+        // Имя в объявлении `Login: POST …` — тот же запрос, что и в вызове `Login()`.
+        if let Item::Request(Request {
+            name_span: Some(span),
+            ..
+        }) = item
+        {
+            consider(Symbol {
+                span: *span,
+                target: Target::Item(ItemRef { file, item: index }),
+            });
         }
         let mut shapes = Vec::new();
         visit_item(item, &mut |e| match &e.kind {
@@ -1143,6 +1175,14 @@ mod tests {
         ]);
         // Верх файла.
         assert!(labels("PO|", &w).contains(&"POST".into()));
+        // После имени запроса — только метод; поля внутри именованного запроса.
+        let l = labels("Health: |", &w);
+        assert!(
+            l.contains(&"GET".into()) && !l.contains(&"flow".into()),
+            "{l:?}"
+        );
+        let l = labels("Health: GET /x {\n  he|\n}", &w);
+        assert!(l.contains(&"headers".into()) && l.contains(&"expect".into()));
         // Поля запроса в начале строки.
         let l = labels("GET /x {\n  he|\n}", &w);
         assert!(l.contains(&"headers".into()) && l.contains(&"expect".into()));
@@ -1196,6 +1236,15 @@ mod tests {
 
         let login = w.resolve(&["Login".into()]).unwrap();
         assert_eq!(target("Login("), Some(Target::Item(login)));
+        // Имя в объявлении `Name:` — сам запрос.
+        let named = "Ping: GET /ping\n";
+        let w2 = ws(&[("ping.routy", named)]);
+        let pi = w2.file_index(Path::new("ping.routy")).unwrap();
+        let ping = w2.resolve(&["Ping".into()]).unwrap();
+        assert_eq!(
+            symbol_at(&w2, pi, 1).map(|s| s.target),
+            Some(Target::Item(ping))
+        );
         assert!(matches!(target("shop,"), Some(Target::Name(n, Binding::Let(_))) if n == "shop"));
         assert!(matches!(target("base }"), Some(Target::Name(n, Binding::Var)) if n == "base"));
         assert_eq!(target("body.token"), Some(Target::Member("body".into())));

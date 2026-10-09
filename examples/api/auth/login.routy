@@ -1,6 +1,5 @@
-// Login
 // httpbin echoes the request body back in the `json` field.
-POST /anything/login {
+Login: POST /anything/login {
   body { user, access_token: "demo-token" }
 
   expect {

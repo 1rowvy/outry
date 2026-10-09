@@ -759,7 +759,22 @@ fn fixed_text(src: &str, edits: &[&Edit]) -> std::result::Result<String, String>
         {
             continue;
         }
-        result.push_str(&out[pos..span.start]);
+        // Старый запрос с именем из комментария печатается как `Name: …`: строка-заголовок
+        // над ним больше не нужна.
+        match item {
+            crate::lang::ast::Item::Request(r) => match crate::lang::fmt::legacy_title(r) {
+                Some(title) => {
+                    let line_start = out[..title.start].rfind('\n').map_or(0, |i| i + 1);
+                    let line_end = out[title.end..]
+                        .find('\n')
+                        .map_or(out.len(), |i| title.end + i + 1);
+                    result.push_str(&out[pos..line_start]);
+                    result.push_str(&out[line_end.min(span.start)..span.start]);
+                }
+                None => result.push_str(&out[pos..span.start]),
+            },
+            _ => result.push_str(&out[pos..span.start]),
+        }
         result.push_str(printed.span().text(&pretty));
         pos = span.end;
     }

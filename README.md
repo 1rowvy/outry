@@ -27,8 +27,7 @@ call each other like functions, so a scenario is just code.
 ```routy
 // api/orders/create.routy
 
-// Create order
-POST /v1/orders {
+CreateOrder: POST /v1/orders {
   headers { Authorization: "Bearer ${Login().body.token}" }
   body { user_id: CreateUser().body.id, items: [{ sku: "BOOK-1", qty: 2 }] }
 
@@ -166,9 +165,8 @@ Or open the folder in the desktop app or VS Code. More: [Getting started](https:
 The smallest file is one line — `GET /health`. Everything else is added when needed:
 
 ```routy
-// Get order
-// The comment's first line is the name: GetOrder.
-GET /orders/{id} {
+// The name comes before the method; the comment is the description.
+GetOrder: GET /orders/{id} {
   query { expand: "items" }
   headers { X-Request-Id: uuid() }
 
@@ -197,7 +195,7 @@ flow Checkout {
 | Part | Rule |
 |------|------|
 | Request | `METHOD /path` is appended to `base`; `https://…` is used as is. `{id}` in the path is a parameter |
-| Name | The first line of the `//` comment above: `// Get order` → `GetOrder` |
+| Name | Before the method: `GetOrder: GET /orders/{id}`; the `//` comment above is the description |
 | Fields | `params`, `only: [dev]`, `confirm: true`, `timeout: 10s`, `cache: 30m`, `query`, `headers`, `body` / `form` / `multipart`, `poll`, `expect`, `save` |
 | Body | JSON5 with expressions: `{ name, role: "admin", id: CreateUser().body.id }` |
 | Values | Bare names are variables; `"${name}"` in strings; `uuid()`, `now()`, `randomInt(1, 10)` |

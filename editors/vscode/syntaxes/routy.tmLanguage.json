@@ -35,10 +35,16 @@
       ]
     },
     "request-line": {
-      "comment": "GET /users/{id} {  — method, then the path up to a block or the end of the line",
-      "begin": "^\\s*([A-Z]{2,})(?=\\s|$)",
+      "comment": "Login: GET /users/{id} {  — optional name, method, then the path up to a block or the end of the line",
+      "begin": "^\\s*(?:([\\p{L}_][\\p{L}\\p{N}_]*)(:)\\s+)?([A-Z]{2,})(?=\\s|$)",
       "beginCaptures": {
         "1": {
+          "name": "entity.name.function.routy"
+        },
+        "2": {
+          "name": "punctuation.separator.key-value.routy"
+        },
+        "3": {
           "name": "keyword.other.http-method.routy"
         }
       },

@@ -1,7 +1,6 @@
-// Me
 // The token comes from calling Login — it is sent once per run, however many
 // requests call it.
-GET /bearer {
+Me: GET /bearer {
   headers { Authorization: "Bearer ${Login().body.json.access_token}" }
 
   expect {
