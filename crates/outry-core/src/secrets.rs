@@ -1,10 +1,27 @@
 //! Секреты живут в системном хранилище паролей, а не в файлах репозитория.
 //! Ключ записи: `<project>/<env>/<name>`, сервис — `outry`.
 
-use std::collections::BTreeMap;
-use std::sync::Mutex;
+use std::collections::{BTreeMap, BTreeSet};
+use std::sync::{Mutex, OnceLock};
 
 use crate::error::Result;
+
+/// Первая ошибка доступа к системному хранилищу в этом процессе (нет D-Bus / Secret Service,
+/// например в WSL или headless CI). `get` в таком случае молча отвечает «нет секрета»,
+/// а CLI по этому значению объясняет, откуда взялись «undefined variable».
+static UNAVAILABLE: OnceLock<String> = OnceLock::new();
+/// Имена, которые искали в недоступном хранилище: для готовой команды в подсказке.
+static MISSED: Mutex<BTreeSet<String>> = Mutex::new(BTreeSet::new());
+
+/// Почему системное хранилище паролей недоступно, если к нему уже обращались и не смогли.
+pub fn unavailable() -> Option<&'static str> {
+    UNAVAILABLE.get().map(String::as_str)
+}
+
+/// Переменные, которые не нашлись из-за недоступного хранилища.
+pub fn missed() -> Vec<String> {
+    MISSED.lock().unwrap().iter().cloned().collect()
+}
 
 pub trait SecretStore: Send + Sync {
     fn get(&self, name: &str) -> Result<Option<String>>;
@@ -78,7 +95,11 @@ mod keyring_store {
                 Err(keyring::Error::NoEntry) => Ok(None),
                 // Нет D-Bus / Secret Service (например, headless CI) — считаем, что секрета нет,
                 // переменная придёт из `OUTRY_*` или будет ошибка «undefined variable».
-                Err(keyring::Error::PlatformFailure(_) | keyring::Error::NoStorageAccess(_)) => {
+                Err(
+                    e @ (keyring::Error::PlatformFailure(_) | keyring::Error::NoStorageAccess(_)),
+                ) => {
+                    let _ = super::UNAVAILABLE.set(e.to_string());
+                    super::MISSED.lock().unwrap().insert(name.to_string());
                     Ok(None)
                 }
                 Err(e) => Err(secret_err(e)),

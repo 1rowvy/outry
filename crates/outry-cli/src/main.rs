@@ -1080,7 +1080,54 @@ async fn run_all(
             }
         );
     }
+    if failed > 0 {
+        keyring_hint();
+    }
     failed == 0
+}
+
+/// Хранилище паролей недоступно — секреты из приложения и `outry secret set` здесь не видны.
+/// Без пояснения это выглядит как необъяснимое «undefined variable», поэтому печатаем
+/// готовую команду под текущий shell.
+fn keyring_hint() {
+    let Some(err) = outry_core::secrets::unavailable() else {
+        return;
+    };
+    let st = Style::stderr();
+    eprintln!(
+        "\n{} system keyring is unavailable ({err})",
+        st.yellow("note:")
+    );
+    if is_wsl() {
+        eprintln!(
+            "      WSL can't see secrets saved by the Windows app (Windows Credential Manager)"
+        );
+    }
+    let names = outry_core::secrets::missed();
+    if names.is_empty() {
+        eprintln!("      pass secrets as OUTRY_<NAME> environment variables instead");
+        return;
+    }
+    eprintln!("      pass them as environment variables instead:");
+    for name in names {
+        eprintln!("        {}", env_command(&name));
+    }
+}
+
+/// Команда, задающая `OUTRY_<NAME>` в текущем shell (fish — универсальная переменная).
+fn env_command(name: &str) -> String {
+    let var = outry_core::vars::process_env_name(name);
+    if std::env::var("SHELL").is_ok_and(|s| s.ends_with("/fish")) {
+        format!("set -Ux {var} '…'")
+    } else {
+        format!("export {var}='…'")
+    }
+}
+
+fn is_wsl() -> bool {
+    cfg!(target_os = "linux")
+        && std::fs::read_to_string("/proc/sys/kernel/osrelease")
+            .is_ok_and(|r| r.to_lowercase().contains("microsoft"))
 }
 
 fn mark(st: &Style, ok: bool) -> String {
@@ -1222,6 +1269,9 @@ fn print_vars(runner: &Runner, reveal: bool, json: bool) -> anyhow::Result<()> {
             st.dim(&format!("{source:9}"))
         );
     }
+    if list.iter().any(|v| v.value.is_none()) {
+        keyring_hint();
+    }
     Ok(())
 }
 
@@ -1236,16 +1286,30 @@ fn secret(cmd: SecretCmd) -> anyhow::Result<ExitCode> {
         bail!("this build has no system keyring support; use OUTRY_* environment variables");
     };
     if set {
-        if std::io::stdin().is_terminal() {
-            eprint!("value for {name} ({}/{env_name}): ", project.id());
-        }
-        let mut value = String::new();
-        std::io::stdin().read_to_string(&mut value)?;
+        // В терминале — одна строка без эха (read_to_string ждал бы Ctrl-D),
+        // из пайпа — всё содержимое.
+        let value = if std::io::stdin().is_terminal() {
+            rpassword::prompt_password(format!("value for {name} ({}/{env_name}): ", project.id()))?
+        } else {
+            let mut value = String::new();
+            std::io::stdin().read_to_string(&mut value)?;
+            value
+        };
         let value = value.trim_end_matches(['\r', '\n']);
         if value.is_empty() {
             bail!("empty value");
         }
-        store.set(&name, value)?;
+        store.set(&name, value).with_context(|| {
+            let wsl = if is_wsl() {
+                " (WSL usually has no Secret Service)"
+            } else {
+                ""
+            };
+            format!(
+                "cannot save to the system keyring{wsl}; set an environment variable instead: {}",
+                env_command(&name)
+            )
+        })?;
         eprintln!("saved {name} for {}/{env_name}", project.id());
     } else if store.delete(&name)? {
         eprintln!("removed {name} for {}/{env_name}", project.id());
