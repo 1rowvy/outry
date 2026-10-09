@@ -1,0 +1,599 @@
+---
+// Лендинг (/ и /ru/). Отдельная страница вне Starlight: свой макет, анимации и карта документации,
+// собранная из коллекции docs, чтобы ссылки не расходились с сайдбаром.
+import { getCollection } from 'astro:content';
+import logoRaw from '../assets/logo-dark.svg?raw';
+import { highlight } from './highlight';
+import { strings, type Lang } from './i18n';
+import './landing.css';
+
+interface Props {
+	lang: Lang;
+}
+
+const { lang } = Astro.props;
+const t = strings[lang];
+const base = import.meta.env.BASE_URL.replace(/\/?$/, '/');
+const prefix = lang === 'ru' ? 'ru/' : '';
+const href = (slug: string) => `${base}${prefix}${slug}/`;
+const other = lang === 'ru' ? base : `${base}ru/`;
+const version = '0.10.0';
+const logo = logoRaw.replace('fill="#ffffff"', 'fill="currentColor"');
+const md = (s: string) => s.replace(/`([^`]+)`/g, '<code>$1</code>');
+
+// Порядок как в сайдбаре astro.config.mjs.
+const groups = [
+	['getting-started', 'example', 'openapi', 'install'],
+	[
+		'guides/chains-and-assertions',
+		'guides/variables',
+		'guides/secrets',
+		'guides/ci',
+		'guides/import-go',
+		'guides/desktop-app',
+		'guides/editors',
+		'guides/request-format',
+	],
+	['reference/outry-format', 'reference/cli', 'reference/env-toml', 'reference/expressions'],
+];
+const entries = new Map((await getCollection('docs')).map((e) => [e.id, e.data]));
+const docGroups = groups.map((slugs, i) => ({
+	title: t.docs.groups[i],
+	items: slugs.map((slug) => {
+		const data = entries.get(prefix + slug) ?? entries.get(slug);
+		return { slug, title: data?.title ?? slug, description: data?.description ?? '' };
+	}),
+}));
+
+const install = 'curl -fsSL https://raw.githubusercontent.com/1rowvy/outry/master/install.sh | sh';
+
+// 01 — разметка частей запроса по строкам.
+const anatomySrc = `
+// Creates an order for the current user.
+CreateOrder: POST /v1/orders {
+  only: [dev, staging]
+
+  headers {
+    Authorization: "Bearer \${Login().body.token}"
+    Idempotency-Key: uuid()
+  }
+
+  body {
+    customer: CreateUser(name: "Ada").body.id,
+    items: [{ sku: "BOOK-1", qty: 2 }],
+  }
+
+  expect {
+    status == 201
+    body.total == 25
+    body matches Order
+  }
+
+  save order_id = body.id
+}`;
+const anatomyParts: Record<number, string> = {
+	1: 'name', 2: 'name', 3: 'only',
+	5: 'call', 6: 'call', 7: 'call', 8: 'call',
+	10: 'body', 11: 'body', 12: 'body', 13: 'body',
+	15: 'expect', 16: 'expect', 17: 'expect', 18: 'shape', 19: 'expect',
+	21: 'save',
+};
+const anatomy = highlight(anatomySrc, 'outry').replace(
+	/data-line="(\d+)"/g,
+	(m, n) => (anatomyParts[+n] ? `${m} data-part="${anatomyParts[+n]}"` : m),
+);
+
+// 02 — расхождение с Go.
+const goSrc = `
+package users
+
+type CreateUser struct {
+	@@field@@
+	Email    string \`json:"email"\`
+}
+
+func (h *Handler) Create(c *gin.Context) {
+	var in CreateUser
+	if err := c.ShouldBindJSON(&in); err != nil {
+		c.JSON(400, errBody(err))
+		return
+	}
+	c.JSON(201, h.svc.Create(in))
+}`;
+const goField = (s: string) => highlight(s, 'go').replace(/^<span class="ln" data-line="1">|<\/span>$/g, '');
+const goHtml = highlight(goSrc, 'go').replace(
+	'<span class="tk-pu">@</span><span class="tk-pu">@</span><span class="tk-id">field</span><span class="tk-pu">@</span><span class="tk-pu">@</span>',
+	`<span class="swap"><span class="v-old">${goField('Name     string `json:"name"`')}</span><span class="v-new">${goField('FullName string `json:"full_name"`')}</span></span>`,
+);
+const specSrc = `
+CreateUser: POST /v1/users {
+  handler: users.Create
+
+  body {
+    @@field@@
+    email: "ada@example.com",
+  }
+
+  expect {
+    status == 201
+    body matches User
+  }
+}`;
+const specField = (s: string) => highlight(s, 'outry').replace(/^<span class="ln" data-line="1">|<\/span>$/g, '');
+const specHtml = highlight(specSrc, 'outry').replace(
+	/<span class="tk-pu">@<\/span><span class="tk-pu">@<\/span><span class="tk-id">field<\/span><span class="tk-pu">@<\/span><span class="tk-pu">@<\/span>/,
+	`<span class="swap"><span class="v-old"><span class="squiggle">${specField('name: "Ada",')}</span></span><span class="v-new">${specField('full_name: "Ada",')}</span></span>`,
+);
+
+// 03 — сценарий и его трасса.
+const flowSrc = `
+// A user buys one item and pays.
+flow Checkout {
+  user  = CreateUser(name: "Ada")
+  order = CreateOrder(customer: user.body.id)
+  Pay(order: order.body.id)
+  WaitUntilPaid(id: order.body.id)
+
+  expect {
+    GetOrder(id: order.body.id).body.status == "paid"
+  }
+  save last_order = order.body.id
+}`;
+const flowHtml = highlight(flowSrc, 'outry');
+// [имя, метод/путь, статус, начало мс, длительность мс, отступ, из кеша]
+const trace: [string, string, string, number, number, number, boolean?][] = [
+	['Checkout', 'flow', '✓', 0, 2390, 0],
+	['CreateUser', 'POST /v1/users', '201', 0, 120, 1],
+	['Login', 'POST /auth/login', '200', 0, 84, 2],
+	['CreateOrder', 'POST /v1/orders', '201', 120, 160, 1],
+	['Login', 'POST /auth/login', '200', 120, 0, 2, true],
+	['Pay', 'POST /v1/orders/o_81f/pay', '202', 280, 95, 1],
+	['WaitUntilPaid', 'GET /v1/orders/o_81f', '200', 375, 1960, 1],
+	['GetOrder', 'GET /v1/orders/o_81f', '200', 2335, 55, 1],
+];
+const traceTotal = 2390;
+
+const ciSrc = `
+name: API tests
+on: [push, pull_request]
+
+jobs:
+  api:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: curl -fsSL https://raw.githubusercontent.com/1rowvy/outry/master/install.sh | sh
+      - run: outry check --format github
+      - run: outry run api --env ci --no-keyring --fail-fast
+        env:
+          OUTRY_TOKEN: \${{ secrets.API_TOKEN }}`;
+const ciHtml = highlight(ciSrc, 'yaml');
+
+const archNodes = t.arch.nodes.map(([title, sub], i) => ({ title, sub, x: i * 202, cx: i * 202 + 95 }));
+---
+
+<!doctype html>
+<html lang={lang} data-theme="dark">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<title>{t.htmlTitle}</title>
+		<meta name="description" content={t.description} />
+		<meta property="og:title" content={t.htmlTitle} />
+		<meta property="og:description" content={t.description} />
+		<link rel="icon" href={`${base}favicon.svg`} type="image/svg+xml" />
+		<link rel="alternate" hreflang="en" href={new URL(base, Astro.site)} />
+		<link rel="alternate" hreflang="ru" href={new URL(`${base}ru/`, Astro.site)} />
+		<link rel="preconnect" href="https://fonts.googleapis.com" />
+		<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+		<link
+			rel="stylesheet"
+			href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Space+Grotesk:wght@400;500;600;700&display=swap"
+		/>
+		<script is:inline>
+			// Та же настройка темы, что и в Starlight: документация и лендинг переключаются вместе.
+			try {
+				const stored = localStorage.getItem('starlight-theme');
+				const theme = stored || (matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
+				document.documentElement.dataset.theme = theme;
+			} catch {}
+		</script>
+	</head>
+	<body>
+		<header class="nav">
+			<div class="wrap nav-in">
+				<a class="brand" href={base + prefix} aria-label="Outry">
+					<span class="brand-logo" set:html={logo} />
+					<span>Outry</span>
+					<span class="ver">v{version}</span>
+				</a>
+				<nav class="nav-links">
+					<a href={href('getting-started')}>{t.nav.docs}</a>
+					<a href={href('reference/outry-format')}>{t.nav.format}</a>
+					<a href={href('reference/cli')}>{t.nav.cli}</a>
+					<a href="https://github.com/1rowvy/outry" class="gh">{t.nav.github}</a>
+					<a href={other} class="lang">{lang === 'ru' ? 'EN' : 'RU'}</a>
+					<button class="theme" type="button" aria-label="Toggle theme">
+						<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"
+							><circle cx="12" cy="12" r="5" fill="none" stroke="currentColor" stroke-width="2"></circle><path
+								d="M12 7a5 5 0 0 1 0 10z"
+								fill="currentColor"></path></svg
+						>
+					</button>
+				</nav>
+			</div>
+		</header>
+
+		<main>
+			<!-- HERO -->
+			<section class="hero">
+				<canvas class="field" aria-hidden="true"></canvas>
+				<div class="wrap hero-grid">
+					<div class="hero-copy">
+						<p class="eyebrow"><span class="pulse"></span>{t.hero.eyebrow}</p>
+						<h1>
+							<span>{t.hero.title[0]}</span>
+							<span class="outline">{t.hero.title[1]}</span>
+						</h1>
+						<p class="lead">{t.hero.lead}</p>
+						<div class="install" data-copy={install}>
+							<span class="prompt">$</span>
+							<code>{install}</code>
+							<button type="button" class="copy" data-label={t.hero.copy} data-done={t.hero.copied}>{t.hero.copy}</button>
+						</div>
+						<div class="actions">
+							<a class="btn primary" href={href('getting-started')}>{t.hero.start} <span aria-hidden="true">→</span></a>
+							<a class="btn" href={href('example')}>{t.hero.example}</a>
+						</div>
+					</div>
+
+					<div class="term hero-term" aria-label="outry run">
+						<div class="term-bar">
+							<i></i><i></i><i></i>
+							<span>~/shop-api — outry</span>
+						</div>
+						<pre class="term-body" data-typed><span class="line cmd" data-cmd="outry run api --env staging"><span class="ps">~/shop-api $</span> <span class="typed"></span><span class="caret"></span></span>
+<span class="line"><span class="ok">✓</span> <span class="dim">api/auth/</span>login.outry       <b>Login</b>          POST  <span class="st">200</span>  <span class="dim">84ms</span></span>
+<span class="line"><span class="ok">✓</span> <span class="dim">api/users/</span>create.outry     <b>CreateUser</b>     POST  <span class="st">201</span>  <span class="dim">41ms</span></span>
+<span class="line sub"><span class="ok">✓</span> status == 201</span>
+<span class="line sub"><span class="ok">✓</span> body matches User</span>
+<span class="line"><span class="ok">✓</span> <span class="dim">api/orders/</span>create.outry    <b>CreateOrder</b>    POST  <span class="st">201</span>  <span class="dim">57ms</span></span>
+<span class="line sub"><span class="ok">✓</span> body.total == 25</span>
+<span class="line"><span class="ok">✓</span> <span class="dim">api/orders/</span>wait-paid.outry <b>WaitUntilPaid</b>  GET   <span class="st">200</span>  <span class="dim">3 polls 2.1s</span></span>
+<span class="line"><span class="ok">✓</span> <span class="dim">api/flows/</span>checkout.outry   <b>Checkout</b>       flow  <span class="dim">5 requests 2.4s</span></span>
+<span class="line sum"><span class="ok">5 passed</span>, 0 failed <span class="dim">· 1 login, cached 4× · 2.6s</span></span></pre>
+					</div>
+				</div>
+
+				<div class="wrap stats">
+					{
+						t.stats.map(([n, label]) => (
+							<div class="stat rv">
+								<span class="stat-n">{n}</span>
+								<span class="stat-l">{label}</span>
+							</div>
+						))
+					}
+				</div>
+			</section>
+
+			<!-- 01 ANATOMY -->
+			<section class="sec" id="format">
+				<div class="wrap">
+					<header class="sec-head rv">
+						<p class="kicker">{t.anatomy.kicker}</p>
+						<h2>{t.anatomy.title}</h2>
+						<p class="sec-lead">{t.anatomy.lead}</p>
+					</header>
+					<div class="anatomy rv">
+						<div class="code-card">
+							<div class="code-tab"><span class="dot"></span>api/orders/create.outry</div>
+							<pre class="code" set:html={anatomy} />
+						</div>
+						<ol class="parts">
+							{
+								t.anatomy.parts.map(([id, title, text], i) => (
+									<li data-part={id} class={i === 0 ? 'on' : ''}>
+										<span class="idx">{String(i + 1).padStart(2, '0')}</span>
+										<div>
+											<strong>{title}</strong>
+											<p set:html={md(text)} />
+										</div>
+									</li>
+								))
+							}
+						</ol>
+					</div>
+				</div>
+			</section>
+
+			<!-- 02 DRIFT -->
+			<section class="sec alt" id="sync">
+				<div class="wrap">
+					<header class="sec-head rv">
+						<p class="kicker">{t.drift.kicker}</p>
+						<h2>{t.drift.title}</h2>
+						<p class="sec-lead">{t.drift.lead}</p>
+					</header>
+					<div class="drift rv" data-step="0">
+						<ol class="steps">
+							{t.drift.steps.map((s, i) => <li data-i={i + 1}><span>{i + 1}</span>{s}</li>)}
+						</ol>
+						<div class="drift-grid">
+							<div class="code-card go">
+								<div class="code-tab"><span class="dot"></span>{t.drift.codeTab}</div>
+								<pre class="code" set:html={goHtml} />
+							</div>
+							<div class="link" aria-hidden="true">
+								<svg viewBox="0 0 60 200" preserveAspectRatio="none"><path d="M0 100 H60" /></svg>
+								<span class="spark"></span>
+							</div>
+							<div class="code-card spec">
+								<div class="code-tab"><span class="dot"></span>{t.drift.specTab}</div>
+								<pre class="code" set:html={specHtml} />
+							</div>
+						</div>
+						<pre class="term drift-term"><span class="out s2"><span class="ps">$</span> outry check
+<span class="dim">api/v1/users/post.outry:5:5:</span> <span class="err">error:</span> required field `full_name` (string) is missing from body <span class="dim">← internal/api/users.go:4</span>
+<span class="dim">api/v1/users/post.outry:5:5:</span> <span class="err">error:</span> body field `name` is not in users.CreateUser <span class="dim">← internal/api/users.go:4</span>
+9 files, 2 environments, 12 Go routes: <span class="err">2 errors</span>, 0 warnings; 2 fixable with `outry import go --fix`</span><span class="out s3"><span class="ps">$</span> outry import go --fix
+<span class="warn">~</span> api/v1/users/post.outry  POST /v1/users  <span class="dim">internal/api/users.go:8</span>
+fixed 2 differences in 1 file
+<span class="ps">$</span> outry check
+9 files, 2 environments, 12 Go routes: <span class="ok">0 errors</span>, 0 warnings</span><span class="out s1"><span class="dim"># git diff internal/api/users.go</span>
+<span class="err">-	Name     string `json:"name"`</span>
+<span class="ok">+	FullName string `json:"full_name"`</span></span></pre>
+						<p class="routers">{t.drift.routers}</p>
+					</div>
+				</div>
+			</section>
+
+			<!-- 03 FLOW -->
+			<section class="sec" id="flows">
+				<div class="wrap">
+					<header class="sec-head rv">
+						<p class="kicker">{t.flow.kicker}</p>
+						<h2>{t.flow.title}</h2>
+						<p class="sec-lead">{t.flow.lead}</p>
+					</header>
+					<div class="flow rv">
+						<div class="code-card">
+							<div class="code-tab"><span class="dot"></span>api/flows/checkout.outry</div>
+							<pre class="code" set:html={flowHtml} />
+						</div>
+						<div class="trace">
+							<div class="trace-head">
+								<span>trace</span>
+								<span class="scale"><i>0</i><i>0.6s</i><i>1.2s</i><i>1.8s</i><i>2.4s</i></span>
+							</div>
+							{
+								trace.map(([name, req, status, start, dur, depth, cached], i) => (
+									<div
+										class:list={['row', { cached, root: depth === 0 }]}
+										style={`--s:${(start / traceTotal) * 100}%;--d:${Math.max((dur / traceTotal) * 100, 0.6)}%;--i:${i};--depth:${depth}`}
+									>
+										<div class="row-name">
+											<span class="st">{status}</span>
+											<b>{name}</b>
+											<span class="dim">{cached ? t.flow.cached : req}</span>
+										</div>
+										<div class="row-bar">
+											<span class:list={['bar', { poll: name === 'WaitUntilPaid' }]}>
+												{name === 'WaitUntilPaid' && <><i /><i /><i /></>}
+											</span>
+											<span class="ms">{cached ? '0ms' : dur >= 1000 ? `${(dur / 1000).toFixed(1)}s` : `${dur}ms`}</span>
+										</div>
+									</div>
+								))
+							}
+							<div class="trace-foot">
+								<span>{t.flow.poll}</span>
+								<span>
+									{t.flow.total} <b>2.39s</b> · 7 requests · 1 cookie jar
+								</span>
+							</div>
+						</div>
+					</div>
+				</div>
+			</section>
+
+			<!-- 04 ARCH -->
+			<section class="sec alt" id="architecture">
+				<div class="wrap">
+					<header class="sec-head rv">
+						<p class="kicker">{t.arch.kicker}</p>
+						<h2>{t.arch.title}</h2>
+						<p class="sec-lead">{t.arch.lead}</p>
+					</header>
+					<div class="arch rv">
+						<svg class="arch-svg" viewBox="-4 0 1006 400" role="img" aria-label={t.arch.title}>
+							<defs>
+								<pattern id="hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+									<line x1="0" y1="0" x2="0" y2="6" class="hatch"></line>
+								</pattern>
+							</defs>
+							{
+								archNodes.map((n, i) => (
+									<path id={`wire${i}`} class="wire" d={`M500 132 C500 220 ${n.cx} 210 ${n.cx} 292`} />
+								))
+							}
+							{
+								archNodes.map((n, i) => (
+									<>
+										<circle r="3.5" class="pkt">
+											<animateMotion dur="2.4s" begin={`${i * 0.37}s`} repeatCount="indefinite">
+												<mpath href={`#wire${i}`} />
+											</animateMotion>
+										</circle>
+										<circle r="2.5" class="pkt back">
+											<animateMotion dur="2.4s" begin={`${1.2 + i * 0.37}s`} repeatCount="indefinite" keyPoints="1;0" keyTimes="0;1" calcMode="linear">
+												<mpath href={`#wire${i}`} />
+											</animateMotion>
+										</circle>
+									</>
+								))
+							}
+							<rect x="290" y="24" width="420" height="108" rx="10" class="core-box"></rect>
+							<rect x="290" y="24" width="420" height="108" rx="10" fill="url(#hatch)" class="core-hatch"></rect>
+							<text x="500" y="72" class="core-t">{t.arch.core}</text>
+							<text x="500" y="102" class="core-s">{t.arch.coreSub}</text>
+							{
+								archNodes.map((n) => (
+									<g class="node">
+										<rect x={n.x} y="292" width="190" height="84" rx="8" />
+										<text x={n.cx} y="328" class="node-t">{n.title}</text>
+										<text x={n.cx} y="354" class="node-s">{n.sub}</text>
+									</g>
+								))
+							}
+						</svg>
+						<ul class="arch-list">
+							<li class="core-li"><b>{t.arch.core}</b><span>{t.arch.coreSub}</span></li>
+							{archNodes.map((n) => <li><b>{n.title}</b><span>{n.sub}</span></li>)}
+						</ul>
+					</div>
+				</div>
+			</section>
+
+			<!-- 05 VARS -->
+			<section class="sec" id="variables">
+				<div class="wrap">
+					<header class="sec-head rv">
+						<p class="kicker">{t.vars.kicker}</p>
+						<h2>{t.vars.title}</h2>
+						<p class="sec-lead" set:html={md(t.vars.lead)} />
+					</header>
+					<div class="vars rv">
+						<ol class="layers">
+							{
+								t.vars.layers.map(([name, note], i) => (
+									<li data-layer={i + 1}>
+										<span class="idx">{i + 1}</span>
+										<code>{name}</code>
+										<span class="note">{note}</span>
+									</li>
+								))
+							}
+						</ol>
+						<pre class="term vars-term"><span class="ps">$</span> outry vars -e dev
+<span class="dim">project shop-api · env dev</span>
+<span class="vrow" data-src="4">base     <span class="src">env.toml</span>   http://localhost:8080</span>
+<span class="vrow" data-src="5">token    <span class="src">keychain</span>   eyJ…(212 chars)</span>
+<span class="vrow" data-src="2">order_id <span class="src">saved</span>      o_81f</span>
+<span class="vrow" data-src="1">page     <span class="src">--var</span>      2</span>
+<span class="vrow" data-src="0">api_key  <span class="src err">missing</span>    not set: outry secret set api_key --env dev</span></pre>
+					</div>
+				</div>
+			</section>
+
+			<!-- 06 CI -->
+			<section class="sec alt" id="ci">
+				<div class="wrap">
+					<header class="sec-head rv">
+						<p class="kicker">{t.ci.kicker}</p>
+						<h2>{t.ci.title}</h2>
+						<p class="sec-lead">{t.ci.lead}</p>
+					</header>
+					<div class="ci rv">
+						<div class="code-card">
+							<div class="code-tab"><span class="dot"></span>.github/workflows/api.yml</div>
+							<pre class="code" set:html={ciHtml} />
+						</div>
+						<div class="pipeline">
+							<div class="job ok"><span class="tick"></span><b>outry check</b><span class="dim">syntax · calls · 3 envs · fmt · 18 Go routes</span><span class="t">0.4s</span></div>
+							<div class="job ok"><span class="tick"></span><b>outry run api --env ci</b><span class="dim">42 requests · 6 flows · 118 checks</span><span class="t">9.8s</span></div>
+							<div class="job fail">
+								<span class="tick"></span><b>annotation</b><span class="dim">api/orders/create.outry#L7</span><span class="t">PR</span>
+								<p class="annot"><span class="err">error</span> variable `api_key` is not defined in staging, prod</p>
+							</div>
+							<div class="exit">
+								<span><code>0</code> passed</span><span><code>1</code> failed</span><span><code>2</code> could not start</span>
+							</div>
+						</div>
+					</div>
+				</div>
+			</section>
+
+			<!-- 07 DOCS -->
+			<section class="sec" id="docs">
+				<div class="wrap">
+					<header class="sec-head rv">
+						<p class="kicker">{t.docs.kicker}</p>
+						<h2>{t.docs.title}</h2>
+						<p class="sec-lead">{t.docs.lead}</p>
+					</header>
+					<div class="docs-grid">
+						{
+							docGroups.map((g) => (
+								<div class="doc-col rv">
+									<h3>{g.title}</h3>
+									<ul>
+										{g.items.map((it) => (
+											<li>
+												<a href={href(it.slug)}>
+													<span class="doc-t">
+														{it.title}
+														<span class="arrow" aria-hidden="true">↗</span>
+													</span>
+													<span class="doc-d">{it.description}</span>
+												</a>
+											</li>
+										))}
+									</ul>
+								</div>
+							))
+						}
+						<div class="doc-col cli-col rv">
+							<h3>{t.docs.cli}</h3>
+							<dl class="cli">
+								{
+									t.docs.commands.map(([cmd, what]) => (
+										<>
+											<dt><code>{cmd}</code></dt>
+											<dd>{what}</dd>
+										</>
+									))
+								}
+							</dl>
+						</div>
+					</div>
+				</div>
+			</section>
+
+			<!-- CTA -->
+			<section class="cta">
+				<div class="wrap cta-in rv">
+					<span class="cta-logo" set:html={logo} />
+					<h2>{t.cta.title}</h2>
+					<p>{t.cta.lead}</p>
+					<div class="install" data-copy={install}>
+						<span class="prompt">$</span>
+						<code>{install}</code>
+						<button type="button" class="copy" data-label={t.hero.copy} data-done={t.hero.copied}>{t.hero.copy}</button>
+					</div>
+					<div class="actions">
+						<a class="btn primary" href={href('getting-started')}>{t.hero.start} <span aria-hidden="true">→</span></a>
+						<a class="btn" href={href('install')}>{lang === 'ru' ? 'Установка' : 'Install'}</a>
+					</div>
+				</div>
+			</section>
+		</main>
+
+		<footer class="foot">
+			<div class="wrap foot-in">
+				<span class="brand"><span class="brand-logo" set:html={logo} />Outry <span class="ver">v{version}</span></span>
+				<span class="dim">{t.footer.license}</span>
+				<nav>
+					<a href={href('getting-started')}>{t.footer.made}</a>
+					<a href="https://github.com/1rowvy/outry/releases">{t.footer.release}</a>
+					<a href="https://github.com/1rowvy/outry">GitHub</a>
+				</nav>
+			</div>
+		</footer>
+
+		<script>
+			import { start } from './landing';
+			start();
+		</script>
+	</body>
+</html>
