@@ -38,20 +38,35 @@ Exit code: `0` — everything passed, `1` — at least one request failed, `2` �
 
 ## `routy check`
 
-Check files without sending anything: syntax, and in `.routy` also names of called requests, their
-arguments, shapes, `schema()` files and call cycles. Exit code `1` if anything is wrong.
+Check the project without sending anything. Exit code `1` if there is an error.
 
 ```sh
-routy check <PATHS>... [--env <ENV>] [--var <NAME=VALUE>]... [--no-keyring]
+routy check [PATHS]... [--env <ENV>] [--var <NAME=VALUE>]... [--no-keyring]
+            [--no-fmt] [--go <DIR> | --no-go] [--format text|github]
 ```
 
-With `--env` it also checks what depends on the environment: calls of requests whose `only` excludes it,
-`only` lists with unknown environments, and variables that are defined nowhere in that environment
-(names captured by `save` somewhere in the project count as defined).
+Without paths (or with the path of the project itself, `routy check api`) it checks everything:
+
+- syntax, and in `.routy` names of called requests, their arguments, shapes, `schema()` files and call cycles;
+- every environment: calls of requests whose `only` excludes it, `only` lists with unknown environments, and
+  variables that are defined nowhere in it (names captured by `save` somewhere in the project count as
+  defined). The keychain is not read — a secret counts as defined when it is listed in `secrets`. The same
+  error in several environments is printed once;
+- formatting, as `routy fmt --check` (`--no-fmt` turns it off);
+- the Go code, as [`routy import go --check`](/routy/guides/import-go/), when a `go.mod` is found in the
+  project directory or above it, up to the repository root. `--go <DIR>` points to the service, `--no-go`
+  skips it.
+
+With paths only those files are checked, without Go. `--env` checks a single environment with its real
+variables — `--var`, `ROUTY_*`, `env.toml` and the keychain (`--no-keyring` turns it off).
+`--format github` prints GitHub Actions annotations.
 
 ```txt
-api/orders/create.routy:7:22: variable `api_key` is not defined in prod
-api/orders/create.routy:9:13: `Seed` is limited to dev, staging and cannot be called in prod
+api/orders/create.routy:1:1: error: not formatted (`routy fmt`)
+api/orders/create.routy:7:22: error: variable `api_key` is not defined in staging, prod
+api/orders/create.routy:9:13: error: `Seed` is limited to dev and cannot be called in prod
+main.go:42:1: error: route DELETE /orders/{id} has no request (`routy import go` creates api/orders/delete.routy)
+12 files, 3 environments, 18 Go routes: 4 errors, 0 warnings
 ```
 
 ## `routy fmt`

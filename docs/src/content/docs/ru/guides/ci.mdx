@@ -27,9 +27,7 @@ jobs:
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: Check request files
-        run: |
-          routy fmt --check api
-          routy check api --env ci --no-keyring
+        run: routy check api --format github
 
       - name: Run API tests
         run: routy run api --env ci --no-keyring --fail-fast
@@ -59,18 +57,23 @@ routy run api --json > results.jsonl
 
 ## Проверка без отправки
 
-`routy check` читает все файлы без отправки запросов — быстрый шаг линтинга. В `.routy` он проверяет ещё
-имена вызываемых запросов, их аргументы, формы и циклы вызовов. С `--env` — то, что зависит от окружения:
-запросы, которым `only` его запрещает, и переменные, которых в нём нет:
+`routy check` проверяет весь проект без отправки запросов — один быстрый шаг линтинга: синтаксис, имена
+вызываемых запросов, их аргументы, формы и циклы вызовов, каждое окружение (запросы, которым `only` его
+запрещает, переменные, которых в нём нет), формат и — если выше проекта есть `go.mod` — роуты в Go-коде
+(как `routy import go --check`):
 
 ```sh
-routy check api
-routy check api --env ci
+routy check                    # проект, найденный от текущего каталога
+routy check api --env ci       # одно окружение, секреты из хранилища паролей / ROUTY_*
+routy check --format github    # аннотации прямо в диффе PR
 ```
 
 ```txt
-api/orders/create.routy:7:22: variable `api_key` is not defined in ci
-api/orders/create.routy:9:13: `Seed` is limited to dev and cannot be called in ci
+api/orders/create.routy:1:1: error: not formatted (`routy fmt`)
+api/orders/create.routy:7:22: error: variable `api_key` is not defined in staging, prod
+api/orders/create.routy:9:13: error: `Seed` is limited to dev and cannot be called in prod
+main.go:42:1: error: route DELETE /orders/{id} has no request (`routy import go` creates api/orders/delete.routy)
+12 files, 3 environments, 18 Go routes: 4 errors, 0 warnings
 ```
 
-`routy fmt --check api` падает, если файл не в каноническом виде; `routy fmt api` исправляет.
+Подробности и флаги: [`routy check`](/routy/ru/reference/cli/#routy-check).

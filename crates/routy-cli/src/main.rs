@@ -2,6 +2,7 @@ mod lsp;
 mod notifier;
 mod update;
 
+use std::collections::BTreeMap;
 use std::io::{IsTerminal, Read};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -12,7 +13,7 @@ use clap::{CommandFactory, Parser, Subcommand};
 use routy_core::expr::AssertOutcome;
 use routy_core::lang::ast::Item;
 use routy_core::lang::exec::{CallTrace, FlowOutcome, Outcome, Run};
-use routy_core::lang::{ItemRef, Workspace};
+use routy_core::lang::{Diagnostic, ItemRef, Workspace};
 use routy_core::runner::{Options, RunOutcome};
 use routy_core::vars::{self, Source};
 use routy_core::{Project, Runner, discover};
@@ -63,20 +64,11 @@ enum Cmd {
         #[arg(long)]
         yes: bool,
     },
-    /// Проверить файлы без отправки: синтаксис, а в *.routy — имена вызовов, аргументы, формы, циклы.
-    /// С --env ещё и окружение: вызовы запросов, закрытых `only`, и недостающие переменные.
-    Check {
-        #[arg(required = true)]
-        paths: Vec<PathBuf>,
-        #[command(flatten)]
-        env: EnvArgs,
-        /// Считать переменную заданной: --var token=x (можно несколько раз)
-        #[arg(long = "var", value_name = "NAME=VALUE", value_parser = parse_kv)]
-        vars: Vec<(String, String)>,
-        /// Не обращаться к системному хранилищу паролей (секреты только из ROUTY_*)
-        #[arg(long)]
-        no_keyring: bool,
-    },
+    /// Проверить проект без отправки запросов. Без путей — весь проект: синтаксис, имена вызовов,
+    /// аргументы, формы, циклы; каждое окружение (вызовы, закрытые `only`, недостающие переменные);
+    /// формат (`routy fmt`); расхождения с Go-кодом (`routy import go --check`), если выше есть go.mod.
+    /// С путями — только эти файлы, без Go.
+    Check(CheckArgs),
     /// Привести *.routy к одному виду (как gofmt): отступы, порядок полей, кавычки, переносы.
     /// Комментарии сохраняются
     Fmt {
@@ -234,6 +226,38 @@ enum ImportFormat {
 }
 
 #[derive(clap::Args)]
+struct CheckArgs {
+    paths: Vec<PathBuf>,
+    #[command(flatten)]
+    env: EnvArgs,
+    /// Считать переменную заданной: --var token=x (можно несколько раз)
+    #[arg(long = "var", value_name = "NAME=VALUE", value_parser = parse_kv)]
+    vars: Vec<(String, String)>,
+    /// Не обращаться к системному хранилищу паролей (секреты только из ROUTY_*). Без --env
+    /// хранилище не читается: секрет считается заданным, если он объявлен в `secrets`
+    #[arg(long)]
+    no_keyring: bool,
+    /// Не проверять формат
+    #[arg(long)]
+    no_fmt: bool,
+    /// Каталог Go-сервиса (по умолчанию — где go.mod, вверх от проекта до .git)
+    #[arg(long, value_name = "DIR", conflicts_with = "no_go")]
+    go: Option<PathBuf>,
+    /// Не сверять с Go-кодом
+    #[arg(long)]
+    no_go: bool,
+    /// Формат вывода: text, github (аннотации GitHub Actions)
+    #[arg(long, value_enum, default_value_t = CheckFormat::Text)]
+    format: CheckFormat,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+enum CheckFormat {
+    Text,
+    Github,
+}
+
+#[derive(clap::Args)]
 struct EnvArgs {
     /// Окружение из env.toml (по умолчанию — `default` из конфига)
     #[arg(short, long)]
@@ -330,66 +354,7 @@ fn real_main(cmd: Cmd) -> anyhow::Result<ExitCode> {
                 ExitCode::FAILURE
             })
         }
-        Cmd::Check {
-            paths,
-            env,
-            vars,
-            no_keyring,
-        } => {
-            let mut ok = true;
-            let targets = expand(&paths)?;
-            let mut routy_files = Vec::new();
-            for t in &targets {
-                match t {
-                    Target::Http(f) => {
-                        let src =
-                            std::fs::read_to_string(f).with_context(|| f.display().to_string())?;
-                        if let Err(e) = routy_core::parse(&src) {
-                            eprintln!("{}: {e}", f.display());
-                            ok = false;
-                        }
-                    }
-                    Target::Routy(f, _) => routy_files.push(f.clone()),
-                    Target::Name(n) => {
-                        bail!("`routy check` takes files and directories, got `{n}`")
-                    }
-                }
-            }
-            if !routy_files.is_empty() {
-                let project = find_project(env.project.as_deref(), &routy_files[0])?;
-                let (ws, files) = workspace_with(&project, &routy_files)?;
-                let wanted: Vec<PathBuf> = files.iter().map(|f| ws.root.join(f)).collect();
-                let cwd = std::env::current_dir().unwrap_or_default();
-                let mut diagnostics = ws.check();
-                if let Some(name) = &env.env {
-                    let envs = project.env_names();
-                    let opts = Options {
-                        use_keyring: !no_keyring,
-                        ..Options::default()
-                    };
-                    let mut runner = Runner::new(project, Some(name), opts)?;
-                    runner.vars.overrides.extend(vars);
-                    let mut has = |n: &str| matches!(runner.vars.get(n), Ok(Some(_)));
-                    diagnostics.extend(ws.check_env(name, &envs, &mut has));
-                } else if !vars.is_empty() {
-                    bail!("--var only makes sense with --env");
-                }
-                for mut d in diagnostics {
-                    if wanted.contains(&d.path) {
-                        if let Ok(rel) = d.path.strip_prefix(&cwd) {
-                            d.path = rel.to_path_buf();
-                        }
-                        eprintln!("{d}");
-                        ok = false;
-                    }
-                }
-            }
-            Ok(if ok {
-                ExitCode::SUCCESS
-            } else {
-                ExitCode::FAILURE
-            })
-        }
+        Cmd::Check(args) => check(args),
         Cmd::Vars {
             env,
             vars,
@@ -461,6 +426,276 @@ enum Target {
 fn is_routy(p: &Path) -> bool {
     p.extension()
         .is_some_and(|e| e == discover::ROUTY_EXTENSION)
+}
+
+/// `routy check`: всё, что проверяется без отправки запросов, одним списком.
+fn check(args: CheckArgs) -> anyhow::Result<ExitCode> {
+    let CheckArgs {
+        paths,
+        env,
+        vars,
+        no_keyring,
+        no_fmt,
+        go,
+        no_go,
+        format,
+    } = args;
+    let project = find_project(env.project.as_deref(), first_existing(&paths))?;
+    // Весь проект: без путей или с путём к нему самому (`routy check api`).
+    let root = std::fs::canonicalize(&project.root).ok();
+    let whole = paths.iter().all(|p| std::fs::canonicalize(p).ok() == root);
+    let targets = if whole {
+        let exts = [discover::EXTENSION, discover::ROUTY_EXTENSION];
+        let found = discover::files(&project.root, &exts)
+            .with_context(|| project.root.display().to_string())?;
+        found
+            .into_iter()
+            .map(|f| {
+                let p = project.root.join(f);
+                if is_routy(&p) {
+                    Target::Routy(p, None)
+                } else {
+                    Target::Http(p)
+                }
+            })
+            .collect()
+    } else {
+        expand(&paths)?
+    };
+    let cwd = std::env::current_dir().unwrap_or_default();
+    let rel = |p: &Path| relative(p, &cwd).display().to_string().replace('\\', "/");
+    let error = |file: String, line, col, message: String| ImportDiag {
+        file,
+        line,
+        col,
+        error: true,
+        message,
+        go: None,
+    };
+
+    let mut found = Vec::new();
+    let mut routy_files = Vec::new();
+    for t in &targets {
+        match t {
+            Target::Http(f) => {
+                let src = std::fs::read_to_string(f).with_context(|| f.display().to_string())?;
+                if let Err(e) = routy_core::parse(&src) {
+                    found.push(error(rel(f), 1, 1, e.to_string()));
+                }
+            }
+            Target::Routy(f, _) => routy_files.push(f.clone()),
+            Target::Name(n) => bail!("`routy check` takes files and directories, got `{n}`"),
+        }
+    }
+
+    let mut env_count = 0;
+    if !routy_files.is_empty() {
+        let (ws, files) = workspace_with(&project, &routy_files)?;
+        let wanted: Vec<PathBuf> = files.iter().map(|f| ws.root.join(f)).collect();
+        let mut diagnostics = ws.check();
+        let envs = project.env_names();
+        if let Some(name) = &env.env {
+            let opts = Options {
+                use_keyring: !no_keyring,
+                ..Options::default()
+            };
+            let mut runner = Runner::new(project.clone(), Some(name), opts)?;
+            runner.vars.overrides.extend(vars);
+            let mut has = |n: &str| matches!(runner.vars.get(n), Ok(Some(_)));
+            diagnostics.extend(ws.check_env(name, &envs, &mut has));
+            env_count = 1;
+        } else {
+            // Все окружения. Хранилище паролей не читается (в CI его нет): объявленный в `secrets`
+            // секрет считается заданным. Одна и та же ошибка в разных окружениях — одной строкой.
+            let names = if envs.is_empty() {
+                vec![project.resolve_env(None)?]
+            } else {
+                envs.clone()
+            };
+            let mut merged: BTreeMap<(PathBuf, usize, usize, String), Vec<&str>> = BTreeMap::new();
+            for name in &names {
+                let opts = Options {
+                    use_keyring: false,
+                    ..Options::default()
+                };
+                let mut runner = Runner::new(project.clone(), Some(name), opts)?;
+                runner.vars.overrides.extend(vars.iter().cloned());
+                let secrets = &project.config.secrets;
+                let mut has = |n: &str| {
+                    secrets.iter().any(|s| s == n) || matches!(runner.vars.get(n), Ok(Some(_)))
+                };
+                for d in ws.check_env(name, &envs, &mut has) {
+                    let key = (d.path, d.line, d.col, env_generic(&d.msg, name));
+                    merged.entry(key).or_default().push(name);
+                }
+            }
+            for ((path, line, col, msg), in_envs) in merged {
+                let msg = msg.replace(ENVS, &in_envs.join(", "));
+                diagnostics.push(Diagnostic {
+                    path,
+                    line,
+                    col,
+                    msg,
+                });
+            }
+            env_count = names.len();
+        }
+        for d in diagnostics {
+            if wanted.contains(&d.path) {
+                found.push(error(rel(&d.path), d.line, d.col, d.msg));
+            }
+        }
+        if !no_fmt {
+            for f in &routy_files {
+                let src = std::fs::read_to_string(f).with_context(|| f.display().to_string())?;
+                // Синтаксические ошибки уже в списке выше.
+                if routy_core::lang::fmt::format(&src).is_ok_and(|out| out != src) {
+                    found.push(error(rel(f), 1, 1, "not formatted (`routy fmt`)".into()));
+                }
+            }
+        }
+    }
+
+    let go_dir = match go {
+        Some(dir) => Some(dir),
+        None if whole && !no_go && project.has_config() => go_module(&project.root),
+        None => None,
+    };
+    let mut loose = Vec::new();
+    let mut go_summary = String::new();
+    let mut fixable = 0;
+    if let Some(dir) = &go_dir {
+        use routy_core::import;
+        let plan = import::plan_go(dir, &project.root, &[], import::DEFAULT_BASE)?;
+        let shown = |p: &Path| rel(&project.root.join(p));
+        let go = |p: &Path| rel(&dir.join(p));
+        found.extend(import_diagnostics(&plan, &shown, &go));
+        loose = plan.warnings.clone();
+        fixable = plan.changes().filter(|c| c.fixable).count();
+        go_summary = format!(
+            ", {}",
+            count(plan.new.len() + plan.existing.len(), "Go route")
+        );
+    }
+
+    found.sort_by(|a, b| (&a.file, a.line, a.col).cmp(&(&b.file, b.line, b.col)));
+    let errors = found.iter().filter(|d| d.error).count();
+    let warnings = found.len() - errors + loose.len();
+    match format {
+        CheckFormat::Github => {
+            print_github(&found, "routy check");
+            for w in &loose {
+                println!("::warning title=routy check::{}", w.replace('\n', "%0A"));
+            }
+        }
+        CheckFormat::Text => {
+            let st = Style::stderr();
+            for d in &found {
+                let sev = if d.error {
+                    st.red("error")
+                } else {
+                    st.yellow("warning")
+                };
+                let mut line = format!("{}:{}:{}: {sev}: {}", d.file, d.line, d.col, d.message);
+                if let Some(go) = &d.go {
+                    line.push_str(&st.dim(&format!("  ← {go}")));
+                }
+                eprintln!("{line}");
+            }
+            for w in &loose {
+                eprintln!("{} {w}", st.yellow("warning:"));
+            }
+            let mut summary = format!(
+                "{}, {}{go_summary}: {}, {}",
+                count(targets.len(), "file"),
+                count(env_count, "environment"),
+                count(errors, "error"),
+                count(warnings, "warning")
+            );
+            if fixable > 0 {
+                summary.push_str(&format!("; {fixable} fixable with `routy import go --fix`"));
+            }
+            eprintln!(
+                "{}",
+                if errors > 0 {
+                    summary
+                } else {
+                    st.green(&summary)
+                }
+            );
+        }
+    }
+    Ok(if errors > 0 {
+        ExitCode::FAILURE
+    } else {
+        ExitCode::SUCCESS
+    })
+}
+
+fn count(n: usize, what: &str) -> String {
+    if n == 1 {
+        format!("1 {what}")
+    } else {
+        format!("{n} {what}s")
+    }
+}
+
+/// Подстановка вместо имён окружений в сообщении `check_env`.
+const ENVS: &str = "{envs}";
+
+/// `in dev` → `in {envs}`, чтобы одинаковые ошибки разных окружений склеились.
+fn env_generic(msg: &str, env: &str) -> String {
+    let pat = format!("in {env}");
+    let mut out = String::new();
+    let mut rest = msg;
+    while let Some(i) = rest.find(&pat) {
+        let end = i + pat.len();
+        let word_ends = rest[end..]
+            .chars()
+            .next()
+            .is_none_or(|c| !(c.is_alphanumeric() || c == '_' || c == '-'));
+        out.push_str(&rest[..i]);
+        out.push_str(if word_ends { "in {envs}" } else { &pat });
+        rest = &rest[end..];
+    }
+    out.push_str(rest);
+    out
+}
+
+/// `path` относительно `base`, с `..`, если он выше; не получилось — как есть.
+fn relative(path: &Path, base: &Path) -> PathBuf {
+    if let Ok(rel) = path.strip_prefix(base) {
+        return rel.to_path_buf();
+    }
+    if !path.is_absolute() {
+        return path.to_path_buf();
+    }
+    let common = path
+        .components()
+        .zip(base.components())
+        .take_while(|(a, b)| a == b)
+        .count();
+    if common == 0 {
+        return path.to_path_buf();
+    }
+    let up = base.components().count() - common;
+    let mut out: PathBuf = std::iter::repeat_n("..", up).collect();
+    out.extend(path.components().skip(common));
+    out
+}
+
+/// Каталог с go.mod: проект и выше, до корня репозитория.
+fn go_module(project_root: &Path) -> Option<PathBuf> {
+    let root = std::fs::canonicalize(project_root).ok()?;
+    for dir in root.ancestors() {
+        if dir.join("go.mod").is_file() {
+            return Some(dir.to_path_buf());
+        }
+        if dir.join(".git").exists() {
+            break;
+        }
+    }
+    None
 }
 
 /// Каталоги → все *.http и *.routy внутри; файлы — как есть, в заданном порядке.
@@ -1057,7 +1292,7 @@ fn import(cmd: ImportCmd) -> anyhow::Result<ExitCode> {
         match format {
             ImportFormat::Json => println!("{}", serde_json::to_string_pretty(&plan)?),
             ImportFormat::Github => {
-                print_github(&diags);
+                print_github(&diags, "routy import go");
                 for w in &plan.warnings {
                     println!(
                         "::warning title=routy import go::{}",
@@ -1098,7 +1333,7 @@ fn import(cmd: ImportCmd) -> anyhow::Result<ExitCode> {
         return Ok(ExitCode::SUCCESS);
     }
     if format == ImportFormat::Github {
-        print_github(&import_diagnostics(&plan, &shown, &go));
+        print_github(&import_diagnostics(&plan, &shown, &go), "routy import go");
         return Ok(ExitCode::SUCCESS);
     }
 
@@ -1342,7 +1577,7 @@ fn print_check(plan: &routy_core::import::Plan, diags: &[ImportDiag]) {
 }
 
 /// Аннотации GitHub Actions: `::error file=…,line=…::текст`.
-fn print_github(diags: &[ImportDiag]) {
+fn print_github(diags: &[ImportDiag], title: &str) {
     fn data(s: &str) -> String {
         s.replace('%', "%25")
             .replace('\r', "%0D")
@@ -1357,7 +1592,7 @@ fn print_github(diags: &[ImportDiag]) {
             message.push_str(&format!(" ({go})"));
         }
         println!(
-            "::{} file={},line={},col={},title=routy import go::{}",
+            "::{} file={},line={},col={},title={title}::{}",
             if d.error { "error" } else { "warning" },
             prop(&d.file),
             d.line,
@@ -1417,5 +1652,48 @@ impl Style {
     }
     fn dim(&self, s: &str) -> String {
         self.paint("2", s)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn env_generic_replaces_whole_names() {
+        assert_eq!(
+            env_generic("variable `x` is not defined in dev", "dev"),
+            "variable `x` is not defined in {envs}"
+        );
+        assert_eq!(
+            env_generic(
+                "`base` is not defined in dev (paths are appended to it)",
+                "dev"
+            ),
+            "`base` is not defined in {envs} (paths are appended to it)"
+        );
+        assert_eq!(
+            env_generic("not defined in development", "dev"),
+            "not defined in development"
+        );
+    }
+
+    // Абсолютные пути в Windows начинаются с диска.
+    #[cfg(unix)]
+    #[test]
+    fn relative_goes_up() {
+        let base = Path::new("/repo/api");
+        assert_eq!(
+            relative(Path::new("/repo/api/a.routy"), base),
+            Path::new("a.routy")
+        );
+        assert_eq!(
+            relative(Path::new("/repo/main.go"), base),
+            Path::new("../main.go")
+        );
+        assert_eq!(
+            relative(Path::new("api/a.routy"), base),
+            Path::new("api/a.routy")
+        );
     }
 }

@@ -226,9 +226,7 @@ In the app, use **Add secret** at the bottom of the sidebar. In CI, set `ROUTY_T
     echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
 - name: Lint request files
-  run: |
-    routy fmt --check api
-    routy check api --env ci --no-keyring
+  run: routy check api --format github
 
 - name: Run API tests
   run: routy run api --env ci --no-keyring --fail-fast
@@ -252,8 +250,12 @@ routy run <PATHS|NAMES>...             # send requests; folders run alphabetical
     --fresh                            #   ignore values saved by previous runs
     --no-keyring                       #   secrets only from ROUTY_*
     --yes                              #   send `confirm: true` requests without asking
-routy check <PATHS>... [--env ENV]     # syntax, names, arguments, shapes, cycles; with --env also
-                                       #   `only` and missing variables. Nothing is sent
+routy check [PATHS]...                 # nothing is sent. Without paths — the whole project: syntax,
+                                       #   names, arguments, shapes, cycles, every environment (`only`,
+                                       #   missing variables), formatting, Go routes if there is a go.mod
+    -e, --env <ENV>                    #   one environment, with keychain and ROUTY_* values
+    --no-fmt, --no-go, --go <DIR>      #   skip formatting / Go, or point to the Go service
+    --format github                    #   GitHub Actions annotations
 routy fmt [PATHS]... [--check]         # canonical style for *.routy, like gofmt
 routy convert [PATHS]... [--rm]        # *.http → *.routy
 routy vars [-e ENV] [--reveal]         # final variable values and their sources

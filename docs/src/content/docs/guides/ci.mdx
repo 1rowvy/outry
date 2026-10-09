@@ -27,9 +27,7 @@ jobs:
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: Check request files
-        run: |
-          routy fmt --check api
-          routy check api --env ci --no-keyring
+        run: routy check api --format github
 
       - name: Run API tests
         run: routy run api --env ci --no-keyring --fail-fast
@@ -59,18 +57,23 @@ A flow's `outcome` has `"kind":"flow"` with `checks`, `calls`, `saved` and `erro
 
 ## Lint without sending
 
-`routy check` reads every file without sending requests — a fast lint step. In `.routy` it also checks
-names of called requests, their arguments, shapes and call cycles. With `--env` it checks what depends
-on the environment: requests whose `only` excludes it, and variables that are not defined in it:
+`routy check` checks the whole project without sending requests — one fast lint step: syntax, names of
+called requests, their arguments, shapes and call cycles, every environment (requests whose `only`
+excludes it, variables that are not defined in it), formatting, and — if there is a `go.mod` above the
+project — routes in the Go code (as `routy import go --check`):
 
 ```sh
-routy check api
-routy check api --env ci
+routy check                    # the project found from the current directory
+routy check api --env ci       # one environment, secrets from the keychain / ROUTY_*
+routy check --format github    # annotations on the PR diff
 ```
 
 ```txt
-api/orders/create.routy:7:22: variable `api_key` is not defined in ci
-api/orders/create.routy:9:13: `Seed` is limited to dev and cannot be called in ci
+api/orders/create.routy:1:1: error: not formatted (`routy fmt`)
+api/orders/create.routy:7:22: error: variable `api_key` is not defined in staging, prod
+api/orders/create.routy:9:13: error: `Seed` is limited to dev and cannot be called in prod
+main.go:42:1: error: route DELETE /orders/{id} has no request (`routy import go` creates api/orders/delete.routy)
+12 files, 3 environments, 18 Go routes: 4 errors, 0 warnings
 ```
 
-`routy fmt --check api` fails when a file is not in the canonical style; `routy fmt api` fixes it.
+Details and flags: [`routy check`](/routy/reference/cli/#routy-check).
