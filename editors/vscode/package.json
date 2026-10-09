@@ -2,7 +2,7 @@
   "name": "outry-vscode",
   "displayName": "Outry API Client",
   "description": "Executable API specs in your repo: send .outry requests, check responses, keep them in sync with your Go routes.",
-  "version": "0.9.0",
+  "version": "0.10.0",
   "publisher": "outry",
   "license": "MIT",
   "icon": "media/icon.png",
