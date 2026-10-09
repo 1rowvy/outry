@@ -609,6 +609,87 @@ func listItems(c *gin.Context) {
 }
 
 #[test]
+fn response_from_layered_service() {
+    // handler.Get → service.Get → model.Order: метод сервиса называется так же, как обработчик.
+    let dir = TempDir::new("layered");
+    dir.write(
+        "internal/model/models.go",
+        r#"package model
+
+type Order struct {
+	ID   int    `json:"id"`
+	Note *string `json:"note,omitempty"`
+}
+"#,
+    );
+    dir.write(
+        "internal/service/order.go",
+        r#"package service
+
+import (
+	"context"
+	"example.com/internal/model"
+)
+
+type OrderService struct{}
+
+func (s *OrderService) Get(ctx context.Context, id int) (*model.Order, error) {
+	return nil, nil
+}
+
+func (s *OrderService) List(ctx context.Context) ([]model.Order, error) {
+	return nil, nil
+}
+"#,
+    );
+    dir.write(
+        "internal/handler/order.go",
+        r#"package handler
+
+import (
+	"net/http"
+	"github.com/gin-gonic/gin"
+	"example.com/internal/service"
+)
+
+type OrderHandler struct {
+	orders *service.OrderService
+}
+
+func (h *OrderHandler) Get(c *gin.Context) {
+	o, err := h.orders.Get(c.Request.Context(), 1)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
+		return
+	}
+	c.JSON(http.StatusOK, o)
+}
+
+func (h *OrderHandler) List(c *gin.Context) {
+	list, _ := h.orders.List(c.Request.Context())
+	c.JSON(http.StatusOK, list)
+}
+
+func Register(r *gin.Engine, h *OrderHandler) {
+	r.GET("/orders/:id", h.Get)
+	r.GET("/orders", h.List)
+}
+"#,
+    );
+    let s = scan(&dir);
+    let shape = |path: &str| {
+        let r = s.routes.iter().find(|r| r.path == path);
+        let r = r.unwrap_or_else(|| panic!("{:?}", routes(&s)));
+        r.info.response.as_ref().map(|r| r.shape.clone())
+    };
+    assert_eq!(shape("/orders/{{id}}").as_deref(), Some("Order"));
+    assert_eq!(shape("/orders").as_deref(), Some("[Order]"));
+    assert_eq!(s.shapes.len(), 1);
+    assert_eq!(s.shapes[0].go_type, "model.Order");
+    assert_eq!(s.shapes[0].shape, "{ id: integer, note?: string }");
+}
+
+#[test]
 fn compares_requests_with_code() {
     let dir = TempDir::new("diff");
     dir.write(

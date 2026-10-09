@@ -140,18 +140,65 @@ impl<'a> Describer<'a> {
         name: &str,
         pkg: Option<&str>,
     ) -> Option<(usize, Node<'a>, Option<Node<'a>>)> {
+        let (f, decl) = self.pick(file, name, pkg, false)?;
+        Some((f, decl.child_by_field_name("body")?, Some(decl)))
+    }
+
+    /// Объявление функции или метода `name` (см. `func`); `returns` — только те, что что-то
+    /// возвращают: `h.svc.Get(…)` в обработчике `Get` — метод сервиса, а не сам обработчик.
+    fn pick(
+        &self,
+        file: usize,
+        name: &str,
+        pkg: Option<&str>,
+        returns: bool,
+    ) -> Option<(usize, Node<'a>)> {
         let own = &self.files[file].package;
-        let candidates: Vec<&Func> = self.funcs.iter().filter(|f| f.name == name).collect();
-        let pick = pkg
-            .and_then(|p| candidates.iter().find(|f| f.package == p))
-            .or_else(|| candidates.iter().find(|f| &f.package == own))
+        let candidates: Vec<(&Func, Node<'a>)> = self
+            .funcs
+            .iter()
+            .filter(|f| f.name == name)
+            .filter_map(|f| {
+                let root = self.files[f.file].tree.root_node();
+                let mut decl = root.descendant_for_byte_range(f.start, f.end)?;
+                while !matches!(decl.kind(), "function_declaration" | "method_declaration") {
+                    decl = decl.parent()?;
+                }
+                (!returns || decl.child_by_field_name("result").is_some()).then_some((f, decl))
+            })
+            .collect();
+        let (pick, decl) = pkg
+            .and_then(|p| candidates.iter().find(|(f, _)| f.package == p))
+            .or_else(|| candidates.iter().find(|(f, _)| &f.package == own))
             .or(candidates.first())?;
-        let root = self.files[pick.file].tree.root_node();
-        let mut decl = root.descendant_for_byte_range(pick.start, pick.end)?;
-        while !matches!(decl.kind(), "function_declaration" | "method_declaration") {
-            decl = decl.parent()?;
+        Some((pick.file, *decl))
+    }
+
+    /// Тип результата вызова `call`: `T` или первый из `(T, error)`. Возвращает файл,
+    /// узел типа и объявление функции (область для её локальных типов).
+    fn call_result(&self, file: usize, call: Node<'a>) -> Option<(usize, Node<'a>, Node<'a>)> {
+        let src = &self.files[file].src;
+        let func = call.child_by_field_name("function")?;
+        let func = match func.kind() {
+            "generic_type" | "index_expression" => func.named_child(0)?,
+            _ => func,
+        };
+        let (name, pkg) = match func.kind() {
+            "identifier" => (text(func, src), None),
+            "selector_expression" => {
+                let operand = func.child_by_field_name("operand")?;
+                let pkg = (operand.kind() == "identifier").then(|| text(operand, src));
+                (text(func.child_by_field_name("field")?, src), pkg)
+            }
+            _ => return None,
+        };
+        let (f, decl) = self.pick(file, name, pkg, true)?;
+        let mut result = decl.child_by_field_name("result")?;
+        if result.kind() == "parameter_list" {
+            // (T, error) — первый тип.
+            result = children(result).next()?.child_by_field_name("type")?;
         }
-        Some((pick.file, decl.child_by_field_name("body")?, Some(decl)))
+        Some((f, result, decl))
     }
 
     /// Комментарий над объявлением: `@Summary`/`@Description` из swag или обычный текст.
@@ -362,15 +409,7 @@ impl<'a> Describer<'a> {
             "identifier" => self.var_type(file, body, text(v, src)),
             "unary_expression" => self.value_type(file, body, v.child_by_field_name("operand")?),
             "composite_literal" => Some((file, v.child_by_field_name("type")?, body)),
-            "call_expression" => {
-                let (f, _, decl) = self.target(file, v.child_by_field_name("function")?, 0)?;
-                let decl = decl?;
-                let mut result = decl.child_by_field_name("result")?;
-                if result.kind() == "parameter_list" {
-                    result = children(result).next()?.child_by_field_name("type")?;
-                }
-                Some((f, result, decl))
-            }
+            "call_expression" => self.call_result(file, v),
             _ => None,
         }
     }
@@ -676,14 +715,7 @@ impl<'a> Describer<'a> {
         if v.kind() != "call_expression" {
             return Some((file, v, body));
         }
-        let (f, _, decl) = self.target(file, v.child_by_field_name("function")?, 0)?;
-        let decl = decl?;
-        let mut result = decl.child_by_field_name("result")?;
-        if result.kind() == "parameter_list" {
-            // (T, error) — первый тип.
-            result = children(result).next()?.child_by_field_name("type")?;
-        }
-        Some((f, result, decl))
+        self.call_result(file, v)
     }
 
     /// Тип → его определение: `*T` → `T`, имя → `type T struct{…}` (в теле обработчика,
