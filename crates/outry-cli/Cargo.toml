@@ -26,7 +26,7 @@ crossbeam-channel = "0.5"
 flate2 = "1"
 # `outry lsp`: протокол поверх stdio; lsp-types 0.95 — последняя с `url::Url` в типах.
 lsp-server = "0.7"
-lsp-types = "0.95"
+lsp-types = "0.97"
 # `outry secret set`: ввод значения без эха.
 rpassword = "7"
 self-replace = "1"
