@@ -1,4 +1,5 @@
 // `routy lsp` и всё, что расширение у него спрашивает: состояние для панелей, запуск, curl.
+import { execFile } from "node:child_process";
 import * as vscode from "vscode";
 import {
   ErrorCodes,
@@ -12,6 +13,9 @@ import {
 } from "vscode-languageclient/node";
 import { findBinary } from "./binary";
 import type { RunResult, State } from "./protocol";
+
+/** Первая версия с `experimental.routyUi`; со старой `routy lsp` либо нет, либо панели пустые. */
+const MIN_VERSION = [0, 6, 0];
 
 /** Выбранное в строке состояния окружение — на рабочую папку. */
 const ENV_KEY = "routy.env";
@@ -61,6 +65,9 @@ export class Server implements vscode.Disposable {
       }
       return;
     }
+    if (!(await this.checkVersion(bin))) {
+      return;
+    }
     const cfg = vscode.workspace.getConfiguration("routy");
     const options: LanguageClientOptions = {
       documentSelector: [{ scheme: "file", language: "routy" }],
@@ -84,6 +91,32 @@ export class Server implements vscode.Disposable {
     }
     this.client = client;
     await this.refresh();
+  }
+
+  /** Старый `routy` падает на `lsp` сразу, и клиент пишет только `write EPIPE` — проверяем заранее. */
+  private async checkVersion(bin: string): Promise<boolean> {
+    const out = await new Promise<string>((resolve) =>
+      execFile(bin, ["--version"], { timeout: 10_000 }, (err, stdout) => resolve(err ? "" : stdout)),
+    );
+    const found = /(\d+)\.(\d+)\.(\d+)/.exec(out)?.slice(1).map(Number);
+    if (found && !older(found, MIN_VERSION)) {
+      return true;
+    }
+    const what = found ? `is ${found.join(".")}` : "did not report its version";
+    this.output.appendLine(`routy: ${bin} ${what}, need ${MIN_VERSION.join(".")}+`);
+    const pick = await vscode.window.showErrorMessage(
+      `Routy: \`${bin}\` ${what}; the extension needs ${MIN_VERSION.join(".")} or newer.`,
+      "Update",
+      "Settings",
+    );
+    if (pick === "Update") {
+      const term = vscode.window.createTerminal("routy update");
+      term.show();
+      term.sendText(`"${bin}" update`);
+    } else if (pick === "Settings") {
+      void vscode.commands.executeCommand("workbench.action.openSettings", "routy.path");
+    }
+    return false;
   }
 
   async stop(): Promise<void> {
@@ -155,4 +188,13 @@ export class Server implements vscode.Disposable {
 
 export function message(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
+}
+
+function older(a: number[], b: number[]): boolean {
+  for (let i = 0; i < b.length; i++) {
+    if (a[i] !== b[i]) {
+      return a[i] < b[i];
+    }
+  }
+  return false;
 }

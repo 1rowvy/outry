@@ -1,8 +1,8 @@
 {
-  "name": "routy",
+  "name": "routy-vscode",
   "displayName": "Routy",
   "description": "API requests as plain .routy files in your repo: send them, check responses, keep them in sync with Go routes.",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "publisher": "routy",
   "license": "MIT",
   "icon": "media/icon.png",

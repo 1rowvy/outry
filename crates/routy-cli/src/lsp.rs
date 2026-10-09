@@ -721,10 +721,14 @@ impl Server {
                     .filter_map(|c| c.uri.to_file_path().ok())
                     .collect();
                 let ext = |p: &PathBuf, e: &str| p.extension().is_some_and(|x| x == e);
-                if paths
+                let config = paths
                     .iter()
-                    .any(|p| p.file_name().is_some_and(|n| n == "env.toml"))
-                {
+                    .find(|p| p.file_name().is_some_and(|n| n == "env.toml"));
+                // `env.toml` появился после старта (`routy import go` в пустой папке) — ищем
+                // проект от него, а не только от открытых файлов.
+                if let Some(path) = config.filter(|_| !self.project.has_config()) {
+                    self.maybe_switch_project(path);
+                } else if config.is_some() {
                     if let Ok(project) = Project::load(&self.project.root) {
                         self.project = project;
                     }

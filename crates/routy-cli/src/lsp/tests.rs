@@ -669,3 +669,27 @@ fn ui_client() {
             .any(|r| r.method == "window/showDocument")
     );
 }
+
+/// `routy import go` в папке, где сервер уже запущен: проект находится по новому `env.toml`,
+/// без открытых файлов.
+#[test]
+fn project_created_after_start() {
+    let dir = TempDir::new("late");
+    std::fs::create_dir(dir.0.join(".git")).unwrap();
+    let mut c = Client::start_with(&dir.0, json!({ "routyUi": true }));
+    assert_eq!(c.request("routy/state", Value::Null)["items"], json!([]));
+
+    let env = dir.write("api/env.toml", "[env.dev]\nbase = \"http://localhost\"\n");
+    let req = dir.write("api/v1/health.routy", "GET /health {}\n");
+    let changes: Vec<Value> = [env, req]
+        .iter()
+        .map(|p| json!({ "uri": Url::from_file_path(p).unwrap(), "type": 1 }))
+        .collect();
+    c.notify(
+        "workspace/didChangeWatchedFiles",
+        json!({ "changes": changes }),
+    );
+    let state = c.request("routy/state", Value::Null);
+    assert_eq!(state["envs"], json!(["dev"]));
+    assert_eq!(state["items"][0]["path"], "v1/health.routy");
+}
