@@ -3,6 +3,10 @@
 The extension is released together with `routy`: versions match, notes are in the
 [GitHub releases](https://github.com/1rowvy/routy/releases).
 
+## 0.6.2
+
+- Marketplace name: Routy API Client.
+
 ## 0.6.1
 
 - The extension id is now `routy.routy-vscode`.
