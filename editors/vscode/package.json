@@ -3,7 +3,7 @@
   "displayName": "Routy",
   "description": "API requests as plain .routy files in your repo: send them, check responses, keep them in sync with Go routes.",
   "version": "0.6.0",
-  "publisher": "1rowvy",
+  "publisher": "routy",
   "license": "MIT",
   "icon": "media/icon.png",
   "homepage": "https://1rowvy.github.io/routy/guides/editors/#vs-code",

@@ -17,7 +17,7 @@ async function until<T>(what: string, f: () => T | undefined | null | false, ms 
 
 export async function run(): Promise<void> {
   const ws = process.env.ROUTY_TEST_WS!;
-  const ext = vscode.extensions.getExtension<Api>("1rowvy.routy")!;
+  const ext = vscode.extensions.getExtension<Api>("routy.routy")!;
   const api = await ext.activate();
   const state = await until("routy/state", () => api.server.state);
   assert.equal(state.env, "dev");

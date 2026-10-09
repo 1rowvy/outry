@@ -5,7 +5,7 @@
 # Секреты репозитория:
 #   TAURI_SIGNING_PRIVATE_KEY            — содержимое ~/.tauri/routy.key
 #   TAURI_SIGNING_PRIVATE_KEY_PASSWORD   — пароль ключа (пустой, если без пароля)
-#   (опционально) VSCE_PAT — токен VS Code Marketplace (издатель 1rowvy), OVSX_PAT — Open VSX;
+#   (опционально) VSCE_PAT — токен VS Code Marketplace (издатель routy), OVSX_PAT — Open VSX;
 #                 без них VSIX только прикладываются к релизу
 #   (опционально, macOS) APPLE_CERTIFICATE, APPLE_CERTIFICATE_PASSWORD, APPLE_SIGNING_IDENTITY,
 #                        APPLE_ID, APPLE_PASSWORD, APPLE_TEAM_ID — подпись и нотаризация
