@@ -549,7 +549,7 @@ fn check(args: CheckArgs) -> anyhow::Result<ExitCode> {
             for f in &routy_files {
                 let src = std::fs::read_to_string(f).with_context(|| f.display().to_string())?;
                 // Синтаксические ошибки уже в списке выше.
-                if routy_core::lang::fmt::format(&src).is_ok_and(|out| out != src) {
+                if routy_core::lang::fmt::format(&src).is_ok_and(|out| !same_text(&out, &src)) {
                     found.push(error(rel(f), 1, 1, "not formatted (`routy fmt`)".into()));
                 }
             }
@@ -698,6 +698,11 @@ fn go_module(project_root: &Path) -> Option<PathBuf> {
     None
 }
 
+/// Текст совпадает с точностью до концов строк: CRLF от git на Windows — не повод для `routy fmt`.
+fn same_text(formatted: &str, src: &str) -> bool {
+    formatted == src || formatted == src.replace("\r\n", "\n")
+}
+
 /// Каталоги → все *.http и *.routy внутри; файлы — как есть, в заданном порядке.
 fn fmt(paths: &[PathBuf], check: bool) -> anyhow::Result<ExitCode> {
     let mut files = Vec::new();
@@ -723,9 +728,15 @@ fn fmt(paths: &[PathBuf], check: bool) -> anyhow::Result<ExitCode> {
                 continue;
             }
         };
-        if out == src {
+        if same_text(&out, &src) {
             continue;
         }
+        // CRLF файла (git с autocrlf на Windows) сохраняем: концы строк — не форматирование.
+        let out = if src.contains("\r\n") {
+            out.replace('\n', "\r\n")
+        } else {
+            out
+        };
         changed += 1;
         println!("{}", f.display());
         if !check {
@@ -1658,6 +1669,12 @@ impl Style {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn crlf_is_not_a_formatting_change() {
+        assert!(same_text("GET /a\n", "GET /a\r\n"));
+        assert!(!same_text("GET /a\n", "GET  /a\r\n"));
+    }
 
     #[test]
     fn env_generic_replaces_whole_names() {
