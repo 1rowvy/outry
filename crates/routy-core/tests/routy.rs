@@ -376,7 +376,11 @@ shape Order { id: string }
             ("bad.routy".into(), "GET /x {\n".into()),
         ],
     );
-    let errors: Vec<String> = ws.check().iter().map(|e| e.to_string()).collect();
+    let errors: Vec<String> = ws
+        .check()
+        .iter()
+        .map(|e| e.to_string().replace('\\', "/"))
+        .collect();
     let has = |s: &str| errors.iter().any(|e| e.contains(s));
     assert!(has("/p/bad.routy:1:8: unclosed `{`"), "{errors:#?}");
     assert!(
@@ -515,7 +519,7 @@ flow Buy {
     let errors: Vec<String> = ws
         .check_env("prod", &envs, &mut has)
         .iter()
-        .map(|e| e.to_string())
+        .map(|e| e.to_string().replace('\\', "/"))
         .collect();
     let want = [
         "/nonexistent/a.routy:12:1: `only` names unknown environment `stagin` (did you mean `staging`?)",
