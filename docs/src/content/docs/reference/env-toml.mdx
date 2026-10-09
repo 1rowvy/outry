@@ -27,6 +27,7 @@ base = "https://api.example.com"
 | `secrets` | Names of variables that are secrets. Values live in the keychain or `ROUTY_*`; the list lets `routy vars` and the app point out missing ones |
 | `[vars]` | Variables shared by all environments |
 | `[env.<name>]` | An environment; its variables override `[vars]` |
+| `[import.middleware]` | Headers that requests for routes behind a Go middleware need: `AuthRequired = { headers = { Authorization = "Bearer ${Login().body.token}" } }`. Used by `routy import go`, see [Middleware](/routy/guides/import-go/#middleware) |
 
 Values may be strings, numbers or booleans; non-strings are inserted as written (`port = 8080` →
 `8080`). Unknown keys are an error, so typos like `defualt` are caught.

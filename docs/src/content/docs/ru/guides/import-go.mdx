@@ -39,8 +39,8 @@ created 2 files
 
 | Роутер | Что распознаётся |
 |--------|------------------|
-| [chi](https://github.com/go-chi/chi) | `r.Get/Post/…`, `r.Method("GET", …)`, `r.Handle`, `r.Route("/prefix", func(r chi.Router) {…})`, `r.Mount("/prefix", sub())`, `r.Mount("/prefix", subRouter)`, `r.With(mw).Get(…)` |
-| [gin](https://github.com/gin-gonic/gin) | `r.GET/POST/…`, `r.Any`, `r.Handle("GET", …)`, `v1 := r.Group("/v1")` и вложенные группы, `r.Group("/v1").GET(…)` |
+| [chi](https://github.com/go-chi/chi) | `r.Get/Post/…`, `r.Method("GET", …)`, `r.Handle`, `r.Route("/prefix", func(r chi.Router) {…})`, `r.Mount("/prefix", sub())`, `r.Mount("/prefix", subRouter)`, `r.With(mw).Get(…)`, `r.Use(mw)`, `r.Group(func(r chi.Router) {…})` |
+| [gin](https://github.com/gin-gonic/gin) | `r.GET/POST/…`, `r.Any`, `r.Handle("GET", …)`, `v1 := r.Group("/v1")` и вложенные группы, `r.Group("/v1").GET(…)`, middleware в `r.Group("/v1", mw)`, `r.GET("/x", mw, h)` и `r.Use(mw)` |
 | `net/http` | `mux.HandleFunc("GET /items/{id}", h)` (шаблоны Go 1.22), `http.HandleFunc("/path", h)` |
 
 Роутер ищется только в файлах, которые его импортируют. Роуты из других функций и пакетов тоже получают
@@ -135,6 +135,38 @@ GET /users {
 
 Если имя занято файлом другого роута (`.routy` или `.http`), добавляется суффикс: `users/get-2.routy`.
 
+## Middleware
+
+Routy собирает middleware, через которые проходит роут: `r.Use(…)` выше в той же функции и том же
+блоке, группу `r.Group("/v1", auth)` (gin), `r.With(auth).Get(…)` и
+`r.Group(func(r chi.Router) { r.Use(auth); … })` (chi), а также middleware роутера, переданного в другую
+функцию (`routes.Register(authed)`). В созданном файле они перечислены под строкой с источником;
+middleware, которые есть у всех роутов (логирование, recovery), не пишутся.
+
+Какие заголовки нужны middleware, задаётся в [`env.toml`](/routy/ru/reference/env-toml/), и запросы к
+роутам за ним получают их сразу:
+
+```toml title="api/env.toml"
+[import.middleware]
+AuthRequired = { headers = { Authorization = "Bearer ${Login().body.token}" } }
+```
+
+```routy title="api/orders/get.routy"
+// List orders
+// gin internal/router/router.go:31 → h.Orders.List
+// middleware: middleware.AuthRequired()
+GET /orders {
+  handler: h.Orders.List
+  headers { Authorization: "Bearer ${Login().body.token}" }
+}
+```
+
+Ключ — имя middleware, как в коде: `AuthRequired` подходит к `middleware.AuthRequired()`,
+`mw.AuthRequired` и `AuthRequired`; `mw.RequireRole` — к любому `mw.RequireRole(…)`. Значение
+заголовка — строка `.routy`, так что `${…}` — [выражение](/routy/ru/reference/expressions/), здесь вызов
+запроса `Login`, который отправляется один раз и кешируется. Существующий запрос без заголовка получает
+[предупреждение с правкой](#расхождения-с-кодом).
+
 ## Сопоставление с существующими запросами
 
 Запрос считается запросом для роута, если его `handler:` называет обработчик роута. Запросы без
@@ -162,6 +194,7 @@ GET /users {
 | Литерал не того типа | `` body field `age` is a string, code expects int `` | error, fix |
 | Обработчик читает query-параметр, которого запрос не шлёт | `` handler reads query parameter `page`, the request doesn't send it `` | warning (error, если `required`) |
 | Обработчик читает заголовок, которого запрос не шлёт | `` handler reads header `X-Tenant-ID`, the request doesn't send it `` | warning |
+| Роут за [middleware](#middleware) из `env.toml`, а запрос не шлёт его заголовок | `` route is behind `middleware.AuthRequired()`, the request doesn't send header `Authorization` `` | warning, fix |
 | Ответ не проверяется | `` handler responds with Order, the request doesn't check `body matches Order` `` | warning, fix |
 
 Со структурой сравнивается только литерал-объект `body { … }`: вложенные объекты и массивы — по именам
@@ -186,9 +219,10 @@ GET /users {
   удаляется;
 - литерал не того типа приводится, когда это возможно (`"25"` → `25`, `1` → `"1"`), иначе заменяется
   пустым значением;
-- в `expect` добавляется `body matches Order`.
+- в `expect` добавляется `body matches Order`;
+- в `headers` добавляется заголовок из [`[import.middleware]`](#middleware).
 
-Переименование параметров, query-параметры и заголовки остаются вам — их значений Routy не знает.
+Переименование параметров, query-параметры и остальные заголовки остаются вам — их значений Routy не знает.
 
 ## Shape ответов
 
@@ -279,6 +313,8 @@ routy import go . --query echo.scm
 | `@receiver` | Роутер, на котором вызван метод, — по нему ищется префикс группы |
 | `@group` + `@group.path` | Префикс. С `@group.var` — для этой переменной (`v1 := r.Group("/v1")`), с `@group.body` — для всего внутри блока (`r.Route`) |
 | `@mount` + `@mount.func` | Роуты функции с этим именем получают префикс `@receiver` плюс `@mount.path`; `@mount.pkg` сужает поиск до пакета |
+| `@middleware` | Middleware `@route` или `@group`, сколько угодно: `(argument_list . (_) @path (_)* @middleware (_) @handler .)` |
+| `@use` + `@middleware` | Middleware для роутов `@receiver`: отдельной инструкцией (`r.Use(mw)`) — для роутов ниже в той же функции и том же блоке, в цепочке вызовов (`r.With(mw).Get`) — только для этого вызова |
 
 Захваты, начинающиеся с `_`, — для предикатов. Строка `; routy: import <путь>` ограничивает запрос
 файлами, импортирующими пакет с таким префиксом.

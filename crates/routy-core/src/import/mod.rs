@@ -5,6 +5,8 @@
 //! Роут и запрос совпадают по `handler:`, а без него — по методу и пути после `base`
 //! (параметры сравниваются как «любое значение»: `/users/{id}` ~ `{{base}}/users/{{user_id}}`).
 //! Совпавшие сравниваются по полям (`diff.rs`), shape ответов — со структурами Go (`shapes.rs`).
+//! Middleware роута из `[import.middleware]` в `env.toml` добавляют запросу заголовки: новым
+//! файлам — сразу, в существующих их отсутствие — предупреждение с правкой.
 
 mod diff;
 pub mod go;
@@ -43,6 +45,8 @@ pub struct Route {
     pub router: String,
     /// Что передавать: из кода обработчика
     pub info: RouteInfo,
+    /// Middleware роута, групп и `Use`, снаружи внутрь: `auth`, `mw.RequireRole("admin")`
+    pub middleware: Vec<String>,
 }
 
 /// Описание роута из кода обработчика.
@@ -370,6 +374,20 @@ pub fn plan_with(
         warnings,
     } = scan_project(project_root, base, overlay)?;
 
+    let rules = crate::project::Project::load(project_root)?
+        .config
+        .import
+        .middleware;
+    // Middleware всех роутов (логирование, recovery) в комментарии файла — шум.
+    let common: Vec<String> = match scan.routes.split_first() {
+        Some((first, rest)) if !rest.is_empty() => first
+            .middleware
+            .iter()
+            .filter(|m| rest.iter().all(|r| r.middleware.contains(m)))
+            .cloned()
+            .collect(),
+        _ => Vec::new(),
+    };
     let shapes_file = shapes
         .first()
         .map_or_else(|| PathBuf::from(SHAPES_FILE), |(f, _, _)| f.clone());
@@ -382,6 +400,7 @@ pub fn plan_with(
     let mut matched = HashSet::new();
     for route in scan.routes {
         let k = key(&route.path);
+        let auth = auth_headers(&route, &rules);
         // По `handler:`, а запросы без него (негативные тесты рядом с основным) — по методу и пути.
         let mut hit: Vec<usize> = known
             .iter()
@@ -401,8 +420,10 @@ pub fn plan_with(
                 .flat_map(|&i| {
                     let k = &known[i];
                     match &k.parsed {
-                        Parsed::Routy(req, src) => diff::compare(&route, req, src, &k.file),
-                        Parsed::Http(req, src) => diff::compare_http(&route, req, src, &k.file),
+                        Parsed::Routy(req, src) => diff::compare(&route, req, src, &k.file, &auth),
+                        Parsed::Http(req, src) => {
+                            diff::compare_http(&route, req, src, &k.file, &auth)
+                        }
                     }
                 })
                 .collect();
@@ -417,7 +438,7 @@ pub fn plan_with(
         let file = free_name(&file_name(&route), &taken);
         taken.insert(file.clone());
         out.new.push(NewFile {
-            content: content(&route, base),
+            content: content(&route, base, &common, &auth),
             file,
             route,
         });
@@ -484,6 +505,53 @@ pub fn plan_with(
         }
     }
     Ok(out)
+}
+
+/// Заголовок, который нужен запросу из-за middleware роута.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct AuthHeader {
+    /// Middleware как в коде
+    pub middleware: String,
+    pub name: String,
+    /// Строка `.routy` без кавычек
+    pub value: String,
+}
+
+/// Заголовки из `[import.middleware]` для middleware роута, без повторов имён.
+fn auth_headers(
+    route: &Route,
+    rules: &std::collections::BTreeMap<String, crate::project::MiddlewareRule>,
+) -> Vec<AuthHeader> {
+    let mut out: Vec<AuthHeader> = Vec::new();
+    for m in &route.middleware {
+        for (key, rule) in rules {
+            if !middleware_matches(key, m) {
+                continue;
+            }
+            for (name, value) in &rule.headers {
+                if !out.iter().any(|h| h.name.eq_ignore_ascii_case(name)) {
+                    out.push(AuthHeader {
+                        middleware: m.clone(),
+                        name: name.clone(),
+                        value: value.clone(),
+                    });
+                }
+            }
+        }
+    }
+    out
+}
+
+/// Ключ `[import.middleware]` подходит к middleware из кода: целиком, без аргументов
+/// (`mw.RequireRole`) или по последнему имени (`AuthRequired` → `middleware.AuthRequired()`).
+fn middleware_matches(key: &str, code: &str) -> bool {
+    let callee = code.split('(').next().unwrap_or(code).trim();
+    key == code || key == callee || callee.ends_with(&format!(".{key}"))
+}
+
+/// `Authorization: "Bearer ${Login().body.token}"`.
+pub(crate) fn header_entry(h: &AuthHeader) -> String {
+    format!("{}: \"{}\"", h.name, h.value)
 }
 
 /// Файл с shape, если в проекте их ещё нет.
@@ -845,7 +913,7 @@ fn free_name(want: &Path, taken: &HashSet<PathBuf>) -> PathBuf {
 
 /// Текст нового `*.routy`: имя и описание из doc-комментария обработчика, откуда роут, что в
 /// него передавать; `handler:`, query-параметры как `params`, пример тела из структуры.
-fn content(route: &Route, _base: &str) -> String {
+fn content(route: &Route, _base: &str, common: &[String], auth: &[AuthHeader]) -> String {
     let info = &route.info;
     let func = route
         .handler
@@ -859,6 +927,15 @@ fn content(route: &Route, _base: &str) -> String {
         from.push_str(&format!(" → {h}"));
     }
     doc.push(from);
+    let own: Vec<&str> = route
+        .middleware
+        .iter()
+        .filter(|m| !common.contains(m))
+        .map(String::as_str)
+        .collect();
+    if !own.is_empty() {
+        doc.push(format!("middleware: {}", own.join(", ")));
+    }
     if route.method == ANY {
         doc.push("any method".into());
     }
@@ -912,9 +989,15 @@ fn content(route: &Route, _base: &str) -> String {
         fields.push(format!("params {{\n{}\n}}", defaults.join("\n")));
         fields.push(format!("query {{\n{}\n}}", query.join("\n")));
     }
-    // Заголовки, которые читает обработчик: значение пользователь впишет сам.
-    if !info.headers.is_empty() {
-        let lines: Vec<String> = info.headers.iter().map(|h| format!("{h}: \"\"")).collect();
+    // Заголовки из `[import.middleware]`, потом те, что читает обработчик: их значение
+    // пользователь впишет сам.
+    let mut lines: Vec<String> = auth.iter().map(header_entry).collect();
+    for h in &info.headers {
+        if !auth.iter().any(|a| a.name.eq_ignore_ascii_case(h)) {
+            lines.push(format!("{h}: \"\""));
+        }
+    }
+    if !lines.is_empty() {
         fields.push(format!("headers {{\n{}\n}}", lines.join("\n")));
     }
     match &info.body {

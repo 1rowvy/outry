@@ -3,6 +3,10 @@
 The extension is released together with `routy`: versions match, notes are in the
 [GitHub releases](https://github.com/1rowvy/routy/releases).
 
+## 0.7.0
+
+- Go import knows route middleware; `[import.middleware]` in `env.toml` adds their headers (quick fix for existing requests).
+
 ## 0.6.2
 
 - Marketplace name: Routy API Client.

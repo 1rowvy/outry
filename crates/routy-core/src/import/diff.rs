@@ -16,7 +16,7 @@ use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 
-use super::{ANY, Field, JsonType, Route, key};
+use super::{ANY, AuthHeader, Field, JsonType, Route, header_entry, key};
 use crate::lang::ast::{BinOp, Body, Expr, ExprKind, Request, Span, StrPart, TargetPart};
 use crate::lang::parse::line_col;
 
@@ -104,6 +104,8 @@ pub enum ChangeKind {
     NewQuery { name: String, required: bool },
     /// Обработчик читает заголовок, которого запрос не шлёт.
     NewHeader { name: String },
+    /// Роут за middleware из `[import.middleware]`, а запрос не шлёт его заголовок.
+    MiddlewareHeader { middleware: String, name: String },
     /// Обработчик отвечает `shape`, а запрос это не проверяет.
     NoMatches { shape: String },
     /// В `shape` нет поля из структуры Go.
@@ -131,6 +133,7 @@ impl ChangeKind {
                 required: false, ..
             }
             | ChangeKind::NewHeader { .. }
+            | ChangeKind::MiddlewareHeader { .. }
             | ChangeKind::NoMatches { .. }
             | ChangeKind::ShapeMissingField { .. } => Severity::Warning,
             _ => Severity::Error,
@@ -169,6 +172,10 @@ impl fmt::Display for ChangeKind {
             ChangeKind::NewHeader { name } => write!(
                 f,
                 "handler reads header `{name}`, the request doesn't send it"
+            ),
+            ChangeKind::MiddlewareHeader { middleware, name } => write!(
+                f,
+                "route is behind `{middleware}`, the request doesn't send header `{name}`"
             ),
             ChangeKind::NoMatches { shape } => write!(
                 f,
@@ -231,7 +238,13 @@ impl Sink<'_> {
 }
 
 /// Расхождения запроса `req` (из файла `file` с текстом `src`) с роутом.
-pub fn compare(route: &Route, req: &Request, src: &str, file: &Path) -> Vec<Change> {
+pub fn compare(
+    route: &Route,
+    req: &Request,
+    src: &str,
+    file: &Path,
+    auth: &[AuthHeader],
+) -> Vec<Change> {
     let mut sink = Sink {
         file,
         src,
@@ -368,6 +381,35 @@ pub fn compare(route: &Route, req: &Request, src: &str, file: &Path) -> Vec<Chan
             );
         }
     }
+    for h in auth {
+        if f.headers
+            .iter()
+            .any(|e| e.key.eq_ignore_ascii_case(&h.name))
+        {
+            continue;
+        }
+        let entry = header_entry(h);
+        let fix = match f.order.iter().find(|(k, _)| *k == "headers") {
+            Some((_, span)) => braces(src, *span).map(|(open, close)| {
+                insert_entry(
+                    src,
+                    open,
+                    close,
+                    f.headers.last().map(|e| e.span.end),
+                    &entry,
+                )
+            }),
+            None => Some(block.insert(src, &format!("headers {{ {entry} }}"))),
+        };
+        sink.push(
+            field_at("headers"),
+            ChangeKind::MiddlewareHeader {
+                middleware: h.middleware.clone(),
+                name: h.name.clone(),
+            },
+            fix,
+        );
+    }
     if let Some(resp) = &info.response
         && !f.expect.iter().any(has_matches)
     {
@@ -402,6 +444,7 @@ pub fn compare_http(
     req: &crate::RequestFile,
     src: &str,
     file: &Path,
+    auth: &[AuthHeader],
 ) -> Vec<Change> {
     let mut sink = Sink {
         file,
@@ -482,6 +525,19 @@ pub fn compare_http(
     for h in &info.headers {
         if !req.headers.iter().any(|x| x.name.eq_ignore_ascii_case(h)) {
             sink.push(line_at, ChangeKind::NewHeader { name: h.clone() }, None);
+        }
+    }
+    for h in auth {
+        if !req
+            .headers
+            .iter()
+            .any(|x| x.name.eq_ignore_ascii_case(&h.name))
+        {
+            let kind = ChangeKind::MiddlewareHeader {
+                middleware: h.middleware.clone(),
+                name: h.name.clone(),
+            };
+            sink.push(line_at, kind, None);
         }
     }
     sink.out

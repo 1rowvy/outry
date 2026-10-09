@@ -11,6 +11,12 @@
 //!   Вызов-группа без переменной работает и как `@receiver`: `r.Group("/v1").GET(...)`.
 //! - `@mount` + `@mount.func` (+ `@mount.pkg`) — роуты функции с этим именем получают префикс
 //!   `@receiver` и `@mount.path`: `r.Mount("/admin", admin.Routes())`, `users.Register(v1)`.
+//! - `@middleware` (сколько угодно) — middleware роута или группы: `v1.POST("/x", auth, h)`,
+//!   `r.Group("/v1", auth)`. `@use` + `@receiver` + `@middleware` — подключение: отдельной
+//!   инструкцией (`r.Use(auth)`) действует на роуты `@receiver` ниже в той же функции и том же
+//!   блоке, в цепочке (`r.With(auth).Get(...)`) — только на этот вызов. Как и префиксы,
+//!   middleware переходят в смонтированные функции. На каждый аргумент `(_)* @middleware`
+//!   tree-sitter даёт отдельное совпадение — они сливаются по месту вызова.
 //!
 //! Захваты, начинающиеся с `_`, — служебные (для предикатов). Строка `; routy: import <путь>`
 //! ограничивает запрос файлами, импортирующими пакет с таким префиксом.
@@ -47,6 +53,8 @@ const CAPTURES: &[&str] = &[
     "mount.func",
     "mount.pkg",
     "mount.path",
+    "middleware",
+    "use",
 ];
 
 const SKIP_DIRS: &[&str] = &["vendor", "testdata", "node_modules"];
@@ -235,6 +243,15 @@ struct Group {
     path: String,
     var: Option<String>,
     body: Option<(usize, usize)>,
+    middleware: Vec<String>,
+}
+
+/// `r.Use(auth)` (`chain: false`) или `r.With(auth)` в цепочке вызовов (`chain: true`).
+struct Use {
+    site: Site,
+    recv: Receiver,
+    middleware: Vec<String>,
+    chain: bool,
 }
 
 struct Mount {
@@ -255,6 +272,7 @@ struct RawRoute {
     handler_range: Option<(usize, usize)>,
     router: String,
     line: usize,
+    middleware: Vec<String>,
 }
 
 #[derive(Default)]
@@ -264,6 +282,7 @@ struct Index {
     funcs: Vec<Func>,
     groups: Vec<Group>,
     mounts: Vec<Mount>,
+    uses: Vec<Use>,
     routes: Vec<RawRoute>,
     warnings: Vec<String>,
 }
@@ -290,7 +309,7 @@ impl Index {
             }
         }
         let consts = collect_consts(files);
-        let mut seen_routes = HashSet::new();
+        let mut seen_routes: HashMap<(usize, usize), usize> = HashMap::new();
         let mut cursor = QueryCursor::new();
         for (i, f) in files.iter().enumerate() {
             for q in queries.iter().filter(|q| q.applies(f)) {
@@ -298,8 +317,14 @@ impl Index {
                 let mut matches = cursor.matches(&q.query, f.tree.root_node(), f.src.as_bytes());
                 while let Some(m) = matches.next() {
                     let mut cap: HashMap<&str, Node> = HashMap::new();
+                    let mut mw = Vec::new();
                     for c in m.captures {
-                        cap.entry(names[c.index as usize]).or_insert(c.node);
+                        let name = names[c.index as usize];
+                        if name == "middleware" {
+                            mw.extend(middleware_name(c.node, &f.src));
+                        } else {
+                            cap.entry(name).or_insert(c.node);
+                        }
                     }
                     let ctx = Ctx {
                         file: f,
@@ -307,12 +332,33 @@ impl Index {
                     };
                     if let Some(&node) = cap.get("route") {
                         let site = ix.site(i, node);
-                        if seen_routes.insert((i, site.start)) {
-                            ix.add_route(&ctx, site, &cap, &q.name);
+                        match seen_routes.get(&(i, site.start)) {
+                            Some(&r) => add_all(&mut ix.routes[r].middleware, &mw),
+                            None => {
+                                let n = ix.routes.len();
+                                ix.add_route(&ctx, site, &cap, &q.name, mw);
+                                if ix.routes.len() > n {
+                                    seen_routes.insert((i, site.start), n);
+                                }
+                            }
                         }
                     } else if let Some(&node) = cap.get("group") {
                         let site = ix.site(i, node);
-                        ix.add_group(&ctx, site, &cap);
+                        ix.add_group(&ctx, site, &cap, mw);
+                    } else if let Some(&node) = cap.get("use") {
+                        let site = ix.site(i, node);
+                        if let Some(u) = ix.uses.iter_mut().find(|u| u.site == site) {
+                            add_all(&mut u.middleware, &mw);
+                        } else if !mw.is_empty() {
+                            ix.uses.push(Use {
+                                site,
+                                recv: receiver(cap.get("receiver").copied(), &f.src),
+                                middleware: mw,
+                                chain: node
+                                    .parent()
+                                    .is_none_or(|p| p.kind() != "expression_statement"),
+                            });
+                        }
                     } else if let Some(&node) = cap.get("mount") {
                         let site = ix.site(i, node);
                         ix.add_mount(&ctx, site, &cap);
@@ -337,7 +383,14 @@ impl Index {
         }
     }
 
-    fn add_route(&mut self, ctx: &Ctx, site: Site, cap: &HashMap<&str, Node>, router: &str) {
+    fn add_route(
+        &mut self,
+        ctx: &Ctx,
+        site: Site,
+        cap: &HashMap<&str, Node>,
+        router: &str,
+        middleware: Vec<String>,
+    ) {
         let Some(&path_node) = cap.get("path") else {
             return;
         };
@@ -377,12 +430,24 @@ impl Index {
             handler_range: cap.get("handler").map(|n| (n.start_byte(), n.end_byte())),
             router: router.to_string(),
             line,
+            middleware,
         });
     }
 
-    fn add_group(&mut self, ctx: &Ctx, site: Site, cap: &HashMap<&str, Node>) {
-        let Some(path) = cap.get("group.path").and_then(|&n| ctx.eval(n)) else {
-            return;
+    fn add_group(
+        &mut self,
+        ctx: &Ctx,
+        site: Site,
+        cap: &HashMap<&str, Node>,
+        middleware: Vec<String>,
+    ) {
+        // Без `@group.path` — группа только для middleware (chi `r.Group(func(r) {…})`).
+        let path = match cap.get("group.path") {
+            Some(&n) => match ctx.eval(n) {
+                Some(p) => p,
+                None => return,
+            },
+            None => String::new(),
         };
         let var = cap
             .get("group.var")
@@ -394,6 +459,7 @@ impl Index {
         if let Some(g) = self.groups.iter_mut().find(|g| g.site == site) {
             g.var = g.var.take().or(var);
             g.body = g.body.or(body);
+            add_all(&mut g.middleware, &middleware);
             return;
         }
         self.groups.push(Group {
@@ -402,6 +468,7 @@ impl Index {
             path,
             var,
             body,
+            middleware,
         });
     }
 
@@ -442,7 +509,8 @@ impl Index {
                 .handler_range
                 .map(|h| describer.describe(raw.site.file, h))
                 .unwrap_or_default();
-            for prefix in r.base(raw.site, &raw.recv, 0) {
+            for (prefix, mut middleware) in r.base(raw.site, &raw.recv, 0) {
+                add_all(&mut middleware, &raw.middleware);
                 let path = super::normalize_route(&join(&prefix, &raw.path));
                 let method = raw.method.clone().unwrap_or_else(|| super::ANY.to_string());
                 if seen.insert((method.clone(), path.clone())) {
@@ -454,6 +522,7 @@ impl Index {
                         handler: raw.handler.clone(),
                         router: raw.router.clone(),
                         info: info.clone(),
+                        middleware,
                     });
                 }
             }
@@ -468,49 +537,85 @@ impl Index {
     }
 }
 
-/// Префиксы роутов: группы, блоки `Route`, монтирование функций.
+/// Префикс пути и middleware, через которые проходит роут.
+type Base = (String, Vec<String>);
+
+/// Префиксы и middleware роутов: группы, блоки `Route`, `Use`, монтирование функций.
 struct Resolver<'a> {
     ix: &'a Index,
-    /// Префиксы функции; `None` — ещё считаются (рекурсия).
-    memo: HashMap<usize, Option<Vec<String>>>,
+    /// Основания функции; `None` — ещё считаются (рекурсия).
+    memo: HashMap<usize, Option<Vec<Base>>>,
 }
 
 const MAX_DEPTH: usize = 32;
 
 impl Resolver<'_> {
-    /// Префиксы для вызова на `recv` в точке `site`.
-    fn base(&mut self, site: Site, recv: &Receiver, depth: usize) -> Vec<String> {
+    /// Префиксы и middleware для вызова на `recv` в точке `site`.
+    fn base(&mut self, site: Site, recv: &Receiver, depth: usize) -> Vec<Base> {
         if depth > MAX_DEPTH {
-            return vec![String::new()];
+            return vec![Base::default()];
         }
-        // r.Group("/v1").GET(...)
+        let mut chain = Vec::new();
+        // r.Group("/v1").GET(...), r.With(auth).Get(...)
         for &(start, end) in &recv.calls {
-            if let Some(g) = self.ix.groups.iter().position(|g| {
-                g.site.file == site.file && g.site.start == start && g.site.end == end
-            }) {
-                return self.full(g, depth + 1);
+            let same = |s: &Site| s.file == site.file && s.start == start && s.end == end;
+            if let Some(u) = self.ix.uses.iter().find(|u| u.chain && same(&u.site)) {
+                chain.splice(0..0, u.middleware.iter().cloned());
+            }
+            if let Some(g) = self.ix.groups.iter().position(|g| same(&g.site)) {
+                return with(self.full(g, depth + 1), &chain);
             }
         }
+        // Сначала `r.Use(…)` выше по коду, потом `With` этого вызова.
+        let mut local = Vec::new();
+        if let Some(var) = &recv.var {
+            for u in &self.ix.uses {
+                if self.uses_apply(u, site, var) {
+                    add_all(&mut local, &u.middleware);
+                }
+            }
+        }
+        add_all(&mut local, &chain);
         if let Some(var) = &recv.var
             && let Some(g) = self.lookup_var(site, var)
         {
-            return self.full(g, depth + 1);
+            return with(self.full(g, depth + 1), &local);
         }
-        if let Some(g) = self.scope(site) {
-            return self.full(g, depth + 1);
-        }
-        match site.func {
-            Some(f) => self.func_prefixes(f, depth + 1),
-            None => vec![String::new()],
-        }
+        let outer = if let Some(g) = self.scope(site) {
+            self.full(g, depth + 1)
+        } else {
+            match site.func {
+                Some(f) => self.func_bases(f, depth + 1),
+                None => vec![Base::default()],
+            }
+        };
+        with(outer, &local)
     }
 
-    fn full(&mut self, g: usize, depth: usize) -> Vec<String> {
+    fn full(&mut self, g: usize, depth: usize) -> Vec<Base> {
         let g = &self.ix.groups[g];
         self.base(g.site, &g.recv, depth)
             .into_iter()
-            .map(|p| join(&p, &g.path))
+            .map(|(p, mut mw)| {
+                add_all(&mut mw, &g.middleware);
+                (join(&p, &g.path), mw)
+            })
             .collect()
+    }
+
+    /// `var.Use(…)` раньше `site` в той же функции и в блоке, где `site` (или на уровне функции).
+    fn uses_apply(&self, u: &Use, site: Site, var: &str) -> bool {
+        !u.chain
+            && u.recv.calls.is_empty()
+            && u.recv.var.as_deref() == Some(var)
+            && u.site.file == site.file
+            && u.site.func == site.func
+            && u.site.end <= site.start
+            && self.scope(u.site).is_none_or(|g| {
+                self.ix.groups[g]
+                    .body
+                    .is_some_and(|(s, e)| s <= site.start && site.end <= e)
+            })
     }
 
     /// Группа в переменной `var` той же функции: последняя объявленная до `site`,
@@ -541,10 +646,10 @@ impl Resolver<'_> {
             .map(|(i, _)| i)
     }
 
-    fn func_prefixes(&mut self, f: usize, depth: usize) -> Vec<String> {
+    fn func_bases(&mut self, f: usize, depth: usize) -> Vec<Base> {
         match self.memo.get(&f) {
             Some(Some(v)) => return v.clone(),
-            Some(None) => return vec![String::new()],
+            Some(None) => return vec![Base::default()],
             None => {}
         }
         self.memo.insert(f, None);
@@ -554,20 +659,20 @@ impl Resolver<'_> {
             if m.func != func.name || m.site.func == Some(f) || !self.targets(mi).contains(&f) {
                 continue;
             }
-            let prefixes: Vec<String> = self
+            let bases: Vec<Base> = self
                 .base(m.site, &m.recv, depth)
                 .into_iter()
-                .map(|p| join(&p, &m.path))
+                .map(|(p, mw)| (join(&p, &m.path), mw))
                 .collect();
-            // users.Register(r) без префикса ничего не меняет — и не дублирует роуты.
-            for p in prefixes {
-                if !p.is_empty() && p != "/" && !out.contains(&p) {
-                    out.push(p);
+            // users.Register(r) без префикса и middleware ничего не меняет — и не дублирует роуты.
+            for b in bases {
+                if ((!b.0.is_empty() && b.0 != "/") || !b.1.is_empty()) && !out.contains(&b) {
+                    out.push(b);
                 }
             }
         }
         if out.is_empty() {
-            out.push(String::new());
+            out.push(Base::default());
         }
         self.memo.insert(f, Some(out.clone()));
         out
@@ -614,6 +719,36 @@ fn receiver(node: Option<Node>, src: &str) -> Receiver {
         }
     }
     r
+}
+
+/// Добавляет в `to` middleware из `from`, которых там ещё нет.
+fn add_all(to: &mut Vec<String>, from: &[String]) {
+    for m in from {
+        if !to.contains(m) {
+            to.push(m.clone());
+        }
+    }
+}
+
+/// Middleware `local` — после middleware каждого основания.
+fn with(mut bases: Vec<Base>, local: &[String]) -> Vec<Base> {
+    for (_, mw) in &mut bases {
+        add_all(mw, local);
+    }
+    bases
+}
+
+/// Middleware как в коде, в одну строку: `auth`, `mw.RequireRole("admin")`. Функция-литерал
+/// и слишком длинное выражение — не имя.
+fn middleware_name(node: Node, src: &str) -> Option<String> {
+    if node.kind() == "func_literal" {
+        return None;
+    }
+    let text = text(node, src)
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    (text.len() <= 60).then_some(text)
 }
 
 /// `a` + `b` как пути: `/v1` + `/users` → `/v1/users`, `/v1` + `/` → `/v1/`.

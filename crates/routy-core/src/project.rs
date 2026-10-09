@@ -38,6 +38,26 @@ pub struct Config {
     pub vars: BTreeMap<String, toml::Value>,
     #[serde(default)]
     pub env: BTreeMap<String, BTreeMap<String, toml::Value>>,
+    /// `[import]`: чем `routy import` дополняет запросы
+    #[serde(default)]
+    pub import: ImportConfig,
+}
+
+#[derive(Debug, Default, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ImportConfig {
+    /// Middleware → что нужно запросу к роуту за ним. Ключ — имя как в коде (`AuthRequired`
+    /// подходит и к `middleware.AuthRequired()`).
+    #[serde(default)]
+    pub middleware: BTreeMap<String, MiddlewareRule>,
+}
+
+#[derive(Debug, Default, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MiddlewareRule {
+    /// Заголовок → значение: строка `.routy`, `${…}` в ней — выражение (`${Login().body.token}`)
+    #[serde(default)]
+    pub headers: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Clone)]

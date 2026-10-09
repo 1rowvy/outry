@@ -40,8 +40,8 @@ button next to **Requests**, or the **Routes** tab.
 
 | Router | What is recognized |
 |--------|--------------------|
-| [chi](https://github.com/go-chi/chi) | `r.Get/Post/…`, `r.Method("GET", …)`, `r.Handle`, `r.Route("/prefix", func(r chi.Router) {…})`, `r.Mount("/prefix", sub())`, `r.Mount("/prefix", subRouter)`, `r.With(mw).Get(…)` |
-| [gin](https://github.com/gin-gonic/gin) | `r.GET/POST/…`, `r.Any`, `r.Handle("GET", …)`, `v1 := r.Group("/v1")` with nested groups, `r.Group("/v1").GET(…)` |
+| [chi](https://github.com/go-chi/chi) | `r.Get/Post/…`, `r.Method("GET", …)`, `r.Handle`, `r.Route("/prefix", func(r chi.Router) {…})`, `r.Mount("/prefix", sub())`, `r.Mount("/prefix", subRouter)`, `r.With(mw).Get(…)`, `r.Use(mw)`, `r.Group(func(r chi.Router) {…})` |
+| [gin](https://github.com/gin-gonic/gin) | `r.GET/POST/…`, `r.Any`, `r.Handle("GET", …)`, `v1 := r.Group("/v1")` with nested groups, `r.Group("/v1").GET(…)`, middleware in `r.Group("/v1", mw)`, `r.GET("/x", mw, h)` and `r.Use(mw)` |
 | `net/http` | `mux.HandleFunc("GET /items/{id}", h)` (Go 1.22 patterns), `http.HandleFunc("/path", h)` |
 
 A router is only looked for in files that import it. Routes registered in other functions and packages
@@ -137,6 +137,38 @@ File names follow the path: static segments become folders, trailing parameters 
 If the name is taken by a file for a different route (`.routy` or `.http`), a suffix is added:
 `users/get-2.routy`.
 
+## Middleware
+
+Routy collects the middleware each route goes through: `r.Use(…)` above it in the same function and
+block, the group's `r.Group("/v1", auth)` (gin), `r.With(auth).Get(…)` and
+`r.Group(func(r chi.Router) { r.Use(auth); … })` (chi), and the middleware of a router passed to another
+function (`routes.Register(authed)`). The generated file lists them under the source line; middleware
+that every route has (logging, recovery) is left out.
+
+Tell Routy which headers a middleware needs in [`env.toml`](/routy/reference/env-toml/), and requests
+for routes behind it get them right away:
+
+```toml title="api/env.toml"
+[import.middleware]
+AuthRequired = { headers = { Authorization = "Bearer ${Login().body.token}" } }
+```
+
+```routy title="api/orders/get.routy"
+// List orders
+// gin internal/router/router.go:31 → h.Orders.List
+// middleware: middleware.AuthRequired()
+GET /orders {
+  handler: h.Orders.List
+  headers { Authorization: "Bearer ${Login().body.token}" }
+}
+```
+
+The key is the middleware's name as written in the code: `AuthRequired` matches
+`middleware.AuthRequired()`, `mw.AuthRequired` and `AuthRequired`; `mw.RequireRole` matches any
+`mw.RequireRole(…)`. A header value is a `.routy` string, so `${…}` is an
+[expression](/routy/reference/expressions/) — here a call of the `Login` request, which is sent once and
+cached. An existing request without the header gets a [warning with a fix](#differences-from-the-code).
+
 ## Matching existing requests
 
 A request counts as the request for a route when its `handler:` names the route's handler. Requests
@@ -164,6 +196,7 @@ file and the place in the Go code; **errors** fail `--check`, **warnings** don't
 | A literal of the wrong type | `` body field `age` is a string, code expects int `` | error, fix |
 | The handler reads a query parameter the request doesn't send | `` handler reads query parameter `page`, the request doesn't send it `` | warning (error if `required`) |
 | The handler reads a header the request doesn't send | `` handler reads header `X-Tenant-ID`, the request doesn't send it `` | warning |
+| The route is behind a [middleware](#middleware) from `env.toml`, the request doesn't send its header | `` route is behind `middleware.AuthRequired()`, the request doesn't send header `Authorization` `` | warning, fix |
 | The response isn't checked | `` handler responds with Order, the request doesn't check `body matches Order` `` | warning, fix |
 
 Only a literal object `body { … }` is compared with the struct: nested objects and arrays by their
@@ -189,9 +222,10 @@ does; the rest of the file stays as it was.
   is removed;
 - a literal of the wrong type is converted when it can be (`"25"` → `25`, `1` → `"1"`), otherwise
   replaced with an empty value;
-- `body matches Order` is added to `expect`.
+- `body matches Order` is added to `expect`;
+- a header from [`[import.middleware]`](#middleware) is added to `headers`.
 
-Parameter renames, query parameters and headers are left to you — Routy doesn't know their values.
+Parameter renames, query parameters and other headers are left to you — Routy doesn't know their values.
 
 ## Response shapes
 
@@ -283,6 +317,8 @@ routy import go . --query echo.scm
 | `@receiver` | The router the method is called on — used to find its group prefix |
 | `@group` + `@group.path` | A prefix. With `@group.var` it applies to that variable (`v1 := r.Group("/v1")`), with `@group.body` to everything inside the block (`r.Route`) |
 | `@mount` + `@mount.func` | Routes of the function with this name get the prefix of `@receiver` plus `@mount.path`; `@mount.pkg` narrows it to a package |
+| `@middleware` | Middleware of a `@route` or `@group`, any number: `(argument_list . (_) @path (_)* @middleware (_) @handler .)` |
+| `@use` + `@middleware` | Middleware for the routes of `@receiver`: as a statement (`r.Use(mw)`) for routes below it in the same function and block, inside a call chain (`r.With(mw).Get`) for that call only |
 
 Captures starting with `_` are free for predicates. A `; routy: import <path>` line limits the query to
 files importing a package with that prefix.

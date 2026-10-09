@@ -265,7 +265,110 @@ fn route(method: &str, path: &str) -> Route {
         handler: Some("h.Get".into()),
         router: "chi".into(),
         info: RouteInfo::default(),
+        middleware: Vec::new(),
     }
+}
+
+fn middleware<'a>(scan: &'a Scan, method: &str, path: &str) -> Vec<&'a str> {
+    let r = scan
+        .routes
+        .iter()
+        .find(|r| r.method == method && r.path == path)
+        .unwrap_or_else(|| panic!("no {method} {path} in {:?}", routes(scan)));
+    r.middleware.iter().map(String::as_str).collect()
+}
+
+#[test]
+fn gin_middleware() {
+    let dir = TempDir::new("gin-mw");
+    dir.write(
+        "main.go",
+        r#"package main
+
+import (
+	"github.com/gin-gonic/gin"
+	"example.com/svc/routes"
+	"example.com/svc/middleware"
+)
+
+func main() {
+	r := gin.New()
+	r.Use(gin.Logger(), gin.Recovery())
+	r.GET("/health", health)
+	api := r.Group("/api")
+	api.POST("/login", login)
+	authed := api.Group("", middleware.AuthRequired())
+	authed.GET("/me", me)
+	admin := authed.Group("/admin")
+	admin.Use(middleware.RequireRole("admin"))
+	admin.DELETE("/users/:id", deleteUser)
+	authed.POST("/orders", rateLimit, createOrder)
+	routes.Register(authed)
+}
+"#,
+    );
+    dir.write(
+        "routes/routes.go",
+        "package routes\n\nimport \"github.com/gin-gonic/gin\"\n\nfunc Register(rg *gin.RouterGroup) {\n\trg.GET(\"/reports\", reports)\n}\n",
+    );
+    let s = scan(&dir);
+    let logs = ["gin.Logger()", "gin.Recovery()"];
+    assert_eq!(middleware(&s, "GET", "/health"), logs);
+    assert_eq!(middleware(&s, "POST", "/api/login"), logs);
+    let auth = [&logs[..], &["middleware.AuthRequired()"]].concat();
+    assert_eq!(middleware(&s, "GET", "/api/me"), auth);
+    assert_eq!(middleware(&s, "GET", "/api/reports"), auth);
+    assert_eq!(
+        middleware(&s, "DELETE", "/api/admin/users/{{id}}"),
+        [&auth[..], &["middleware.RequireRole(\"admin\")"]].concat()
+    );
+    assert_eq!(
+        middleware(&s, "POST", "/api/orders"),
+        [&auth[..], &["rateLimit"]].concat()
+    );
+    let orders = s.routes.iter().find(|r| r.path == "/api/orders").unwrap();
+    assert_eq!(orders.handler.as_deref(), Some("createOrder"));
+}
+
+#[test]
+fn chi_middleware() {
+    let dir = TempDir::new("chi-mw");
+    dir.write(
+        "main.go",
+        r#"package main
+
+import "github.com/go-chi/chi/v5"
+
+func main() {
+	r := chi.NewRouter()
+	r.Use(logger)
+	r.Post("/login", login)
+	r.Group(func(r chi.Router) {
+		r.Use(jwtauth.Authenticator(tokenAuth))
+		r.Get("/me", me)
+		r.With(paginate).Get("/orders", listOrders)
+	})
+	r.Route("/admin", func(r chi.Router) {
+		r.Use(adminOnly)
+		r.Get("/stats", stats)
+	})
+	r.Get("/public", public)
+}
+"#,
+    );
+    let s = scan(&dir);
+    assert_eq!(middleware(&s, "POST", "/login"), ["logger"]);
+    assert_eq!(middleware(&s, "GET", "/public"), ["logger"]);
+    let auth = ["logger", "jwtauth.Authenticator(tokenAuth)"];
+    assert_eq!(middleware(&s, "GET", "/me"), auth);
+    assert_eq!(
+        middleware(&s, "GET", "/orders"),
+        [&auth[..], &["paginate"]].concat()
+    );
+    assert_eq!(
+        middleware(&s, "GET", "/admin/stats"),
+        ["logger", "adminOnly"]
+    );
 }
 
 #[test]
@@ -515,7 +618,7 @@ fn describes_handlers() {
         .iter()
         .find(|r| r.method == "POST" && r.path == "/users")
         .unwrap();
-    let text = content(route, DEFAULT_BASE);
+    let text = content(route, DEFAULT_BASE, &[], &[]);
     assert!(text.starts_with("// Create user\n// CreateUser creates a user.\n// Sends a welcome email.\n// chi main.go:14 → h.CreateUser\n//\n"), "{text}");
     assert!(
         text.contains("// Headers: X-Tenant-ID\n// Body: dto.CreateUser\n"),
@@ -540,7 +643,7 @@ fn describes_handlers() {
         .iter()
         .find(|r| r.method == "GET" && r.path == "/users")
         .unwrap();
-    let text = content(list, DEFAULT_BASE);
+    let text = content(list, DEFAULT_BASE, &[], &[]);
     assert!(
         text.contains("GET /users {\n  handler: h.ListUsers\n\n  params {\n    page: null\n    limit: null\n  }\n\n  query {\n    page\n    limit\n  }\n}\n"),
         "{text}"
@@ -1129,4 +1232,92 @@ func createOrder(w http.ResponseWriter, r *http.Request) {
     // Проект снова целиком проходит `routy check`.
     let ws = crate::lang::Workspace::load(&root).unwrap();
     assert!(ws.check().is_empty(), "{:?}", ws.check());
+}
+
+#[test]
+fn middleware_headers_from_env_toml() {
+    let dir = TempDir::new("mw-plan");
+    dir.write(
+        "env.toml",
+        "[env.dev]\nbase = \"http://x\"\n\n[import.middleware]\nAuthRequired = { headers = { Authorization = \"Bearer ${Login().body.token}\" } }\n",
+    );
+    // Без заголовка, с блоком headers, негативный тест и .http.
+    dir.write(
+        "orders.routy",
+        "// List\nGET /orders { handler: h.List }\n\n// One\nGET /orders/{id} {\n  handler: h.One\n  headers {\n    Accept: \"application/json\"\n  }\n}\n\n// No token\nGET /orders { expect { status == 401 } }\n",
+    );
+    dir.write("reports.http", "GET {{base}}/reports\n");
+    let authed = |method: &str, path: &str, handler: &str| Route {
+        handler: Some(handler.into()),
+        middleware: vec!["gin.Logger()".into(), "middleware.AuthRequired()".into()],
+        ..route(method, path)
+    };
+    let scan = Scan {
+        files: 1,
+        routes: vec![
+            authed("GET", "/orders", "h.List"),
+            authed("GET", "/orders/{{id}}", "h.One"),
+            authed("GET", "/reports", "h.Reports"),
+            authed("POST", "/orders", "h.Create"),
+            Route {
+                middleware: vec!["gin.Logger()".into()],
+                ..route("POST", "/login")
+            },
+        ],
+        shapes: vec![],
+        warnings: vec![],
+    };
+    let plan = plan(&dir.0, scan, "base").unwrap();
+
+    let create = plan.new.iter().find(|n| n.route.path == "/orders").unwrap();
+    assert!(
+        create
+            .content
+            .contains("// middleware: middleware.AuthRequired()\n"),
+        "{}",
+        create.content
+    );
+    assert!(!create.content.contains("gin.Logger"), "{}", create.content);
+    assert!(
+        create
+            .content
+            .contains("headers { Authorization: \"Bearer ${Login().body.token}\" }"),
+        "{}",
+        create.content
+    );
+    let login = plan.new.iter().find(|n| n.route.path == "/login").unwrap();
+    assert!(!login.content.contains("headers"), "{}", login.content);
+    assert!(!login.content.contains("middleware:"), "{}", login.content);
+
+    let warnings: Vec<(String, usize, bool)> = plan
+        .changes()
+        .filter(|c| matches!(c.kind, ChangeKind::MiddlewareHeader { .. }))
+        .map(|c| (slash(&c.file), c.line, c.fixable))
+        .collect();
+    assert_eq!(
+        warnings,
+        [
+            ("orders.routy".to_string(), 2, true),
+            ("orders.routy".to_string(), 7, true),
+            ("reports.http".to_string(), 1, false),
+        ]
+    );
+    let c = plan
+        .changes()
+        .find(|c| matches!(c.kind, ChangeKind::MiddlewareHeader { .. }))
+        .unwrap();
+    assert_eq!(
+        c.message,
+        "route is behind `middleware.AuthRequired()`, the request doesn't send header `Authorization`"
+    );
+    assert_eq!(c.severity, Severity::Warning);
+
+    let fixed = fixes(&plan, |c| {
+        matches!(c.kind, ChangeKind::MiddlewareHeader { .. })
+    })
+    .unwrap();
+    assert_eq!(
+        fixed[0].after,
+        "// List\nGET /orders {\n  handler: h.List\n  headers { Authorization: \"Bearer ${Login().body.token}\" }\n}\n\n// One\nGET /orders/{id} {\n  handler: h.One\n\n  headers {\n    Accept: \"application/json\"\n    Authorization: \"Bearer ${Login().body.token}\"\n  }\n}\n\n// No token\nGET /orders { expect { status == 401 } }\n"
+    );
 }

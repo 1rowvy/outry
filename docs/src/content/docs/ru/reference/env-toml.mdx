@@ -27,6 +27,7 @@ base = "https://api.example.com"
 | `secrets` | Имена переменных-секретов. Значения — в хранилище паролей или `ROUTY_*`; по списку `routy vars` и приложение подсказывают, каких не хватает |
 | `[vars]` | Переменные, общие для всех окружений |
 | `[env.<имя>]` | Окружение; его переменные перекрывают `[vars]` |
+| `[import.middleware]` | Заголовки, которые нужны запросам к роутам за middleware в Go: `AuthRequired = { headers = { Authorization = "Bearer ${Login().body.token}" } }`. Для `routy import go`, см. [Middleware](/routy/ru/guides/import-go/#middleware) |
 
 Значения — строки, числа или булевы; не-строки подставляются как написаны (`port = 8080` → `8080`).
 Неизвестные ключи — ошибка, так что опечатки вроде `defualt` не пройдут незамеченными.

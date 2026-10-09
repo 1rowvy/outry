@@ -33,6 +33,22 @@
   arguments: (argument_list . (_) @group.path . (func_literal body: (block) @group.body) .)
   (#eq? @_fn "Route")) @group
 
+; r.Group(func(r chi.Router) { r.Use(auth); ... }) — группа без префикса, для middleware
+(call_expression
+  function: (selector_expression
+    operand: (_) @receiver
+    field: (field_identifier) @_fn)
+  arguments: (argument_list . (func_literal body: (block) @group.body) .)
+  (#eq? @_fn "Group")) @group
+
+; r.Use(auth) — middleware для роутов r дальше по коду; r.With(auth).Get(...) — для одного вызова
+(call_expression
+  function: (selector_expression
+    operand: (_) @receiver
+    field: (field_identifier) @_fn)
+  arguments: (argument_list (_)* @middleware)
+  (#any-of? @_fn "Use" "With")) @use
+
 ; r.Mount("/admin", adminRouter()), r.Mount("/users", users.Routes())
 (call_expression
   function: (selector_expression

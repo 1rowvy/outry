@@ -6,7 +6,7 @@
   function: (selector_expression
     operand: (_) @receiver
     field: (field_identifier) @method)
-  arguments: (argument_list . (_) @path (_) @handler .)
+  arguments: (argument_list . (_) @path (_)* @middleware (_) @handler .)
   (#any-of? @method "GET" "POST" "PUT" "PATCH" "DELETE" "HEAD" "OPTIONS" "Any")) @route
 
 ; r.Handle("GET", "/users", h)
@@ -14,7 +14,7 @@
   function: (selector_expression
     operand: (_) @receiver
     field: (field_identifier) @_fn)
-  arguments: (argument_list . (_) @method . (_) @path (_) @handler .)
+  arguments: (argument_list . (_) @method . (_) @path (_)* @middleware (_) @handler .)
   (#eq? @_fn "Handle")) @route
 
 ; v1 := r.Group("/v1")
@@ -26,7 +26,7 @@
       function: (selector_expression
         operand: (_) @receiver
         field: (field_identifier) @_fn)
-      arguments: (argument_list . (_) @group.path)) @group)
+      arguments: (argument_list . (_) @group.path (_)* @middleware)) @group)
   (#eq? @_fn "Group"))
 
 ; v1 = r.Group("/v1")
@@ -38,7 +38,7 @@
       function: (selector_expression
         operand: (_) @receiver
         field: (field_identifier) @_fn)
-      arguments: (argument_list . (_) @group.path)) @group)
+      arguments: (argument_list . (_) @group.path (_)* @middleware)) @group)
   (#eq? @_fn "Group"))
 
 ; var v1 = r.Group("/v1")
@@ -50,7 +50,7 @@
       function: (selector_expression
         operand: (_) @receiver
         field: (field_identifier) @_fn)
-      arguments: (argument_list . (_) @group.path)) @group)
+      arguments: (argument_list . (_) @group.path (_)* @middleware)) @group)
   (#eq? @_fn "Group"))
 
 ; r.Group("/v1").GET(...) — группа без переменной
@@ -58,8 +58,16 @@
   function: (selector_expression
     operand: (_) @receiver
     field: (field_identifier) @_fn)
-  arguments: (argument_list . (_) @group.path)
+  arguments: (argument_list . (_) @group.path (_)* @middleware)
   (#eq? @_fn "Group")) @group
+
+; r.Use(gin.Logger()), v1.Use(auth)
+(call_expression
+  function: (selector_expression
+    operand: (_) @receiver
+    field: (field_identifier) @_fn)
+  arguments: (argument_list (_)* @middleware)
+  (#eq? @_fn "Use")) @use
 
 ; users.Register(v1), users.Register(r.Group("/users")) — группа передана в функцию,
 ; её роуты получают префикс группы
