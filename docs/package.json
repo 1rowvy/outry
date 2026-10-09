@@ -16,5 +16,8 @@
   },
   "devDependencies": {
     "starlight-links-validator": "^0.26.0"
+  },
+  "overrides": {
+    "postcss-selector-parser": "^7.1.6"
   }
 }
