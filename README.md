@@ -95,6 +95,14 @@ whose `api/` folder uses every feature of Outry. Clone it, `go run .`, `outry ru
 - **One engine everywhere.** The CLI, the desktop app, the VS Code extension and `outry lsp` share the same
   core — what works on your machine works in CI.
 
+### Already have OpenAPI?
+
+OpenAPI describes what the API promises: it feeds Swagger UI and client generators. Outry checks that the running
+service keeps the promise — it sends the requests with real data, chains them into scenarios (log in, create,
+pay, wait until paid) and compares every request with the Go handler, so drift fails CI instead of breaking
+clients. Keep the spec for the public contract; use Outry to run and check the API.
+More: [Outry and OpenAPI](https://1rowvy.github.io/outry/openapi/).
+
 ## Installation
 
 ### CLI

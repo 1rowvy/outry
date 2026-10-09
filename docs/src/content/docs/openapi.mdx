@@ -1,0 +1,80 @@
+---
+title: Outry and OpenAPI
+description: OpenAPI describes what an API promises. Outry checks that the running service keeps that promise — and that your requests still match the code.
+---
+
+If you already have an OpenAPI spec, you might wonder what Outry adds. They answer different questions:
+
+- **OpenAPI** — *what does the API promise?* A contract: endpoints, parameters, schemas. It feeds Swagger UI,
+  client generators and gateways.
+- **Outry** — *does the running service keep that promise, and do our requests still fit the code?* Requests
+  that are actually sent, with real data, in the order a user would send them, checked on every pull request.
+
+## What a spec can't do
+
+An OpenAPI file is a description. It doesn't log in, create a user, place an order, pay for it and then check
+the total. It can say a field is a `string`; it can't say that after paying, `status` becomes `"paid"`
+within ten seconds.
+
+```outry title="api/flows/checkout.outry"
+flow Checkout {
+  user = CreateUser(name: "Bob Stone")
+  order = CreateOrder(user_id: user.body.id, qty: 3)
+  PayOrder(id: order.body.id)
+  paid = WaitUntilPaid(id: order.body.id)
+
+  expect { paid.body.total == 45.5 }
+}
+```
+
+```outry title="api/orders/wait.outry"
+WaitUntilPaid: GET /v1/orders/{id} {
+  poll body.status == "paid" every 1s for 10s
+}
+```
+
+Each step is a request from another file, called like a function; `Login()` inside them runs once per run
+and is reused. This is the part people usually keep in a Postman collection or a separate test suite — next to
+the spec, and disagreeing with it.
+
+## Drift: who notices when the code moves
+
+A spec is written by hand or generated from annotations in comments. Either way, nothing stops the handler
+from changing while the spec stays the same: a renamed field, a new required parameter, an extra
+middleware. Clients find out first.
+
+Outry reads the Go code itself — routes, the struct the body is bound into, query parameters, headers,
+middleware, the response type — without annotations. Every `.outry` request is compared with its handler,
+and CI fails on the exact line:
+
+```console
+$ outry check
+api/v1/users/post.outry:17:8: error: required field `full_name` (string) is missing from body  ← internal/api/users.go:13
+```
+
+See [Import routes from Go](/outry/guides/import-go/).
+
+## Side by side
+
+| | OpenAPI | Outry |
+| --- | --- | --- |
+| Purpose | Describe the contract | Run and check the API |
+| Sends requests | No (only "Try it out" in Swagger UI) | Yes: CLI, desktop app, editors, CI |
+| Checks values and status codes | No | `expect { … }` |
+| Scenarios across requests | No | Requests call each other, `flow`, `poll` |
+| Environments and secrets | `servers` only | `env.toml`, system keychain, `OUTRY_*` in CI |
+| Stays in sync with Go code | If someone updates it | `outry check` compares with the handlers |
+| Client generation, Swagger UI | Yes | No |
+
+## Using both
+
+Outry doesn't replace your spec — keep it for the public contract, documentation and generated clients. Use
+Outry for what the spec can't do: run the requests, chain them into scenarios and catch drift in CI.
+
+If you have JSON Schemas for response bodies, Outry checks responses against them directly:
+
+```outry
+shape Order = schema("./schemas/order.json")
+```
+
+Import from OpenAPI into `.outry` files is planned.
