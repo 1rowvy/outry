@@ -2,7 +2,7 @@
   "name": "routy-vscode",
   "displayName": "Routy API Client",
   "description": "Executable API specs in your repo: send .routy requests, check responses, keep them in sync with your Go routes.",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "publisher": "routy",
   "license": "MIT",
   "icon": "media/icon.png",
