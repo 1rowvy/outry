@@ -2948,7 +2948,7 @@ dependencies = [
 name = "outry-app"
 version = "0.10.1"
 dependencies = [
- "base64 0.22.1",
+ "base64 0.23.1",
  "notify",
  "outry-core",
  "serde",
@@ -2966,7 +2966,7 @@ name = "outry-cli"
 version = "0.10.1"
 dependencies = [
  "anyhow",
- "base64 0.22.1",
+ "base64 0.23.1",
  "clap",
  "clap_complete",
  "crossbeam-channel",
@@ -2989,7 +2989,7 @@ dependencies = [
 name = "outry-core"
 version = "0.10.1"
 dependencies = [
- "base64 0.22.1",
+ "base64 0.23.1",
  "dirs",
  "fastrand",
  "keyring",
