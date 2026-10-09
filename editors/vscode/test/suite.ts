@@ -67,13 +67,17 @@ export async function run(): Promise<void> {
     assert.equal(shown.result.passed, true);
     assert.equal((shown.result.outcome as unknown as { response: { status: number } }).response.status, 201);
   }
-  // Вкладка появляется в tabGroups не сразу после createWebviewPanel.
+  // Вкладка и её заголовок доходят до tabGroups с задержкой (сначала — «CreateOrder · dev…»).
   const tab = await until("response tab", () =>
     vscode.window.tabGroups.all
       .flatMap((g) => g.tabs)
-      .find((t) => t.input instanceof vscode.TabInputWebview && t.input.viewType.endsWith("routy.response")),
+      .find(
+        (t) =>
+          t.input instanceof vscode.TabInputWebview &&
+          t.input.viewType.endsWith("routy.response") &&
+          t.label === "CreateOrder · dev",
+      ),
   );
-  assert.equal(tab.label, "CreateOrder · dev");
   assert.notEqual(tab.group.viewColumn, vscode.ViewColumn.One, "beside the file");
   // Webview отрисовал ResponseView из app/src.
   const rendered = await until("rendered response", () => api.panel.rendered);
