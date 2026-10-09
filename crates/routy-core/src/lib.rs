@@ -1,6 +1,7 @@
 //! Routy core: всё, что не UI. Используется и CLI, и desktop-приложением,
 //! поэтому поведение у них не может разъехаться.
 
+pub mod curl;
 pub mod discover;
 pub mod dynamic;
 pub mod error;

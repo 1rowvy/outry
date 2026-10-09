@@ -1,0 +1,37 @@
+/* Переменные app/src/styles.css — из темы VS Code. */
+:root {
+  --win: var(--vscode-editor-background);
+  --panel: var(--vscode-editor-background);
+  --line: var(--vscode-panel-border, var(--vscode-editorGroup-border, rgba(128, 128, 128, 0.25)));
+  --hover: var(--vscode-list-hoverBackground);
+  --track: var(--vscode-textBlockQuote-background, rgba(128, 128, 128, 0.12));
+  --raised: var(--vscode-editorWidget-background);
+  --text: var(--vscode-editor-foreground);
+  --muted: var(--vscode-descriptionForeground);
+  --faint: var(--vscode-disabledForeground, var(--vscode-descriptionForeground));
+  --accent: var(--vscode-textLink-foreground);
+  --accent-text: var(--vscode-button-foreground);
+  --bad: var(--vscode-errorForeground);
+  --ok: var(--vscode-testing-iconPassed, var(--vscode-charts-green));
+  --m-get: var(--vscode-charts-green);
+  --m-post: var(--vscode-charts-orange);
+  --m-put: var(--vscode-charts-blue);
+  --m-patch: var(--vscode-charts-purple);
+  --m-delete: var(--vscode-charts-red);
+  --panel-shadow: var(--vscode-widget-shadow) 0 2px 8px;
+  --raised-shadow: 0 0 0 1px var(--vscode-contrastBorder, transparent), 0 1px 2px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.2));
+  --mono: var(--vscode-editor-font-family);
+  --sans: var(--vscode-font-family);
+}
+body.vscode-light { color-scheme: light; }
+body.vscode-dark, body.vscode-high-contrast { color-scheme: dark; }
+body { padding: 0; font-size: var(--vscode-font-size); }
+
+#root { display: flex; flex-direction: column; }
+.busy {
+  display: flex; align-items: center; gap: 8px; flex: none;
+  padding: 6px 14px; border-bottom: 1px solid var(--line);
+  font-size: 12px; color: var(--muted);
+}
+.result { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.busy + .result { opacity: 0.55; }

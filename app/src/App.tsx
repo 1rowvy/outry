@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useRef, useState, type MouseEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import { getVersion } from "@tauri-apps/api/app";
 import { listen } from "@tauri-apps/api/event";
-import { confirm, open } from "@tauri-apps/plugin-dialog";
+import { confirm, open, save } from "@tauri-apps/plugin-dialog";
 import {
   api,
   type Entry,
@@ -18,7 +18,7 @@ import { ContextMenu, type MenuItem } from "./ContextMenu";
 import { FileTree, type TreeTarget } from "./FileTree";
 import { FlowView } from "./FlowView";
 import { HistoryList } from "./HistoryList";
-import { ResponseView } from "./ResponseView";
+import { ResponseView, type ResponseHost } from "./ResponseView";
 import { RoutesPanel } from "./RoutesPanel";
 import { SettingsMenu } from "./SettingsMenu";
 import { TitleBar } from "./TitleBar";
@@ -118,6 +118,22 @@ function storage(key: string, value?: string | null): string | null {
   return null;
 }
 
+/** ResponseView в приложении: байты ответа и запись файла — командами Tauri. */
+function appResponseHost(onError: (e: string) => void): ResponseHost {
+  return {
+    image: (entry) => api.responseImage(entry.id),
+    saveBody: async (entry, defaultPath) => {
+      try {
+        const dest = await save({ title: "Save response body", defaultPath });
+        if (dest) await api.saveBody(entry.id, dest);
+      } catch (e) {
+        onError(String(e));
+      }
+    },
+    noImage: "Image data is only kept for responses from this session.",
+  };
+}
+
 export default function App() {
   const [project, setProject] = useState<ProjectInfo | null>(null);
   const [env, setEnv] = useState<string | null>(null);
@@ -135,6 +151,7 @@ export default function App() {
   /** Растёт после отправки и правок переменных — перечитать историю и переменные. */
   const [tick, setTick] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  const responseHost = useMemo(() => appResponseHost(setError), []);
   const [pathForm, setPathForm] = useState<PathForm | null>(null);
   const [menu, setMenu] = useState<{ x: number; y: number; items: MenuItem[] } | null>(null);
   const [secretForm, setSecretForm] = useState<{ name: string; value: string } | null>(null);
@@ -792,7 +809,7 @@ export default function App() {
                     {run?.flow && !opened && !run.error ? (
                       <FlowView name={run.name ?? "flow"} flow={run.flow} />
                     ) : shown && (opened || !run?.error) ? (
-                      <ResponseView key={shown.id} entry={shown} onError={setError} />
+                      <ResponseView key={shown.id} entry={shown} host={responseHost} />
                     ) : (
                       !run?.error && (
                         <p className="hint">

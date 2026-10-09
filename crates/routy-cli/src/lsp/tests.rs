@@ -87,12 +87,19 @@ struct Client {
     /// Запросы сервера к клиенту, которые уже пришли.
     server_requests: Vec<Request>,
     messages: Vec<String>,
+    /// Остальные уведомления сервера: метод и параметры.
+    notes: Vec<(String, Value)>,
     /// Что ответить на `window/showMessageRequest`.
     answer: Option<&'static str>,
 }
 
 impl Client {
     fn start(root: &Path) -> Client {
+        Client::start_with(root, json!({}))
+    }
+
+    /// `experimental` — возможности клиента вроде `routyUi`.
+    fn start_with(root: &Path, experimental: Value) -> Client {
         let (server, conn) = Connection::memory();
         let handle = std::thread::spawn(move || {
             serve(
@@ -110,6 +117,7 @@ impl Client {
             diagnostics: HashMap::new(),
             server_requests: Vec::new(),
             messages: Vec::new(),
+            notes: Vec::new(),
             answer: None,
         };
         let init = json!({
@@ -117,7 +125,8 @@ impl Client {
             "rootUri": Url::from_file_path(root).unwrap(),
             "capabilities": {
                 "window": { "showDocument": { "support": true } },
-                "textDocument": { "completion": { "completionItem": { "snippetSupport": true } } }
+                "textDocument": { "completion": { "completionItem": { "snippetSupport": true } } },
+                "experimental": experimental
             },
             "initializationOptions": { "keyring": false }
         });
@@ -145,6 +154,7 @@ impl Client {
                 let p: ShowMessageParams = serde_json::from_value(n.params.clone()).unwrap();
                 self.messages.push(p.message);
             }
+            Message::Notification(n) => self.notes.push((n.method.clone(), n.params.clone())),
             Message::Request(r) => {
                 let result = match (r.method.as_str(), self.answer) {
                     ("window/showMessageRequest", Some(a)) => json!({ "title": a }),
@@ -543,5 +553,119 @@ fn folder_without_env_toml() {
     assert!(
         d[0].message.contains("unknown request or flow `Nope`"),
         "{d:?}"
+    );
+}
+
+/// Расширение VS Code (`routyUi`): свои команды в code lens, итог без файла и сообщений,
+/// `routy/state`, `routy/didChange`, curl и запуск в другом окружении.
+#[test]
+fn ui_client() {
+    let dir = TempDir::new("ui");
+    let base = echo_server();
+    dir.write(
+        "api/env.toml",
+        &format!("default = \"dev\"\nsecrets = [\"key\"]\n\n[env.dev]\nbase = \"{base}\"\nkey = \"0123456789abcdef\"\n\n[env.staging]\nbase = \"{base}\"\n"),
+    );
+    dir.write("api/auth/login.routy", LOGIN);
+    let orders = dir.write("api/orders.routy", "");
+    let mut c = Client::start_with(&dir.0, json!({ "routyUi": true }));
+
+    let text = "// Create order\nPOST /orders {\n  headers { T: Login().body.id }\n  body { x: 1 }\n}\n\nflow Checkout {\n  CreateOrder()\n}\n";
+    let uri = c.open(&orders, text);
+    c.wait_diagnostics(&uri, |d| d.is_empty());
+    let lenses = c.request(
+        "textDocument/codeLens",
+        json!({ "textDocument": { "uri": uri } }),
+    );
+    let lenses: Vec<(&str, &str)> = lenses
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|l| {
+            (
+                l["command"]["title"].as_str().unwrap(),
+                l["command"]["command"].as_str().unwrap(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        lenses,
+        [
+            ("▶ Send · dev", UI_SEND),
+            ("in…", UI_SEND_IN),
+            ("Copy as curl", UI_CURL),
+            ("▶ Run flow · dev", UI_SEND),
+            ("in…", UI_SEND_IN),
+        ]
+    );
+
+    let state = c.request("routy/state", Value::Null);
+    assert_eq!(state["env"], "dev");
+    assert_eq!(state["envs"], json!(["dev", "staging"]));
+    let items = state["items"].as_array().unwrap();
+    let create = items.iter().find(|i| i["name"] == "CreateOrder").unwrap();
+    assert_eq!(create["method"], "POST");
+    assert_eq!(create["target"], "/orders");
+    assert_eq!(create["line"], 2);
+    assert_eq!(create["path"], "orders.routy");
+    assert!(
+        items
+            .iter()
+            .any(|i| i["name"] == "Checkout" && i["flow"] == true)
+    );
+    assert!(items.iter().any(|i| i["name"] == "Login"));
+    let vars = state["vars"].as_array().unwrap();
+    let key = vars.iter().find(|v| v["name"] == "key").unwrap();
+    assert_eq!(key["secret"], true);
+    assert_eq!(key["value"], "012…(16 chars)");
+
+    // curl: Login() уходит, сам запрос — нет.
+    let curl = c.request(
+        "workspace/executeCommand",
+        json!({ "command": CURL_COMMAND, "arguments": [uri, 2] }),
+    );
+    let curl = curl.as_str().unwrap();
+    assert!(
+        curl.starts_with(&format!("curl -X POST {base}/orders \\\n")),
+        "{curl}"
+    );
+    assert!(
+        curl.contains("-H 'T: 7'") && curl.contains("--data-raw '{\"x\":1}'"),
+        "{curl}"
+    );
+
+    // Запуск в другом окружении: итог только в ответе.
+    let r = c.request(
+        "workspace/executeCommand",
+        json!({ "command": RUN_COMMAND, "arguments": [uri, 2, "staging"] }),
+    );
+    assert_eq!(r["env"], "staging");
+    assert_eq!(r["passed"], true, "{r}");
+    assert_eq!(r["file"], Value::Null);
+    let err = c
+        .request_result(
+            "workspace/executeCommand",
+            json!({ "command": RUN_COMMAND, "arguments": [uri, 2, "nope"] }),
+        )
+        .unwrap_err();
+    assert!(err.contains("no environment `nope`"), "{err}");
+
+    c.request(
+        "workspace/executeCommand",
+        json!({ "command": ENV_COMMAND, "arguments": ["staging"] }),
+    );
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !c
+        .notes
+        .iter()
+        .any(|(m, p)| m == "routy/didChange" && p["env"] == "staging")
+    {
+        assert!(c.recv(deadline).is_some(), "no routy/didChange");
+    }
+    assert!(c.messages.is_empty(), "{:?}", c.messages);
+    assert!(
+        !c.server_requests
+            .iter()
+            .any(|r| r.method == "window/showDocument")
     );
 }

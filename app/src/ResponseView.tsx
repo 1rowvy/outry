@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { save } from "@tauri-apps/plugin-dialog";
-import { api, type AssertOutcome, type Entry, type Header } from "./api";
+import type { AssertOutcome, Entry, Header } from "./types";
 import { BodyViewer, type BodyLanguage, type BodyViewerHandle } from "./BodyViewer";
 import { Trace } from "./Trace";
 
@@ -38,7 +37,7 @@ const EXTENSIONS: Record<string, string> = {
 };
 
 /** Имя файла для «Save»: последний сегмент URL или `response`, расширение — по Content-Type. */
-function suggestedName(url: string, mime: string): string {
+export function suggestedName(url: string, mime: string): string {
   let base = "response";
   try {
     base = decodeURIComponent(new URL(url).pathname.split("/").filter(Boolean).pop() ?? "") || base;
@@ -49,7 +48,17 @@ function suggestedName(url: string, mime: string): string {
   return ext && !base.includes(".") ? `${base}.${ext}` : base;
 }
 
-export function ResponseView({ entry, onError }: { entry: Entry; onError: (e: string) => void }) {
+/** Что ответу нужно от оболочки: приложения или webview расширения VS Code. */
+export interface ResponseHost {
+  /** Картинка из ответа как `data:` URL; `null` — байтов нет. */
+  image: (entry: Entry, mime: string) => Promise<string | null>;
+  /** «Save body to file…»: спросить путь и записать тело. */
+  saveBody: (entry: Entry, suggestedName: string) => Promise<void>;
+  /** Почему картинки нет. */
+  noImage: string;
+}
+
+export function ResponseView({ entry, host }: { entry: Entry; host: ResponseHost }) {
   const { outcome } = entry;
   const r = outcome.response;
   const mime = contentType(r.headers);
@@ -81,17 +90,11 @@ export function ResponseView({ entry, onError }: { entry: Entry; onError: (e: st
 
   // Родитель задаёт key={entry.id}, так что вкладка сбрасывается на каждый ответ.
   useEffect(() => {
-    if (isImage) api.responseImage(entry.id).then(setImage, () => setImage(null));
+    if (isImage) host.image(entry, mime).then(setImage, () => setImage(null));
+    // host не в зависимостях: для того же ответа картинка та же.
   }, [entry.id, isImage]);
 
-  const saveBody = async () => {
-    try {
-      const dest = await save({ title: "Save response body", defaultPath: suggestedName(outcome.request.url, mime) });
-      if (dest) await api.saveBody(entry.id, dest);
-    } catch (e) {
-      onError(String(e));
-    }
-  };
+  const saveBody = () => host.saveBody(entry, suggestedName(outcome.request.url, mime));
 
   return (
     <div className="response">
@@ -143,7 +146,7 @@ export function ResponseView({ entry, onError }: { entry: Entry; onError: (e: st
             image ? (
               <img src={image} alt="Response" />
             ) : (
-              <p className="muted">Image data is only kept for responses from this session.</p>
+              <p className="muted">{host.noImage}</p>
             )
           ) : (
             // Без allow-scripts: страница из ответа не выполняет JS и не видит приложение.

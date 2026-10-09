@@ -5,6 +5,8 @@
 # Секреты репозитория:
 #   TAURI_SIGNING_PRIVATE_KEY            — содержимое ~/.tauri/routy.key
 #   TAURI_SIGNING_PRIVATE_KEY_PASSWORD   — пароль ключа (пустой, если без пароля)
+#   (опционально) VSCE_PAT — токен VS Code Marketplace (издатель 1rowvy), OVSX_PAT — Open VSX;
+#                 без них VSIX только прикладываются к релизу
 #   (опционально, macOS) APPLE_CERTIFICATE, APPLE_CERTIFICATE_PASSWORD, APPLE_SIGNING_IDENTITY,
 #                        APPLE_ID, APPLE_PASSWORD, APPLE_TEAM_ID — подпись и нотаризация
 
@@ -39,9 +41,11 @@ jobs:
         run: |
           cargo_version=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "routy-app") | .version')
           npm_version=$(jq -r .version app/package.json)
-          echo "tag=$TAG cargo=$cargo_version npm=$npm_version"
+          vscode_version=$(jq -r .version editors/vscode/package.json)
+          echo "tag=$TAG cargo=$cargo_version npm=$npm_version vscode=$vscode_version"
           [ "$TAG" = "v$cargo_version" ] || { echo "::error::tag $TAG != Cargo.toml v$cargo_version"; exit 1; }
           [ "$npm_version" = "$cargo_version" ] || { echo "::error::app/package.json $npm_version != $cargo_version"; exit 1; }
+          [ "$vscode_version" = "$cargo_version" ] || { echo "::error::editors/vscode/package.json $vscode_version != $cargo_version"; exit 1; }
       - name: Черновик релиза
         id: release
         env:
@@ -184,8 +188,75 @@ jobs:
           (cd dist && if command -v sha256sum >/dev/null; then sha256sum "${asset#dist/}"; else shasum -a 256 "${asset#dist/}"; fi) > "$asset.sha256"
           gh release upload "$TAG" "$asset" "$asset.sha256" --clobber
 
+  # Расширение VS Code: по VSIX на платформу с бинарём `routy` из архивов CLI этого релиза
+  # (linux — musl, работает и на Alpine) и один без бинаря для остальных платформ.
+  vscode:
+    needs: [create-release, cli]
+    runs-on: ubuntu-latest
+    # Секреты в `if` недоступны — через env задания. Пре-релизы (vX.Y.Z-beta) Marketplace не принимает.
+    env:
+      VSCE_PAT: ${{ secrets.VSCE_PAT }}
+      OVSX_PAT: ${{ secrets.OVSX_PAT }}
+    defaults:
+      run:
+        working-directory: editors/vscode
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ env.TAG }}
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: editors/vscode/package-lock.json
+      - run: npm ci
+      - run: npm run build
+      - name: Платформенные VSIX
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p ../../dist/vsix cli
+          gh release download "$TAG" --dir cli --pattern 'routy-cli-*'
+          (cd cli && for f in *.tar.gz *.zip; do sha256sum -c "$f.sha256"; done)
+          pack() { # <vscode target> <rust target>
+            rm -rf bin && mkdir bin
+            name="routy-cli-${TAG}-$2"
+            if [ -f "cli/$name.zip" ]; then
+              unzip -q -j "cli/$name.zip" "$name/routy.exe" -d bin
+            else
+              tar -xzf "cli/$name.tar.gz" -C bin --strip-components=1 "$name/routy"
+              chmod +x bin/routy
+            fi
+            npx vsce package --no-dependencies --target "$1" -o "../../dist/vsix/routy-${TAG}-$1.vsix"
+          }
+          pack linux-x64 x86_64-unknown-linux-musl
+          pack alpine-x64 x86_64-unknown-linux-musl
+          pack linux-arm64 aarch64-unknown-linux-musl
+          pack alpine-arm64 aarch64-unknown-linux-musl
+          pack darwin-arm64 aarch64-apple-darwin
+          pack darwin-x64 x86_64-apple-darwin
+          pack win32-x64 x86_64-pc-windows-msvc
+          rm -rf bin
+          npx vsce package --no-dependencies -o "../../dist/vsix/routy-${TAG}-universal.vsix"
+          gh release upload "$TAG" ../../dist/vsix/*.vsix --clobber
+      - name: VS Code Marketplace
+        if: ${{ env.VSCE_PAT != '' && !contains(env.TAG, '-') }}
+        run: |
+          for f in ../../dist/vsix/*.vsix; do
+            case "$f" in *-universal.vsix) continue ;; esac
+            npx vsce publish --packagePath "$f"
+          done
+      - name: Open VSX (Cursor, Windsurf, VSCodium)
+        if: ${{ env.OVSX_PAT != '' && !contains(env.TAG, '-') }}
+        run: |
+          for f in ../../dist/vsix/*.vsix; do
+            case "$f" in *-universal.vsix) continue ;; esac
+            npx --yes ovsx publish "$f"
+          done
+
   publish:
-    needs: [create-release, app, cli]
+    needs: [create-release, app, cli, vscode]
     runs-on: ubuntu-latest
     steps:
       # Пока релиз черновик, releases/latest/download/latest.json его не видит —

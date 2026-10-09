@@ -1,13 +1,14 @@
 ---
 title: Editors
-description: Edit .routy files in Neovim, Helix or any editor with an LSP client — errors, completion, go to definition and sending requests come from `routy lsp`.
+description: Edit .routy files in VS Code, Neovim, Helix or any editor with an LSP client — errors, completion, go to definition and sending requests come from `routy lsp`.
 ---
 
 import { Aside } from '@astrojs/starlight/components';
 
 `routy lsp` is a language server built into the CLI: the same checks, names and variables as
-`routy check` and the desktop app, in your own editor. Any editor with an LSP client can use it;
-syntax highlighting comes from the tree-sitter grammar in
+`routy check` and the desktop app, in your own editor. For VS Code (and Cursor, Windsurf, VSCodium) there is
+an extension with a response view; any other editor with an LSP client can use the server directly, with
+syntax highlighting from the tree-sitter grammar in
 [`editors/tree-sitter-routy`](https://github.com/1rowvy/routy/tree/master/editors/tree-sitter-routy).
 
 ## What you get
@@ -35,6 +36,37 @@ syntax highlighting comes from the tree-sitter grammar in
   work as in the app; `confirm: true` asks first.
 - **Format** — `routy fmt` as document formatting.
 - **Outline** — requests, flows, shapes and `let`s of the file.
+
+## VS Code
+
+Install **Routy** from the [Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=1rowvy.routy)
+or, in Cursor, Windsurf and VSCodium, from [Open VSX](https://open-vsx.org/extension/1rowvy/routy). The packages for
+Linux, macOS and Windows include `routy`, so nothing else is needed. Elsewhere [install the CLI](/routy/install/):
+the extension finds it on `PATH` or in `~/.local/bin`, or set `routy.path`. Each
+[release](https://github.com/1rowvy/routy/releases) also has the `.vsix` files for
+**Extensions → ⋯ → Install from VSIX…**.
+
+Besides everything above, the extension adds:
+
+- **Response beside the file.** **▶ Send** (or <kbd>Ctrl</kbd>+<kbd>Enter</kbd> on any line of a request) opens
+  the same view as the desktop app: the body with highlighting and search, image and HTML preview, headers,
+  checks from `expect`, the trace of called requests, the request as it was sent, and saving the body to a file.
+  A flow shows its checks and trace.
+- **in…** — send once in another environment without switching to it; `confirm: true` asks first.
+- **Copy as curl** — the request with variables, calls (`Login().body.token`) and the run's cookies resolved.
+  The calls are sent, the request itself is not.
+- **Environment in the status bar**, remembered per workspace.
+- **Sidebar** — the project's requests and flows by folder (click to open, ▶ to send), and the variables of the
+  current environment with where each comes from; secrets are masked.
+
+| Setting | Default | |
+|---------|---------|---|
+| `routy.path` | the bundled binary, then `PATH` | Path to `routy` |
+| `routy.env` | `default` from `env.toml` | Environment to start with |
+| `routy.keyring`, `routy.import`, `routy.goDir` | | As `keyring`, `import`, `goDir` in [Settings](#settings) |
+
+The output of the language server is in **Output → Routy**; **Routy: Restart Language Server** restarts it
+(after `routy update`, for example).
 
 ## Neovim
 
@@ -123,8 +155,7 @@ line of a request. If the response file is already open, `:reload` shows the new
 ## Other editors
 
 Any LSP client works: the command is `routy lsp` over stdio (`--stdio` is accepted and ignored), the
-language id is `routy`, files are `*.routy`. A VS Code extension is planned; until then, a generic LSP
-client extension can start `routy lsp`.
+language id is `routy`, files are `*.routy`.
 
 The grammar in `editors/tree-sitter-routy` (with `queries/highlights.scm` in the capture names of
 nvim-treesitter and Zed) can be used by any editor that loads tree-sitter grammars.
@@ -147,7 +178,8 @@ Commands (`workspace/executeCommand`), for key bindings and editor extensions:
 
 | Command | Arguments | |
 |---------|-----------|---|
-| `routy.run` | `[uri, line]` | Send the request or run the flow at `line` (1-based). Returns the outcome as JSON |
+| `routy.run` | `[uri, line, env?]` | Send the request or run the flow at `line` (1-based), in `env` if given instead of the current environment. Returns the outcome as JSON |
+| `routy.curl` | `[uri, line, env?]` | The request at `line` as a `curl` command (a string). Calls in it are sent, the request is not |
 | `routy.selectEnv` | `[env]` or none | Switch the environment; without an argument the editor shows a choice |
 
 When the project has several environments, the code lens “env: dev” above the first request runs

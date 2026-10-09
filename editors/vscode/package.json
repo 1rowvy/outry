@@ -1,0 +1,273 @@
+{
+  "name": "routy",
+  "displayName": "Routy",
+  "description": "API requests as plain .routy files in your repo: send them, check responses, keep them in sync with Go routes.",
+  "version": "0.5.0",
+  "publisher": "1rowvy",
+  "license": "MIT",
+  "icon": "media/icon.png",
+  "homepage": "https://1rowvy.github.io/routy/guides/editors/#vs-code",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/1rowvy/routy",
+    "directory": "editors/vscode"
+  },
+  "bugs": "https://github.com/1rowvy/routy/issues",
+  "engines": {
+    "vscode": "^1.91.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Testing",
+    "Other"
+  ],
+  "keywords": [
+    "api",
+    "http",
+    "rest",
+    "client",
+    "postman"
+  ],
+  "main": "./dist/extension.js",
+  "activationEvents": [
+    "workspaceContains:**/*.routy",
+    "workspaceContains:**/api/env.toml"
+  ],
+  "contributes": {
+    "languages": [
+      {
+        "id": "routy",
+        "aliases": [
+          "Routy",
+          "routy"
+        ],
+        "extensions": [
+          ".routy"
+        ],
+        "configuration": "./language-configuration.json",
+        "icon": {
+          "light": "./media/file.svg",
+          "dark": "./media/file.svg"
+        }
+      }
+    ],
+    "grammars": [
+      {
+        "language": "routy",
+        "scopeName": "source.routy",
+        "path": "./syntaxes/routy.tmLanguage.json"
+      }
+    ],
+    "commands": [
+      {
+        "command": "routy.send",
+        "title": "Send Request",
+        "category": "Routy",
+        "icon": "$(play)"
+      },
+      {
+        "command": "routy.sendIn",
+        "title": "Send Request in Environment…",
+        "category": "Routy"
+      },
+      {
+        "command": "routy.copyCurl",
+        "title": "Copy Request as curl",
+        "category": "Routy"
+      },
+      {
+        "command": "routy.selectEnvironment",
+        "title": "Select Environment",
+        "category": "Routy",
+        "icon": "$(server-environment)"
+      },
+      {
+        "command": "routy.refresh",
+        "title": "Refresh",
+        "category": "Routy",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "routy.restart",
+        "title": "Restart Language Server",
+        "category": "Routy"
+      },
+      {
+        "command": "routy.showOutput",
+        "title": "Show Output",
+        "category": "Routy"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "routy.send",
+        "key": "ctrl+enter",
+        "mac": "cmd+enter",
+        "when": "editorTextFocus && editorLangId == routy"
+      }
+    ],
+    "menus": {
+      "commandPalette": [
+        {
+          "command": "routy.send",
+          "when": "editorLangId == routy"
+        },
+        {
+          "command": "routy.sendIn",
+          "when": "editorLangId == routy"
+        },
+        {
+          "command": "routy.copyCurl",
+          "when": "editorLangId == routy"
+        }
+      ],
+      "editor/title/run": [
+        {
+          "command": "routy.send",
+          "when": "resourceLangId == routy"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "routy.send",
+          "when": "editorLangId == routy",
+          "group": "routy@1"
+        },
+        {
+          "command": "routy.sendIn",
+          "when": "editorLangId == routy",
+          "group": "routy@2"
+        },
+        {
+          "command": "routy.copyCurl",
+          "when": "editorLangId == routy",
+          "group": "routy@3"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "routy.selectEnvironment",
+          "when": "view == routy.requests",
+          "group": "navigation@1"
+        },
+        {
+          "command": "routy.refresh",
+          "when": "view == routy.requests || view == routy.variables",
+          "group": "navigation@2"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "routy.send",
+          "when": "view == routy.requests && viewItem =~ /^(request|flow)$/",
+          "group": "inline"
+        },
+        {
+          "command": "routy.send",
+          "when": "view == routy.requests && viewItem =~ /^(request|flow)$/",
+          "group": "1_run@1"
+        },
+        {
+          "command": "routy.sendIn",
+          "when": "view == routy.requests && viewItem =~ /^(request|flow)$/",
+          "group": "1_run@2"
+        },
+        {
+          "command": "routy.copyCurl",
+          "when": "view == routy.requests && viewItem == request",
+          "group": "2_copy@1"
+        }
+      ]
+    },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "routy",
+          "title": "Routy",
+          "icon": "media/activity.svg"
+        }
+      ]
+    },
+    "views": {
+      "routy": [
+        {
+          "id": "routy.requests",
+          "name": "Requests"
+        },
+        {
+          "id": "routy.variables",
+          "name": "Variables"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "routy.requests",
+        "contents": "No .routy requests in this workspace.\n[Read the format guide](https://1rowvy.github.io/routy/guides/request-format/)"
+      }
+    ],
+    "configuration": {
+      "title": "Routy",
+      "properties": {
+        "routy.path": {
+          "type": "string",
+          "default": "",
+          "scope": "machine-overridable",
+          "markdownDescription": "Path to the `routy` binary. Empty: the one bundled with the extension, then `routy` on `PATH`."
+        },
+        "routy.env": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Environment to start with. Empty: `default` from `env.toml`. Switching it in the status bar is remembered per workspace."
+        },
+        "routy.keyring": {
+          "type": "boolean",
+          "default": true,
+          "description": "Read secrets from the system keychain."
+        },
+        "routy.import": {
+          "type": "boolean",
+          "default": true,
+          "description": "Compare requests with the Go code and offer quick fixes."
+        },
+        "routy.goDir": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Folder with the Go code, relative to the workspace folder. Empty: the parent of `api/`, else the project folder."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "node esbuild.mjs && vite build --config webview/vite.config.ts",
+    "watch": "node esbuild.mjs --watch",
+    "typecheck": "tsc --noEmit -p . && tsc --noEmit -p webview",
+    "package": "vsce package --no-dependencies",
+    "vscode:prepublish": "npm run build",
+    "test": "node test/run.mjs"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  },
+  "devDependencies": {
+    "@codemirror/commands": "^6.11.1",
+    "@codemirror/language": "^6.13.1",
+    "@codemirror/legacy-modes": "^6.5.5",
+    "@codemirror/search": "^6.7.2",
+    "@codemirror/state": "^6.7.6",
+    "@codemirror/view": "^6.43.14",
+    "@lezer/highlight": "^1.2.5",
+    "@types/node": "^22.20.5",
+    "@types/react": "^19.1.0",
+    "@types/react-dom": "^19.1.0",
+    "@types/vscode": "~1.91.0",
+    "@vitejs/plugin-react": "^4.7.0",
+    "@vscode/test-electron": "^2.5.2",
+    "@vscode/vsce": "^3.6.0",
+    "esbuild": "^0.25.0",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "typescript": "~5.8.3",
+    "vite": "^6.4.0"
+  }
+}

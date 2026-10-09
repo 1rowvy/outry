@@ -149,11 +149,16 @@ flow Checkout {
 - [ ] Расширение для Zed (грамматика + запуск `routy lsp`) — вместе с этапом 4
 
 ### 4. VS Code-расширение
-LSP-клиент + интерфейс; логика вся в `routy`, своих правил в расширении нет.
-- [ ] Платформенные VSIX с бинарём `routy` внутри; Marketplace + Open VSX (Cursor, Windsurf)
-- [ ] Code lens «▶ Send», «Send in prod…», «Copy as curl»; ответ в webview (компоненты из `app/src`: ResponseView, BodyViewer)
-- [ ] Боковая панель: дерево запросов, env, переменные, Routes с синхронизацией, история, Trace
-- [ ] Общие React-компоненты вынести в пакет для app и расширения
+`editors/vscode`: LSP-клиент + интерфейс; логика вся в `routy`, своих правил в расширении нет. Сервер знает
+о таком клиенте по `experimental.routyUi` (`routy/state`, `routy/didChange`, команды расширения в code lens).
+- [x] Платформенные VSIX с бинарём `routy` внутри (из архивов CLI релиза) + универсальный без него — в
+  `release.yml`; публикация в Marketplace + Open VSX, когда заданы `VSCE_PAT` / `OVSX_PAT`
+- [x] Code lens «▶ Send», «in…» (другое окружение), «Copy as curl» (`routy.curl`, `Run::resolve_item`);
+  ответ в webview — ResponseView / FlowView / BodyViewer из `app/src` (vite alias `@app`, типы — `app/src/types.ts`)
+- [x] Окружение в строке состояния; боковая панель: дерево запросов и сценариев, переменные
+- [x] Интеграционный тест в настоящем VS Code (`npm test`, в CI под xvfb)
+- [ ] Боковая панель: Routes с синхронизацией (пока — диагностика и Quick Fix), история ответов
+- [ ] Публикация: создать издателя `1rowvy` в Marketplace и namespace в Open VSX, секреты в репозитории
 
 ### 5. MCP для AI-агентов
 - [ ] `routy mcp` (stdio): «список запросов», «выполнить запрос/flow в env», «показать переменные» поверх `Runner`/`Vars`

@@ -1,13 +1,14 @@
 ---
 title: Редакторы
-description: Правка .routy в Neovim, Helix и любом редакторе с LSP-клиентом — ошибки, автодополнение, переход к определению и отправка запросов из `routy lsp`.
+description: Правка .routy в VS Code, Neovim, Helix и любом редакторе с LSP-клиентом — ошибки, автодополнение, переход к определению и отправка запросов из `routy lsp`.
 ---
 
 import { Aside } from '@astrojs/starlight/components';
 
 `routy lsp` — языковой сервер, встроенный в CLI: те же проверки, имена и переменные, что в
-`routy check` и приложении, но в вашем редакторе. Подойдёт любой редактор с LSP-клиентом; подсветку
-даёт грамматика tree-sitter из
+`routy check` и приложении, но в вашем редакторе. Для VS Code (и Cursor, Windsurf, VSCodium) есть расширение
+с просмотром ответов; любой другой редактор с LSP-клиентом подключает сервер напрямую, а подсветку даёт
+грамматика tree-sitter из
 [`editors/tree-sitter-routy`](https://github.com/1rowvy/routy/tree/master/editors/tree-sitter-routy).
 
 ## Что умеет
@@ -35,6 +36,37 @@ import { Aside } from '@astrojs/starlight/components';
   `confirm: true` сначала спрашивает.
 - **Форматирование** — `routy fmt` как форматирование документа.
 - **Outline** — запросы, сценарии, формы и `let` файла.
+
+## VS Code
+
+Установите **Routy** из [Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=1rowvy.routy),
+а в Cursor, Windsurf и VSCodium — из [Open VSX](https://open-vsx.org/extension/1rowvy/routy). В пакетах для
+Linux, macOS и Windows `routy` уже внутри, больше ничего не нужно. На других платформах
+[установите CLI](/routy/ru/install/): расширение найдёт его в `PATH` или в `~/.local/bin`, либо укажите
+`routy.path`. В каждом [релизе](https://github.com/1rowvy/routy/releases) есть и файлы `.vsix` — для
+**Extensions → ⋯ → Install from VSIX…**.
+
+Сверх всего, что выше, расширение добавляет:
+
+- **Ответ рядом с файлом.** **▶ Send** (или <kbd>Ctrl</kbd>+<kbd>Enter</kbd> на любой строке запроса) открывает
+  тот же вид, что в приложении: тело с подсветкой и поиском, предпросмотр картинок и HTML, заголовки, проверки
+  из `expect`, trace вызванных запросов, запрос в том виде, как ушёл, и сохранение тела в файл. У сценария —
+  его проверки и trace.
+- **in…** — отправить один раз в другом окружении, не переключаясь; `confirm: true` сначала спросит.
+- **Copy as curl** — запрос с подставленными переменными, вызовами (`Login().body.token`) и cookies прогона.
+  Вызовы отправляются, сам запрос — нет.
+- **Окружение в строке состояния**, запоминается для рабочей папки.
+- **Боковая панель** — запросы и сценарии проекта по папкам (щелчок открывает, ▶ отправляет) и переменные
+  текущего окружения с источником каждой; секреты замаскированы.
+
+| Настройка | По умолчанию | |
+|-----------|--------------|---|
+| `routy.path` | бинарь из пакета, затем `PATH` | Путь к `routy` |
+| `routy.env` | `default` из `env.toml` | С какого окружения начинать |
+| `routy.keyring`, `routy.import`, `routy.goDir` | | Как `keyring`, `import`, `goDir` в [Настройках](#настройки) |
+
+Вывод языкового сервера — в **Output → Routy**; **Routy: Restart Language Server** перезапускает его
+(например, после `routy update`).
 
 ## Neovim
 
@@ -122,8 +154,7 @@ curl -fsSL https://raw.githubusercontent.com/1rowvy/routy/master/editors/tree-si
 ## Другие редакторы
 
 Подойдёт любой LSP-клиент: команда `routy lsp`, транспорт stdio (`--stdio` принимается и ничего не
-меняет), язык `routy`, файлы `*.routy`. Расширение для VS Code в планах; пока можно запустить
-`routy lsp` из любого расширения-LSP-клиента.
+меняет), язык `routy`, файлы `*.routy`.
 
 Грамматику из `editors/tree-sitter-routy` (`queries/highlights.scm` — в именах захватов nvim-treesitter и
 Zed) можно подключить в любом редакторе, который загружает грамматики tree-sitter.
@@ -146,7 +177,8 @@ Zed) можно подключить в любом редакторе, кото�
 
 | Команда | Аргументы | |
 |---------|-----------|---|
-| `routy.run` | `[uri, line]` | Отправить запрос или запустить сценарий на строке `line` (с 1). Возвращает итог в JSON |
+| `routy.run` | `[uri, line, env?]` | Отправить запрос или запустить сценарий на строке `line` (с 1), в окружении `env`, если оно передано, иначе в текущем. Возвращает итог в JSON |
+| `routy.curl` | `[uri, line, env?]` | Запрос на строке `line` командой `curl` (строкой). Вызовы в нём отправляются, сам запрос — нет |
 | `routy.selectEnv` | `[env]` или ничего | Сменить окружение; без аргумента редактор предложит выбор |
 
 Если окружений несколько, code lens «env: dev» над первым запросом вызывает `routy.selectEnv`.

@@ -10,6 +10,7 @@ root="$(cd "$(dirname "$0")/.." && pwd)"
 # [workspace.package] version — единственная версия Rust-крейтов и приложения.
 sed -i.bak -E "0,/^version = \"[^\"]+\"/s//version = \"$version\"/" "$root/Cargo.toml" && rm "$root/Cargo.toml.bak"
 (cd "$root/app" && npm version "$version" --no-git-tag-version --allow-same-version >/dev/null)
+(cd "$root/editors/vscode" && npm version "$version" --no-git-tag-version --allow-same-version >/dev/null)
 (cd "$root" && cargo update --workspace --quiet)
 
 echo "version → $version"

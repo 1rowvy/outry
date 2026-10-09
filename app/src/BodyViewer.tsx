@@ -7,7 +7,7 @@ import { StreamLanguage, bracketMatching, syntaxHighlighting } from "@codemirror
 import { json } from "@codemirror/legacy-modes/mode/javascript";
 import { html, xml } from "@codemirror/legacy-modes/mode/xml";
 import { highlightSelectionMatches, openSearchPanel, search, searchKeymap } from "@codemirror/search";
-import { highlight, theme } from "./CodeEditor";
+import { highlight, theme } from "./editorTheme";
 
 export type BodyLanguage = "json" | "html" | "xml" | "text";
 

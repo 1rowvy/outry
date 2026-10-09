@@ -566,3 +566,36 @@ async fn editor_workflow_keeps_the_run() {
     assert!(o.calls[0].cached);
     assert_eq!(hits.lock().unwrap()["/login"], 1);
 }
+
+#[tokio::test]
+async fn resolve_item_builds_the_request_without_sending_it() {
+    let (base, hits) = server();
+    let mut r = runner(&base);
+    let ws = workspace(&[("auth/login.routy", LOGIN), ("orders.routy", ORDERS)]);
+    let mut run = Run::new(ws, Duration::from_secs(5)).unwrap();
+    let item = find(run.workspace(), "CreateOrder");
+    let (req, body) = run.resolve_item(&mut r, item).await.unwrap();
+    assert_eq!(req.method, "POST");
+    assert_eq!(req.url, format!("{base}/orders/main?tags=a&tags=b"));
+    let header = |n: &str| {
+        req.headers
+            .iter()
+            .find(|h| h.name.eq_ignore_ascii_case(n))
+            .map(|h| h.value.as_str())
+    };
+    assert_eq!(header("Authorization"), Some("Bearer tok-1"));
+    assert_eq!(header("Cookie"), Some("session=s1"), "the run's cookies");
+    let body: Value = serde_json::from_slice(&body.unwrap()).unwrap();
+    assert_eq!(body["who"], "tok-1");
+    {
+        let hits = hits.lock().unwrap();
+        assert_eq!(hits["/login"], 1, "calls in expressions are sent");
+        assert!(
+            !hits.contains_key("/orders/main"),
+            "the request itself is not"
+        );
+    }
+
+    let flow = find(run.workspace(), "Checkout");
+    assert!(run.resolve_item(&mut r, flow).await.is_err());
+}

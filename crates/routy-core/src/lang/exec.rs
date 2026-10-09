@@ -156,6 +156,54 @@ impl Run {
             _ => Err(Error::Run("only requests and flows can be run".into())),
         }
     }
+
+    /// Запрос в том виде, в каком ушёл бы, но без отправки — для «Copy as curl». Вызовы в
+    /// выражениях (`Login().body.token`) выполняются (или берутся из кеша прогона); cookies
+    /// прогона для адреса добавляются заголовком `Cookie`.
+    pub async fn resolve_item(
+        &mut self,
+        runner: &mut Runner,
+        r: ItemRef,
+    ) -> Result<(ResolvedRequest, Option<Vec<u8>>)> {
+        let ws = self.ws.clone();
+        let Item::Request(req) = ws.item(r) else {
+            return Err(Error::Run("only requests can be copied as curl".into()));
+        };
+        let src = &ws.sources[r.file];
+        let name = req
+            .name
+            .clone()
+            .unwrap_or_else(|| format!("{}:{}", src.path.display(), src.line(req.span.start)));
+        let mut ex = Exec {
+            runner,
+            run: self,
+            stack: Vec::new(),
+            trace: Vec::new(),
+        };
+        ex.enter(r, &name)?;
+        let locals = ex.base_locals(src).await?;
+        let allowed = ws.params_of(r);
+        let locals = ex
+            .bind_params(src, &name, &req.fields.params, &allowed, Vec::new(), locals)
+            .await?;
+        let (mut request, body, _) = ex.prepare(src, req, locals).await?;
+        let jar = reqwest::Url::parse(&request.url)
+            .ok()
+            .and_then(|u| ex.run.jar.cookies(&u));
+        if let Some(cookie) = jar {
+            if !request
+                .headers
+                .iter()
+                .any(|h| h.name.eq_ignore_ascii_case("cookie"))
+            {
+                request.headers.push(Header {
+                    name: "Cookie".into(),
+                    value: String::from_utf8_lossy(cookie.as_bytes()).into_owned(),
+                });
+            }
+        }
+        Ok((request, body))
+    }
 }
 
 /// Ключ кеша вызовов (и `cache:` между прогонами): индексы элементов меняются от правок,

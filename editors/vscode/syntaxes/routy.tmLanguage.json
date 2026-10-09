@@ -1,0 +1,336 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Routy",
+  "scopeName": "source.routy",
+  "comment": "Approximate, for colour only: the format's rules live in routy-core/src/lang/parse.rs. Keep in step with app/src/routyLanguage.ts and editors/tree-sitter-routy.",
+  "patterns": [
+    {
+      "include": "#comments"
+    },
+    {
+      "include": "#request-line"
+    },
+    {
+      "include": "#declarations"
+    },
+    {
+      "include": "#fields"
+    },
+    {
+      "include": "#expression"
+    }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        {
+          "name": "comment.line.double-slash.routy",
+          "match": "//.*$"
+        },
+        {
+          "name": "comment.block.routy",
+          "begin": "/\\*",
+          "end": "\\*/"
+        }
+      ]
+    },
+    "request-line": {
+      "comment": "GET /users/{id} {  — method, then the path up to a block or the end of the line",
+      "begin": "^\\s*([A-Z]{2,})(?=\\s|$)",
+      "beginCaptures": {
+        "1": {
+          "name": "keyword.other.http-method.routy"
+        }
+      },
+      "end": "(?=\\s+\\{|\\s*//)|$",
+      "patterns": [
+        {
+          "include": "#strings"
+        },
+        {
+          "include": "#interpolation"
+        },
+        {
+          "match": "(\\{)\\s*([A-Za-z_][\\w]*)\\s*(\\})",
+          "captures": {
+            "1": {
+              "name": "punctuation.definition.parameter.begin.routy"
+            },
+            "2": {
+              "name": "variable.parameter.routy"
+            },
+            "3": {
+              "name": "punctuation.definition.parameter.end.routy"
+            }
+          }
+        },
+        {
+          "name": "string.unquoted.path.routy",
+          "match": "[^\\s{$\"]+|\\$(?!\\{)"
+        }
+      ]
+    },
+    "declarations": {
+      "patterns": [
+        {
+          "match": "\\b(shape)\\s+([A-Za-z_][\\w]*)",
+          "captures": {
+            "1": {
+              "name": "keyword.other.shape.routy"
+            },
+            "2": {
+              "name": "entity.name.type.routy"
+            }
+          }
+        },
+        {
+          "match": "\\b(flow)\\s+([A-Za-z_][\\w]*)",
+          "captures": {
+            "1": {
+              "name": "keyword.other.flow.routy"
+            },
+            "2": {
+              "name": "entity.name.function.routy"
+            }
+          }
+        },
+        {
+          "match": "\\b(let)\\s+([A-Za-z_][\\w]*)",
+          "captures": {
+            "1": {
+              "name": "storage.type.let.routy"
+            },
+            "2": {
+              "name": "variable.other.declaration.routy"
+            }
+          }
+        },
+        {
+          "match": "\\b(save)\\s+([A-Za-z_][\\w]*)(?=\\s*=)",
+          "captures": {
+            "1": {
+              "name": "keyword.other.save.routy"
+            },
+            "2": {
+              "name": "variable.other.declaration.routy"
+            }
+          }
+        },
+        {
+          "match": "^\\s*(handler)\\s*(:)\\s*([\\w./-]+)",
+          "captures": {
+            "1": {
+              "name": "keyword.other.field.routy"
+            },
+            "2": {
+              "name": "punctuation.separator.key-value.routy"
+            },
+            "3": {
+              "name": "entity.name.namespace.routy"
+            }
+          }
+        }
+      ]
+    },
+    "fields": {
+      "comment": "Request fields at the start of a line: `headers {`, `body \"…\"`, `timeout: 5s`",
+      "match": "^\\s*(handler|params|only|confirm|timeout|redirects|cache|query|headers|body|form|multipart)\\b(?=\\s*(?:[:{\\[\"']|file\\s*\\())",
+      "captures": {
+        "1": {
+          "name": "keyword.other.field.routy"
+        }
+      }
+    },
+    "expression": {
+      "patterns": [
+        {
+          "include": "#comments"
+        },
+        {
+          "include": "#strings"
+        },
+        {
+          "include": "#regex"
+        },
+        {
+          "name": "constant.numeric.duration.routy",
+          "match": "\\b\\d+(?:\\.\\d+)?(?:ms|s|m|h)\\b"
+        },
+        {
+          "name": "constant.numeric.routy",
+          "match": "\\b\\d+(?:\\.\\d+)?(?:[eE][+-]?\\d+)?\\b"
+        },
+        {
+          "name": "constant.language.routy",
+          "match": "\\b(?:true|false|null)\\b"
+        },
+        {
+          "name": "keyword.control.routy",
+          "match": "\\b(?:expect|save|poll|every|for|fresh|let|shape|flow)\\b"
+        },
+        {
+          "name": "keyword.operator.word.routy",
+          "match": "\\b(?:matches|in|typeof)\\b"
+        },
+        {
+          "name": "support.type.property-name.routy",
+          "match": "(?<![.\\w-])[A-Za-z_][\\w]*(?:-[\\w]+)*\\??(?=\\s*:(?!:))"
+        },
+        {
+          "name": "support.function.builtin.routy",
+          "match": "\\b(?:uuid|now|nowIso|randomInt|randomString|number|string|json|base64|unbase64|file|schema)(?=\\s*\\()"
+        },
+        {
+          "name": "entity.name.function.call.routy",
+          "match": "\\b[A-Z][\\w]*(?=\\s*\\()"
+        },
+        {
+          "name": "support.type.primitive.routy",
+          "match": "\\b(?:string|number|integer|boolean|any)\\b"
+        },
+        {
+          "name": "entity.name.type.routy",
+          "match": "\\b[A-Z][\\w]*\\b"
+        },
+        {
+          "match": "(\\.)\\s*([A-Za-z_][\\w]*(?:-[\\w]+)*)(?=\\s*\\()",
+          "captures": {
+            "1": {
+              "name": "punctuation.accessor.routy"
+            },
+            "2": {
+              "name": "entity.name.function.member.routy"
+            }
+          }
+        },
+        {
+          "match": "(\\.)\\s*([A-Za-z_][\\w]*(?:-[\\w]+)*)",
+          "captures": {
+            "1": {
+              "name": "punctuation.accessor.routy"
+            },
+            "2": {
+              "name": "variable.other.property.routy"
+            }
+          }
+        },
+        {
+          "name": "variable.language.routy",
+          "match": "\\b(?:status|headers|body|duration|cookies|env|vars)\\b"
+        },
+        {
+          "name": "variable.other.routy",
+          "match": "\\b[a-z_][\\w]*\\b"
+        },
+        {
+          "name": "keyword.operator.routy",
+          "match": "==|!=|<=|>=|&&|\\|\\||=>|[<>=!+\\-*/%|?]"
+        },
+        {
+          "name": "punctuation.separator.routy",
+          "match": "[,:]"
+        },
+        {
+          "begin": "\\{",
+          "end": "\\}",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.section.block.begin.routy"
+            }
+          },
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.section.block.end.routy"
+            }
+          },
+          "patterns": [
+            {
+              "include": "#fields"
+            },
+            {
+              "include": "#declarations"
+            },
+            {
+              "include": "#expression"
+            }
+          ]
+        }
+      ]
+    },
+    "regex": {
+      "match": "(?<=\\bmatches)\\s+(/(?:[^/\\\\\\n]|\\\\.)+/[a-z]*)",
+      "captures": {
+        "1": {
+          "name": "string.regexp.routy"
+        }
+      }
+    },
+    "strings": {
+      "patterns": [
+        {
+          "name": "string.quoted.triple.routy",
+          "begin": "\"\"\"",
+          "end": "\"\"\"",
+          "patterns": [
+            {
+              "include": "#escape"
+            },
+            {
+              "include": "#interpolation"
+            }
+          ]
+        },
+        {
+          "name": "string.quoted.double.routy",
+          "begin": "\"",
+          "end": "\"|$",
+          "patterns": [
+            {
+              "include": "#escape"
+            },
+            {
+              "include": "#interpolation"
+            }
+          ]
+        },
+        {
+          "name": "string.quoted.single.routy",
+          "begin": "'",
+          "end": "'|$",
+          "patterns": [
+            {
+              "include": "#escape"
+            },
+            {
+              "include": "#interpolation"
+            }
+          ]
+        }
+      ]
+    },
+    "escape": {
+      "name": "constant.character.escape.routy",
+      "match": "\\\\."
+    },
+    "interpolation": {
+      "name": "meta.embedded.interpolation.routy",
+      "begin": "\\$\\{",
+      "end": "\\}",
+      "beginCaptures": {
+        "0": {
+          "name": "punctuation.section.interpolation.begin.routy"
+        }
+      },
+      "endCaptures": {
+        "0": {
+          "name": "punctuation.section.interpolation.end.routy"
+        }
+      },
+      "patterns": [
+        {
+          "include": "#expression"
+        }
+      ]
+    }
+  }
+}

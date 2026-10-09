@@ -284,6 +284,10 @@ More in the [desktop app guide](https://1rowvy.github.io/routy/guides/desktop-ap
 
 ## Editors
 
+**VS Code** (and Cursor, Windsurf, VSCodium): the [Routy extension](editors/vscode) bundles `routy` and adds a
+response view beside the file (the same as in the desktop app), “Copy as curl”, the environment in the status bar,
+and the project's requests and variables in the sidebar.
+
 `routy lsp` brings the same checks to Neovim, Helix and any editor with an LSP client: `routy check` errors
 as you type, differences from the Go code with quick fixes, completion of requests, variables and
 functions, hover with variable values (secrets masked), go to definition (a call → the request, a variable →
@@ -298,7 +302,9 @@ crates/routy-core   .routy parser, checker, formatter and executor; .http suppor
                     Go route import: all behavior lives here
 crates/routy-cli    the `routy` binary, a thin wrapper over core
 app/                Tauri 2 + React desktop app, also a thin wrapper over core
-editors/            tree-sitter grammar for *.routy (highlighting in Neovim, Helix, Zed)
+editors/vscode      VS Code extension: `routy lsp` client; the response webview reuses app/src components
+editors/tree-sitter-routy
+                    tree-sitter grammar for *.routy (highlighting in Neovim, Helix, Zed)
 docs/               Astro Starlight documentation site (English + Russian)
 examples/api        sample requests against httpbin.org
 ```

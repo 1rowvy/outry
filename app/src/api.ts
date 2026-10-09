@@ -1,5 +1,9 @@
 // Типизированные обёртки над командами из src-tauri/src/lib.rs.
 import { invoke } from "@tauri-apps/api/core";
+import type { Entry, FlowOutcome } from "./types";
+
+// Ответы и итоги запусков — в types.ts: их же показывает расширение VS Code.
+export type { AssertOutcome, CallTrace, Entry, FlowOutcome, Header, RunOutcome } from "./types";
 
 export interface ProjectInfo {
   root: string;
@@ -11,56 +15,6 @@ export interface ProjectInfo {
   files: string[];
   /** путь → метод из строки запроса */
   methods: Record<string, string>;
-}
-
-export interface Header {
-  name: string;
-  value: string;
-}
-
-export interface AssertOutcome {
-  source: string;
-  passed: boolean;
-  actual: unknown;
-  /** *.routy: почему не прошла — `body.total is 0` */
-  detail?: string;
-}
-
-/** Запрос, вызванный из *.routy (`Login()`), — для вкладки Trace. */
-export interface CallTrace {
-  name: string;
-  /** 0 — вызван прямо из запущенного */
-  depth: number;
-  args: Record<string, unknown>;
-  /** ответ взят из кеша прогона */
-  cached: boolean;
-  status: number | null;
-  duration_ms: number | null;
-}
-
-export interface RunOutcome {
-  request: { method: string; url: string; headers: Header[]; body: string | null };
-  response: {
-    status: number;
-    status_text: string;
-    headers: Header[];
-    body: string;
-    duration_ms: number;
-    size: number;
-  };
-  saved: Record<string, string>;
-  asserts: AssertOutcome[];
-  save_misses: string[];
-  /** *.routy: вызванные запросы */
-  calls?: CallTrace[];
-}
-
-export interface FlowOutcome {
-  checks: AssertOutcome[];
-  saved: Record<string, string>;
-  calls: CallTrace[];
-  /** шаг, на котором сценарий остановился */
-  error: string | null;
 }
 
 /** Результат запуска *.routy: ответ запроса или итог сценария. */
@@ -88,16 +42,6 @@ export interface ParseError {
   /** с 1; есть у ошибок *.routy */
   col: number | null;
   message: string;
-}
-
-/** Запись истории — она же результат отправки. */
-export interface Entry {
-  id: number;
-  file: string;
-  env: string;
-  /** Unix-время в миллисекундах */
-  at: number;
-  outcome: RunOutcome;
 }
 
 export interface VarName {

@@ -9,6 +9,12 @@
 //!
 //! Настройки (`initializationOptions` или `workspace/didChangeConfiguration` → `routy`):
 //! `env`, `keyring` (по умолчанию true), `import` (сравнение с Go, по умолчанию true), `goDir`.
+//!
+//! Клиент с `capabilities.experimental.routyUi: true` (расширение VS Code) показывает ответы
+//! сам: `routy.run` только возвращает итог (без файла и сообщений), code lens ведут на его
+//! команды (`routy.send`, `routy.sendIn`, `routy.copyCurl`), окружение — в его строке
+//! состояния. Для его панелей: запрос `routy/state` (окружения, запросы проекта, переменные)
+//! и уведомление `routy/didChange`, когда они могли измениться.
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -26,12 +32,18 @@ use routy_core::lang::ide::{self, Target};
 use routy_core::lang::scope::Binding;
 use routy_core::lang::{ItemRef, Workspace, ast};
 use routy_core::runner::Options;
-use routy_core::vars::{Source, VarInfo};
+use routy_core::vars::{Source, VarInfo, mask};
 use routy_core::{Project, Runner};
 use serde_json::{Value, json};
 
 pub const RUN_COMMAND: &str = "routy.run";
 pub const ENV_COMMAND: &str = "routy.selectEnv";
+pub const CURL_COMMAND: &str = "routy.curl";
+
+/// Команды клиента с `routyUi` (их регистрирует расширение, не сервер).
+const UI_SEND: &str = "routy.send";
+const UI_SEND_IN: &str = "routy.sendIn";
+const UI_CURL: &str = "routy.copyCurl";
 
 /// Флаги командной строки `routy lsp`; настройки клиента их перекрывают.
 #[derive(Debug, Clone, Default)]
@@ -93,7 +105,7 @@ fn capabilities() -> ServerCapabilities {
             resolve_provider: Some(false),
         }),
         execute_command_provider: Some(ExecuteCommandOptions {
-            commands: vec![RUN_COMMAND.into(), ENV_COMMAND.into()],
+            commands: vec![RUN_COMMAND.into(), ENV_COMMAND.into(), CURL_COMMAND.into()],
             ..Default::default()
         }),
         ..Default::default()
@@ -120,6 +132,8 @@ struct Client {
     show_document: bool,
     watch: bool,
     lens_refresh: bool,
+    /// Расширение routy: ответы, окружение и панели — его (см. описание модуля).
+    ui: bool,
 }
 
 struct Go {
@@ -169,6 +183,7 @@ impl Server {
             show_document: flag("/window/showDocument/support"),
             watch: flag("/workspace/didChangeWatchedFiles/dynamicRegistration"),
             lens_refresh: flag("/workspace/codeLens/refreshSupport"),
+            ui: flag("/experimental/routyUi"),
         };
         let settings = init.initialization_options.clone().unwrap_or(Value::Null);
         let setting = |k: &str| {
@@ -217,6 +232,7 @@ impl Server {
             waiting.clone(),
             ids.clone(),
             client.show_document,
+            client.ui,
         );
         let mut s = Server {
             out,
@@ -336,6 +352,13 @@ impl Server {
         );
     }
 
+    /// Окружение, запросы или переменные могли измениться: расширению — перечитать `routy/state`.
+    fn changed(&self) {
+        if self.client.ui {
+            self.notify("routy/didChange", json!({ "env": self.env }));
+        }
+    }
+
     // ---------- проект, переменные, рабочее пространство ----------
 
     fn load_runner(&mut self) {
@@ -441,6 +464,7 @@ impl Server {
         self.reload_workspace();
         self.go.scan = None;
         self.rescan_go();
+        self.changed();
     }
 
     fn set_env(&mut self, env: &str) {
@@ -458,7 +482,11 @@ impl Server {
         if self.client.lens_refresh {
             self.request("workspace/codeLens/refresh", ());
         }
-        self.message(MessageType::INFO, format!("routy: environment `{env}`"));
+        if self.client.ui {
+            self.changed();
+        } else {
+            self.message(MessageType::INFO, format!("routy: environment `{env}`"));
+        }
     }
 
     fn rescan_go(&mut self) {
@@ -707,6 +735,7 @@ impl Server {
                 }
                 self.reload_workspace();
                 self.publish();
+                self.changed();
             }
             "workspace/didChangeConfiguration" => {
                 let Ok(p) = serde_json::from_value::<DidChangeConfigurationParams>(n.params) else {
@@ -745,6 +774,7 @@ impl Server {
                 self.var_cache.clear();
                 self.vars_list = None;
                 self.publish();
+                self.changed();
             }
         }
     }
@@ -780,6 +810,7 @@ impl Server {
             "textDocument/formatting" => self.formatting(req.params),
             "textDocument/codeAction" => self.code_actions(req.params),
             "textDocument/codeLens" => self.code_lens(req.params),
+            "routy/state" => self.state(),
             "workspace/executeCommand" => match self.execute(id.clone(), req.params) {
                 // Ответ на запуск пришлёт поток запусков.
                 Ok(None) => return,
@@ -1168,7 +1199,7 @@ impl Server {
                 actions.push(CodeActionOrCommand::CodeAction(CodeAction {
                     command: Some(Command {
                         title: title.clone(),
-                        command: RUN_COMMAND.into(),
+                        command: if self.client.ui { UI_SEND } else { RUN_COMMAND }.into(),
                         arguments: Some(vec![json!(uri), json!(line)]),
                     }),
                     title,
@@ -1189,32 +1220,38 @@ impl Server {
             return Ok(Value::Null);
         }
         let mut lenses = Vec::new();
-        for (i, (_, name, line, flow)) in ide::runnables(&self.ws, fi).into_iter().enumerate() {
+        let lens = |line: usize, title: String, command: &str| {
             let at = Position::new(line.saturating_sub(1) as u32, 0);
-            let range = Range::new(at, at);
-            let title = match (flow, name) {
-                (true, _) => format!("▶ Run flow · {}", self.env),
-                (false, _) => format!("▶ Send · {}", self.env),
-            };
-            lenses.push(CodeLens {
-                range,
+            CodeLens {
+                range: Range::new(at, at),
                 command: Some(Command {
                     title,
-                    command: RUN_COMMAND.into(),
+                    command: command.into(),
                     arguments: Some(vec![json!(uri), json!(line)]),
                 }),
                 data: None,
-            });
-            if i == 0 && self.project.env_names().len() > 1 {
-                lenses.push(CodeLens {
-                    range,
-                    command: Some(Command {
-                        title: format!("env: {}", self.env),
-                        command: ENV_COMMAND.into(),
-                        arguments: None,
-                    }),
-                    data: None,
-                });
+            }
+        };
+        let several_envs = self.project.env_names().len() > 1;
+        for (i, (_, _, line, flow)) in ide::runnables(&self.ws, fi).into_iter().enumerate() {
+            let verb = if flow { "▶ Run flow" } else { "▶ Send" };
+            if self.client.ui {
+                lenses.push(lens(line, format!("{verb} · {}", self.env), UI_SEND));
+                if several_envs {
+                    lenses.push(lens(line, "in…".into(), UI_SEND_IN));
+                }
+                if !flow {
+                    lenses.push(lens(line, "Copy as curl".into(), UI_CURL));
+                }
+                continue;
+            }
+            lenses.push(lens(line, format!("{verb} · {}", self.env), RUN_COMMAND));
+            if i == 0 && several_envs {
+                let mut env = lens(line, format!("env: {}", self.env), ENV_COMMAND);
+                if let Some(c) = &mut env.command {
+                    c.arguments = None;
+                }
+                lenses.push(env);
             }
         }
         Ok(serde_json::to_value(lenses)?)
@@ -1224,14 +1261,23 @@ impl Server {
     fn execute(&mut self, id: RequestId, params: Value) -> anyhow::Result<Option<Value>> {
         let p: ExecuteCommandParams = serde_json::from_value(params)?;
         match p.command.as_str() {
-            RUN_COMMAND => {
-                let uri: Url = serde_json::from_value(
-                    p.arguments
-                        .first()
-                        .cloned()
-                        .context("routy.run takes [uri, line]")?,
-                )?;
+            RUN_COMMAND | CURL_COMMAND => {
+                let usage = || format!("{} takes [uri, line, env?]", p.command);
+                let uri: Url =
+                    serde_json::from_value(p.arguments.first().cloned().with_context(usage)?)?;
                 let line = p.arguments.get(1).and_then(Value::as_u64).unwrap_or(1) as usize;
+                let env = match p.arguments.get(2).and_then(Value::as_str) {
+                    None => self.env.clone(),
+                    Some(env) => {
+                        let names = self.project.env_names();
+                        anyhow::ensure!(
+                            names.is_empty() || names.iter().any(|n| n == env),
+                            "no environment `{env}` (have: {})",
+                            names.join(", ")
+                        );
+                        env.to_string()
+                    }
+                };
                 let (_, _, fi) = self.doc(&uri).context("no such file")?;
                 let fi = fi.context("the file has errors; fix them first")?;
                 let item = self
@@ -1242,11 +1288,12 @@ impl Server {
                 self.jobs
                     .send(Job {
                         id,
+                        curl: p.command == CURL_COMMAND,
                         ws: self.ws.clone(),
                         item,
                         name,
                         project: self.project.clone(),
-                        env: self.env.clone(),
+                        env,
                         keyring: self.keyring,
                     })
                     .context("run thread stopped")?;
@@ -1280,6 +1327,54 @@ impl Server {
             }
             other => anyhow::bail!("unknown command {other}"),
         }
+    }
+}
+
+impl Server {
+    /// `routy/state`: окружения, запросы и сценарии проекта, переменные текущего окружения
+    /// (секреты замаскированы).
+    fn state(&mut self) -> anyhow::Result<Value> {
+        let mut items = Vec::new();
+        for (fi, src) in self.ws.sources.iter().enumerate() {
+            let Ok(uri) = Url::from_file_path(&src.full) else {
+                continue;
+            };
+            for (r, name, line, flow) in ide::runnables(&self.ws, fi) {
+                let (method, target) = match self.ws.item(r) {
+                    ast::Item::Request(req) => {
+                        (req.method.as_str(), req.target.span.text(&src.text))
+                    }
+                    _ => ("", ""),
+                };
+                items.push(json!({
+                    "uri": uri,
+                    "path": slash(&src.path),
+                    "name": name,
+                    "flow": flow,
+                    "method": method,
+                    "target": target,
+                    "line": line,
+                }));
+            }
+        }
+        let vars: Vec<Value> = self
+            .vars()
+            .into_iter()
+            .map(|v| {
+                let value = match (&v.value, v.secret) {
+                    (Some(val), true) => Some(mask(val)),
+                    (value, _) => value.clone(),
+                };
+                json!({ "name": v.name, "value": value, "source": v.source, "secret": v.secret })
+            })
+            .collect();
+        Ok(json!({
+            "root": self.project.root,
+            "env": self.env,
+            "envs": self.project.env_names(),
+            "items": items,
+            "vars": vars,
+        }))
     }
 }
 
@@ -1477,6 +1572,8 @@ fn minimal_edit(before: &str, after: &str) -> Option<TextEdit> {
 
 struct Job {
     id: RequestId,
+    /// `routy.curl`: только подготовить запрос и вернуть команду curl.
+    curl: bool,
     ws: Workspace,
     item: ItemRef,
     name: String,
@@ -1485,14 +1582,19 @@ struct Job {
     keyring: bool,
 }
 
+/// `Runner` и `exec::Run` одного окружения проекта.
+type Sessions = HashMap<(PathBuf, String), (Runner, Run)>;
+
 /// Поток запусков: свой `Runner` и `exec::Run` на окружение (кеш вызовов и cookies живут,
-/// пока окружение то же — как в приложении), запросы по одному.
+/// пока жив сервер — как в приложении), запросы по одному. `quiet` — клиент с `routyUi`
+/// показывает итог сам: без файла ответа и сообщений.
 fn spawn_worker(
     out: Sender<Message>,
     done: Sender<Internal>,
     waiting: Waiting,
     ids: Arc<AtomicU64>,
     show_document: bool,
+    quiet: bool,
 ) -> Sender<Job> {
     let (tx, rx) = crossbeam_channel::unbounded::<Job>();
     std::thread::spawn(move || {
@@ -1502,28 +1604,35 @@ fn spawn_worker(
         else {
             return;
         };
-        let mut session: Option<(PathBuf, String, Runner, Run)> = None;
+        let mut sessions = Sessions::new();
+        let show = |typ, message: String| {
+            if !quiet {
+                let _ = out.send(
+                    Notification::new(
+                        "window/showMessage".into(),
+                        ShowMessageParams { typ, message },
+                    )
+                    .into(),
+                );
+            }
+        };
         for job in rx {
-            let result = run_job(&rt, &mut session, &job, &out, &waiting, &ids);
-            let response = match result {
-                Ok((outcome, file)) => {
+            let result = if job.curl {
+                curl_job(&rt, &mut sessions, &job, &out, &waiting, &ids).map(Value::String)
+            } else {
+                run_job(&rt, &mut sessions, &job, &out, &waiting, &ids).map(|outcome| {
                     let passed = outcome.passed();
-                    let summary = summary(&job.name, &job.env, &outcome);
                     let typ = if passed {
                         MessageType::INFO
                     } else {
                         MessageType::ERROR
                     };
-                    let _ = out.send(
-                        Notification::new(
-                            "window/showMessage".into(),
-                            ShowMessageParams {
-                                typ,
-                                message: summary,
-                            },
-                        )
-                        .into(),
-                    );
+                    show(typ, summary(&job.name, &job.env, &outcome));
+                    let file = if quiet {
+                        None
+                    } else {
+                        write_report(&job.name, &job.env, &outcome).ok()
+                    };
                     if let (true, Some(uri)) = (
                         show_document,
                         file.as_deref().and_then(|f| Url::from_file_path(f).ok()),
@@ -1539,28 +1648,29 @@ fn spawn_worker(
                                 .into(),
                         );
                     }
-                    Response::new_ok(
-                        job.id,
-                        json!({
-                            "name": job.name,
-                            "env": job.env,
-                            "passed": passed,
-                            "file": file,
-                            "outcome": outcome,
-                        }),
-                    )
-                }
+                    let mut result = json!({
+                        "name": job.name,
+                        "env": job.env,
+                        "passed": passed,
+                        "file": file,
+                        "outcome": outcome,
+                    });
+                    // Тело не UTF-8 (картинка, архив): в `body` оно испорчено, расширению — байты.
+                    if let (true, Outcome::Request(o)) = (quiet, &outcome) {
+                        if std::str::from_utf8(&o.response.raw).is_err() {
+                            use base64::Engine;
+                            result["raw"] = json!(
+                                base64::engine::general_purpose::STANDARD.encode(&o.response.raw)
+                            );
+                        }
+                    }
+                    result
+                })
+            };
+            let response = match result {
+                Ok(v) => Response::new_ok(job.id, v),
                 Err(e) => {
-                    let _ = out.send(
-                        Notification::new(
-                            "window/showMessage".into(),
-                            ShowMessageParams {
-                                typ: MessageType::ERROR,
-                                message: format!("✗ {}: {e:#}", job.name),
-                            },
-                        )
-                        .into(),
-                    );
+                    show(MessageType::ERROR, format!("✗ {}: {e:#}", job.name));
                     Response::new_err(
                         job.id,
                         lsp_server::ErrorCode::RequestFailed as i32,
@@ -1569,37 +1679,39 @@ fn spawn_worker(
                 }
             };
             let _ = out.send(response.into());
-            let _ = done.send(Internal::RunDone);
+            if !job.curl {
+                let _ = done.send(Internal::RunDone);
+            }
         }
     });
     tx
 }
 
-fn run_job(
-    rt: &tokio::runtime::Runtime,
-    session: &mut Option<(PathBuf, String, Runner, Run)>,
+/// Сессия окружения задания с текстами из задания и вопросом для `confirm: true`.
+fn session<'s>(
+    sessions: &'s mut Sessions,
     job: &Job,
     out: &Sender<Message>,
     waiting: &Waiting,
     ids: &Arc<AtomicU64>,
-) -> anyhow::Result<(Outcome, Option<PathBuf>)> {
-    let same = session
-        .as_ref()
-        .is_some_and(|(root, env, _, _)| *root == job.project.root && *env == job.env);
-    if !same {
-        let opts = Options {
-            use_keyring: job.keyring,
-            ..Options::default()
-        };
-        let runner = Runner::new(job.project.clone(), Some(&job.env), opts)?;
-        let run = Run::new(job.ws.clone(), Duration::from_secs(30))?;
-        *session = Some((job.project.root.clone(), job.env.clone(), runner, run));
-    }
-    let (_, env, runner, run) = session.as_mut().expect("session");
-    runner.load_saved()?;
-    run.set_workspace(job.ws.clone());
-    let (out, waiting, ids, env_name) = (out.clone(), waiting.clone(), ids.clone(), env.clone());
-    run.confirm = Some(Box::new(move |name, req| {
+) -> anyhow::Result<&'s mut (Runner, Run)> {
+    let s = match sessions.entry((job.project.root.clone(), job.env.clone())) {
+        std::collections::hash_map::Entry::Occupied(e) => e.into_mut(),
+        std::collections::hash_map::Entry::Vacant(e) => {
+            let opts = Options {
+                use_keyring: job.keyring,
+                ..Options::default()
+            };
+            let runner = Runner::new(job.project.clone(), Some(&job.env), opts)?;
+            let run = Run::new(job.ws.clone(), Duration::from_secs(30))?;
+            e.insert((runner, run))
+        }
+    };
+    s.0.load_saved()?;
+    s.1.set_workspace(job.ws.clone());
+    let (out, waiting, ids, env_name) =
+        (out.clone(), waiting.clone(), ids.clone(), job.env.clone());
+    s.1.confirm = Some(Box::new(move |name, req| {
         confirm(
             &out,
             &waiting,
@@ -1607,12 +1719,38 @@ fn run_job(
             &format!("Send {name} ({} {}) in `{env_name}`?", req.method, req.url),
         )
     }));
+    Ok(s)
+}
+
+fn run_job(
+    rt: &tokio::runtime::Runtime,
+    sessions: &mut Sessions,
+    job: &Job,
+    out: &Sender<Message>,
+    waiting: &Waiting,
+    ids: &Arc<AtomicU64>,
+) -> anyhow::Result<Outcome> {
+    let (runner, run) = session(sessions, job, out, waiting, ids)?;
     let outcome = rt.block_on(run.run_item(runner, job.item));
     run.confirm = None;
     runner.persist_saved()?;
-    let outcome = outcome?;
-    let file = write_report(&job.name, env, &outcome).ok();
-    Ok((outcome, file))
+    Ok(outcome?)
+}
+
+fn curl_job(
+    rt: &tokio::runtime::Runtime,
+    sessions: &mut Sessions,
+    job: &Job,
+    out: &Sender<Message>,
+    waiting: &Waiting,
+    ids: &Arc<AtomicU64>,
+) -> anyhow::Result<String> {
+    let (runner, run) = session(sessions, job, out, waiting, ids)?;
+    let resolved = rt.block_on(run.resolve_item(runner, job.item));
+    run.confirm = None;
+    runner.persist_saved()?;
+    let (req, body) = resolved?;
+    Ok(routy_core::curl::command(&req, body.as_deref()))
 }
 
 /// `confirm: true`: спросить клиента и ждать ответа (главный цикл передаст его сюда).

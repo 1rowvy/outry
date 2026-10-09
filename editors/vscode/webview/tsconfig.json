@@ -1,0 +1,26 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "isolatedModules": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "types": ["node"],
+    "paths": {
+      "@app/*": ["../../../app/src/*"],
+      "react": ["../node_modules/@types/react"],
+      "react/*": ["../node_modules/@types/react/*"],
+      "react-dom/*": ["../node_modules/@types/react-dom/*"],
+      "@codemirror/*": ["../node_modules/@codemirror/*"],
+      "@lezer/*": ["../node_modules/@lezer/*"]
+    },
+    "typeRoots": ["../node_modules/@types"]
+  },
+  "include": ["*.tsx", "*.ts", "*.d.ts"]
+}

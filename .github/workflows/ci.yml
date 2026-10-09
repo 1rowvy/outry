@@ -72,3 +72,28 @@ jobs:
       - run: npx --yes tree-sitter-cli@0.25.10 generate
       - run: git diff --exit-code -- src
       - run: npx --yes tree-sitter-cli@0.25.10 test
+
+  vscode:
+    name: VS Code extension
+    runs-on: ubuntu-22.04
+    defaults:
+      run:
+        working-directory: editors/vscode
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: editors/vscode/package-lock.json
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: npm ci
+      # Webview собирается из app/src (ResponseView и др.) — проверка типов и сборка ловят расхождения.
+      - run: npm run typecheck
+      - run: npm run build
+      - run: npx vsce package --no-dependencies -o routy.vsix
+      - run: cargo build -p routy-cli
+        working-directory: .
+      # Настоящий VS Code (скачивается) с расширением и `routy lsp` из target/debug.
+      - run: xvfb-run -a npm test

@@ -16,7 +16,7 @@ import {
   tooltips,
 } from "@codemirror/view";
 import { defaultKeymap, history, historyKeymap, indentWithTab } from "@codemirror/commands";
-import { HighlightStyle, StreamLanguage, bracketMatching, syntaxHighlighting } from "@codemirror/language";
+import { StreamLanguage, bracketMatching, syntaxHighlighting } from "@codemirror/language";
 import { toml } from "@codemirror/legacy-modes/mode/toml";
 import {
   autocompletion,
@@ -29,8 +29,8 @@ import {
 } from "@codemirror/autocomplete";
 import { lintGutter, setDiagnostics, type Diagnostic } from "@codemirror/lint";
 import { highlightSelectionMatches, searchKeymap } from "@codemirror/search";
-import { tags } from "@lezer/highlight";
 import type { ParseError, Symbols, VarName } from "./api";
+import { highlight, theme } from "./editorTheme";
 import { httpLanguage } from "./httpLanguage";
 import { BUILTINS, FIELDS, KEYWORDS, TYPES, routyLanguage } from "./routyLanguage";
 
@@ -170,91 +170,6 @@ class RunMarker extends GutterMarker {
 const runMarker = new RunMarker();
 /** Строка, с которой начинается запрос (`GET /x`) или сценарий (`flow X {`). */
 const RUNNABLE = /^([A-Z]{2,}\s|flow\s)/;
-
-export const highlight = HighlightStyle.define([
-  { tag: tags.keyword, color: "var(--accent)", fontWeight: "600" },
-  { tag: tags.url, color: "var(--text)" },
-  { tag: tags.special(tags.variableName), color: "var(--m-patch)", backgroundColor: "color-mix(in srgb, var(--m-patch) 12%, transparent)", borderRadius: "3px" },
-  { tag: tags.propertyName, color: "var(--m-put)" },
-  { tag: tags.string, color: "var(--m-get)" },
-  { tag: [tags.number, tags.atom], color: "var(--m-delete)" },
-  { tag: [tags.operator, tags.punctuation, tags.meta], color: "var(--muted)" },
-  { tag: tags.comment, color: "var(--faint)", fontStyle: "italic" },
-  { tag: tags.definitionKeyword, color: "var(--accent)" },
-  { tag: tags.function(tags.variableName), color: "var(--m-patch)", fontWeight: "600" },
-  { tag: [tags.standard(tags.function(tags.variableName)), tags.function(tags.propertyName)], color: "var(--m-put)" },
-  { tag: tags.typeName, color: "var(--m-delete)" },
-  { tag: tags.regexp, color: "var(--m-post)" },
-  { tag: tags.special(tags.brace), color: "var(--m-patch)" },
-]);
-
-export const theme = EditorView.theme({
-  "&": { height: "100%", backgroundColor: "transparent", color: "var(--text)" },
-  "&.cm-focused": { outline: "none" },
-  ".cm-scroller": { fontFamily: "var(--mono)", fontSize: "12.5px", lineHeight: "1.65" },
-  ".cm-content": { padding: "12px 0", caretColor: "var(--accent)" },
-  ".cm-line": { padding: "0 16px 0 6px" },
-  ".cm-gutters": { backgroundColor: "transparent", color: "var(--faint)", border: "none" },
-  ".cm-lineNumbers .cm-gutterElement": { padding: "0 4px 0 12px", minWidth: "32px" },
-  ".cm-activeLine": { backgroundColor: "var(--hover)" },
-  ".cm-activeLineGutter": { backgroundColor: "transparent", color: "var(--muted)" },
-  ".cm-cursor": { borderLeftColor: "var(--accent)", borderLeftWidth: "2px" },
-  "&.cm-focused .cm-selectionBackground, .cm-selectionBackground, ::selection": {
-    backgroundColor: "color-mix(in srgb, var(--accent) 22%, transparent) !important",
-  },
-  ".cm-selectionMatch": { backgroundColor: "color-mix(in srgb, var(--accent) 12%, transparent)" },
-  ".cm-matchingBracket": { backgroundColor: "var(--track)", outline: "1px solid var(--line)" },
-  ".cm-placeholder": { color: "var(--faint)" },
-  ".cm-lintRange-error": {
-    backgroundImage: "none",
-    textDecoration: "underline wavy var(--bad)",
-    textDecorationSkipInk: "none",
-    textUnderlineOffset: "3px",
-  },
-  ".cm-gutter-lint": { width: "12px" },
-  ".cm-run-gutter .cm-gutterElement": { padding: "0 2px 0 6px", cursor: "pointer" },
-  ".cm-run-marker": { color: "var(--m-get)", fontSize: "10px" },
-  ".cm-run-marker:hover": { color: "var(--accent)" },
-  ".cm-lint-marker": { width: "8px", height: "8px", content: "none" },
-  ".cm-lint-marker-error": { content: "none", borderRadius: "50%", backgroundColor: "var(--bad)" },
-  ".cm-tooltip": {
-    backgroundColor: "var(--raised)",
-    color: "var(--text)",
-    border: "1px solid var(--line)",
-    borderRadius: "8px",
-    boxShadow: "var(--panel-shadow)",
-    overflow: "hidden",
-  },
-  ".cm-tooltip-autocomplete > ul": { fontFamily: "var(--mono)", fontSize: "12px", maxHeight: "16em" },
-  ".cm-tooltip-autocomplete > ul > li": { padding: "3px 10px" },
-  ".cm-tooltip-autocomplete > ul > li[aria-selected]": {
-    backgroundColor: "color-mix(in srgb, var(--accent) 18%, transparent)",
-    color: "var(--text)",
-  },
-  ".cm-completionDetail": { color: "var(--faint)", fontStyle: "normal", marginLeft: "12px" },
-  ".cm-completionIcon": { display: "none" },
-  ".cm-tooltip-lint": { padding: "0" },
-  ".cm-diagnostic": { padding: "6px 10px", fontFamily: "var(--mono)", fontSize: "12px" },
-  ".cm-diagnostic-error": { borderLeft: "3px solid var(--bad)" },
-  ".cm-panels": { backgroundColor: "var(--panel)", color: "var(--text)" },
-  ".cm-panels.cm-panels-bottom": { borderTop: "1px solid var(--line)" },
-  ".cm-panels.cm-panels-top": { borderBottom: "1px solid var(--line)" },
-  ".cm-search": { fontFamily: "var(--sans)", fontSize: "12px", display: "flex", flexWrap: "wrap", alignItems: "center", gap: "4px 6px", padding: "6px 28px 6px 10px" },
-  ".cm-search br": { display: "none" },
-  ".cm-search input, .cm-search button": { margin: "0", padding: "2px 8px", fontSize: "12px" },
-  ".cm-textfield, .cm-button": {
-    backgroundColor: "var(--panel)",
-    backgroundImage: "none",
-    color: "var(--text)",
-    border: "1px solid var(--line)",
-    borderRadius: "6px",
-  },
-  ".cm-textfield:focus": { borderColor: "var(--accent)", outline: "none" },
-  ".cm-button:active": { backgroundImage: "none", backgroundColor: "var(--hover)" },
-  ".cm-search label": { display: "inline-flex", alignItems: "center", gap: "3px", color: "var(--muted)", fontSize: "12px" },
-  ".cm-search label input": { accentColor: "var(--accent)" },
-  ".cm-panel.cm-search [name=close]": { color: "var(--muted)", fontSize: "16px", top: "4px", right: "6px" },
-});
 
 function diagnostics(state: EditorState, errors: ParseError[]): Diagnostic[] {
   return errors
