@@ -24,11 +24,11 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           # Полная история нужна для «Последнее обновление» на страницах.
           fetch-depth: 0
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@v6
         with:
           node-version: 22
           cache: npm
@@ -38,7 +38,7 @@ jobs:
       # Сборка падает на битых внутренних ссылках (starlight-links-validator).
       - run: npm run build
         working-directory: docs
-      - uses: actions/upload-pages-artifact@v3
+      - uses: actions/upload-pages-artifact@v5
         if: github.event_name != 'pull_request'
         with:
           path: docs/dist
@@ -52,4 +52,4 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5
