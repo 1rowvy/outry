@@ -1,36 +1,36 @@
-# Routy — план
+# Outry — план
 
 API-клиент, где запросы — текстовые файлы в репозитории, а коллекция собирается сама из кода.
-Аналог Insomnia/Postman, но без облака и без экспорта/импорта коллекций: правда — в `api/*.routy` (раньше `*.http`).
+Аналог Insomnia/Postman, но без облака и без экспорта/импорта коллекций: правда — в `api/*.outry` (раньше `*.http`).
 
 ## Архитектура
 
 ```
-routy/
-├── crates/routy-core   вся логика, без UI: формат, переменные, окружения, секреты, HTTP, save/assert
-├── crates/routy-cli    бинарь `routy` поверх core — терминал и CI
+outry/
+├── crates/outry-core   вся логика, без UI: формат, переменные, окружения, секреты, HTTP, save/assert
+├── crates/outry-cli    бинарь `outry` поверх core — терминал и CI
 ├── app/                Tauri 2 + React + TS
-│   └── src-tauri       команды Tauri → routy-core, слежение за файлами (notify), автообновление
+│   └── src-tauri       команды Tauri → outry-core, слежение за файлами (notify), автообновление
 ├── examples/api        пример проекта (httpbin.org)
 └── .github/workflows   ci.yml, release.yml
 ```
 
 GUI и CLI не могут разъехаться: оба вызывают одни и те же `Runner::run` / `parse`.
-Крейт назван `routy-core`, а не `core`: имя `core` занято стандартной библиотекой Rust.
+Крейт назван `outry-core`, а не `core`: имя `core` занято стандартной библиотекой Rust.
 
 ### Разрешение переменных (приоритет сверху вниз)
 
 1. `--var name=value` (CLI) / ручные значения
-2. значения из `save` / `> save` (сохраняются между запусками в `~/.local/share/routy/state/`, не в репо)
-3. переменные процесса `ROUTY_<NAME>` — секреты в CI
+2. значения из `save` / `> save` (сохраняются между запусками в `~/.local/share/outry/state/`, не в репо)
+3. переменные процесса `OUTRY_<NAME>` — секреты в CI
 4. `[env.<name>]` из `env.toml`, затем общие `[vars]`
-5. системное хранилище паролей (`keyring`): `routy secret set token --env dev`
+5. системное хранилище паролей (`keyring`): `outry secret set token --env dev`
 
 ## Этапы
 
 Сделанное (этапы 0–5: каркас, core, CLI, desktop, переменные, импорт из Go) — в git-истории и README.
 
-### 1. Свой формат запросов `*.routy` — приоритет
+### 1. Свой формат запросов `*.outry` — приоритет
 C-подобный, декларативный, простой без знания Go: JSON-тело, выражения как в JS/Java/C#, запрос — как функция.
 Решаем до LSP и VS Code-расширения, иначе их придётся переделывать.
 
@@ -89,53 +89,53 @@ flow Checkout {
 - запрос — функция: `params { email: "…" }` с умолчаниями + path-параметры; вызов `Login(email: "a@b.c")`, результат — ответ
 - вызовы только как значения: в `headers`, `body`, `query`, `expect`, `flow`; никаких `if`, циклов, своих функций
 - кеш на прогон: тот же вызов с теми же аргументами выполняется один раз; `Login().fresh()` — заново
-- имена уникальны в проекте без импортов, при конфликте — с папкой (`users.Create()`); циклы и конфликты — ошибка `routy check`
+- имена уникальны в проекте без импортов, при конфликте — с папкой (`users.Create()`); циклы и конфликты — ошибка `outry check`
 - упавший `expect` вызванного запроса роняет вызывающий, ошибка с цепочкой: `CreateOrder → Login: status == 200 — got 401`
-- `flow Name { … }` — сценарий; `routy run Checkout`, кнопка в GUI; вкладка «Trace» с вызванными запросами
+- `flow Name { … }` — сценарий; `outry run Checkout`, кнопка в GUI; вкладка «Trace» с вызванными запросами
 
 Задачи:
-- [x] Спека: `docs/…/reference/routy-format.mdx` (EN + RU), подсветка `docs/src/routy.tmLanguage.json`;
+- [x] Спека: `docs/…/reference/outry-format.mdx` (EN + RU), подсветка `docs/src/outry.tmLanguage.json`;
   открытые вопросы закрыты (`run <каталог>` запускает всё, cookies на прогон + `cookies.x`, `cache:` в state-файле)
-- [x] `crates/routy-core/src/lang/`: парсер с позициями (`Span` у узлов, комментарии отдельно), вычислитель,
-  формы, `routy check` (синтаксис, имена с «did you mean», аргументы, формы, циклы) — `path:line:col`
+- [x] `crates/outry-core/src/lang/`: парсер с позициями (`Span` у узлов, комментарии отдельно), вычислитель,
+  формы, `outry check` (синтаксис, имена с «did you mean», аргументы, формы, циклы) — `path:line:col`
 - [x] Вызовы запросов, кеш на прогон, `fresh`, циклы, `flow`, `poll`, `only`, `confirm` (`--yes`), cookies;
-  `routy run` по файлу, каталогу, имени и `файл:строка`; trace вызовов в выводе CLI
+  `outry run` по файлу, каталогу, имени и `файл:строка`; trace вызовов в выводе CLI
 - [x] `cache: 30m` между прогонами (state-файл), `multipart`, `schema("…")` (подмножество JSON Schema, `lang/schema.rs`)
-- [x] `routy check --env prod`: `only`, неизвестные окружения и недостающие переменные без отправки (`lang/env_check.rs`)
-- [x] `routy fmt [--check]` — канонический вид из дерева с комментариями; элемент, который не печатается
+- [x] `outry check --env prod`: `only`, неизвестные окружения и недостающие переменные без отправки (`lang/env_check.rs`)
+- [x] `outry fmt [--check]` — канонический вид из дерева с комментариями; элемент, который не печатается
   без потерь, остаётся как был (проверка повторным разбором)
-- [x] `.http` — режим совместимости + `routy convert [--dry-run] [--rm]`
-- [x] Генерация `*.routy` в `import go`: имя и описание из doc-комментария, `handler:`, query → `params`,
+- [x] `.http` — режим совместимости + `outry convert [--dry-run] [--rm]`
+- [x] Генерация `*.outry` в `import go`: имя и описание из doc-комментария, `handler:`, query → `params`,
   тело из структуры; сопоставление по `handler`, затем по методу и пути
-- [x] GUI: запуск `*.routy` (прогон на окружение, элемент под курсором, ▶ на полях, `confirm` — диалог),
-  подсветка, `routy check` на лету, автодополнение, вкладка Trace, итог сценария
-- [x] `examples/api` (вызовы, форма, сценарий), README, docs (EN + RU), `routy init` — на новый формат
+- [x] GUI: запуск `*.outry` (прогон на окружение, элемент под курсором, ▶ на полях, `confirm` — диалог),
+  подсветка, `outry check` на лету, автодополнение, вкладка Trace, итог сценария
+- [x] `examples/api` (вызовы, форма, сценарий), README, docs (EN + RU), `outry init` — на новый формат
 
 ### 2. Коллекция, которая не устаревает (киллер-фича)
 Питч: «одна строка в CI — и API-тесты больше не разъедутся с кодом». Bruno/Postman о коде ничего не знают.
-Не просто «сходится / нет», а что поменялось в Go и что поправить в `.routy` — с автоправкой.
+Не просто «сходится / нет», а что поменялось в Go и что поправить в `.outry` — с автоправкой.
 - [x] Поле `handler: users.GetUser` в запросе: импорт пишет его, сопоставление по хендлеру переживает смену пути и метода
   (без `handler` — по методу и пути, `import/mod.rs`)
 - [x] Сравнение по полям: путь/метод, переименованный path-параметр, `required`-поле тела отсутствует в `body`,
   лишнее поле, сменился тип (`"25"` vs `int`), новые query/заголовки, удалённый роут, новый роут
   (`import/diff.rs` → `Existing::changes`; негативные тесты со `status` 4xx — только путь и метод)
-- [x] Тип ответа: `json.Encode` / `c.JSON` / `writeJSON` → `shape` в `shapes.routy` (`go/describe.rs`), новые запросы
+- [x] Тип ответа: `json.Encode` / `c.JSON` / `writeJSON` → `shape` в `shapes.outry` (`go/describe.rs`), новые запросы
   получают `body matches Order`; shape сравниваются со структурами (строже кода — можно), `--fix` переписывает
   несовместимые поля (`import/shapes.rs`)
-- [x] `routy import go --check`: отчёт по файлам со ссылкой на строку в Go, exit code 1 при ошибках (warning — нет)
+- [x] `outry import go --check`: отчёт по файлам со ссылкой на строку в Go, exit code 1 при ошибках (warning — нет)
 - [x] `--fix` — правки с diff (затронутый запрос печатается заново `fmt`), `--fix --dry-run`; `--prune` удаляет
   файлы, где все запросы — к пропавшим роутам
-- [x] `--format github` — аннотации на строках `.routy`/Go; `--format json` / `--json`
+- [x] `--format github` — аннотации на строках `.outry`/Go; `--format json` / `--json`
 - [x] GUI: во вкладке Routes бейдж «changed», diff и «Apply» на каждое изменение, «Fix N», «Remove N files»
-- [x] LSP: диагностика в `.routy` («path changed in code: …») + Quick Fix — `routy lsp` (этап 3)
+- [x] LSP: диагностика в `.outry` («path changed in code: …») + Quick Fix — `outry lsp` (этап 3)
 - [x] `.http`: сопоставление по методу и пути; сравниваются тело (если валидный JSON), query и заголовки, без правок
 - [x] `body matches Order` по Go-структуре: импорт генерирует shape из типа ответа
 
-### 3. Редакторы без GUI: `routy lsp`
-Протокол — `crates/routy-cli/src/lsp.rs` (`lsp-server` + `lsp-types`), подсказки — `lang/ide.rs`,
+### 3. Редакторы без GUI: `outry lsp`
+Протокол — `crates/outry-cli/src/lsp.rs` (`lsp-server` + `lsp-types`), подсказки — `lang/ide.rs`,
 области видимости имён — `lang/scope.rs` (общие с `check --env`).
-- [x] `routy lsp` (stdio, `lsp-server`) внутри того же бинаря; настройки `env`, `keyring`, `import`, `goDir`
-- [x] Диагностика как `routy check` + `check --env` текущего окружения (предупреждения); автодополнение
+- [x] `outry lsp` (stdio, `lsp-server`) внутри того же бинаря; настройки `env`, `keyring`, `import`, `goDir`
+- [x] Диагностика как `outry check` + `check --env` текущего окружения (предупреждения); автодополнение
   переменных (`Vars::list`), встроенных функций, имён запросов с аргументами, полей, форм, окружений в `only`
 - [x] Расхождения с кодом (`import::plan_with` по текстам из редактора) как диагностика со ссылкой на Go,
   `Edit` — как Quick Fix и «Fix all»; «did you mean» — тоже Quick Fix
@@ -143,38 +143,38 @@ flow Checkout {
 - [x] Go to definition: переменная → строка в `env.toml` и `save`, `Login()` → его файл, `Order` → объявление
   → Go-структура, `handler:` → роут
 - [x] Code lens «Send» / «Run flow» (и то же в code actions — для Helix) → ответ в
-  `~/.cache/routy/responses/<Name>.http` через `window/showDocument`; `confirm` — `showMessageRequest`
-- [x] Грамматика tree-sitter `editors/tree-sitter-routy` + запросы подсветки (Neovim/Zed и Helix), проверка в CI
+  `~/.cache/outry/responses/<Name>.http` через `window/showDocument`; `confirm` — `showMessageRequest`
+- [x] Грамматика tree-sitter `editors/tree-sitter-outry` + запросы подсветки (Neovim/Zed и Helix), проверка в CI
 - [x] Страница в docs: настройка редакторов (Neovim, Helix, остальные)
-- [ ] Расширение для Zed (грамматика + запуск `routy lsp`) — вместе с этапом 4
+- [ ] Расширение для Zed (грамматика + запуск `outry lsp`) — вместе с этапом 4
 
 ### 4. VS Code-расширение
-`editors/vscode`: LSP-клиент + интерфейс; логика вся в `routy`, своих правил в расширении нет. Сервер знает
-о таком клиенте по `experimental.routyUi` (`routy/state`, `routy/didChange`, команды расширения в code lens).
-- [x] Платформенные VSIX с бинарём `routy` внутри (из архивов CLI релиза) + универсальный без него — в
+`editors/vscode`: LSP-клиент + интерфейс; логика вся в `outry`, своих правил в расширении нет. Сервер знает
+о таком клиенте по `experimental.outryUi` (`outry/state`, `outry/didChange`, команды расширения в code lens).
+- [x] Платформенные VSIX с бинарём `outry` внутри (из архивов CLI релиза) + универсальный без него — в
   `release.yml`; публикация в Marketplace + Open VSX, когда заданы `VSCE_PAT` / `OVSX_PAT`
-- [x] Code lens «▶ Send», «in…» (другое окружение), «Copy as curl» (`routy.curl`, `Run::resolve_item`);
+- [x] Code lens «▶ Send», «in…» (другое окружение), «Copy as curl» (`outry.curl`, `Run::resolve_item`);
   ответ в webview — ResponseView / FlowView / BodyViewer из `app/src` (vite alias `@app`, типы — `app/src/types.ts`)
 - [x] Окружение в строке состояния; боковая панель: дерево запросов и сценариев, переменные
 - [x] Интеграционный тест в настоящем VS Code (`npm test`, в CI под xvfb)
 - [ ] Боковая панель: Routes с синхронизацией (пока — диагностика и Quick Fix), история ответов
-- [ ] Публикация: создать издателя `routy` в Marketplace и namespace в Open VSX, секреты в репозитории
+- [ ] Публикация: создать издателя `outry` в Marketplace и namespace в Open VSX, секреты в репозитории
 
 ### 5. MCP для AI-агентов
-- [ ] `routy mcp` (stdio): «список запросов», «выполнить запрос/flow в env», «показать переменные» поверх `Runner`/`Vars`
-- [ ] Секреты подставляются внутри routy и не попадают к агенту (значения из keyring/`secrets` маскируются)
+- [ ] `outry mcp` (stdio): «список запросов», «выполнить запрос/flow в env», «показать переменные» поверх `Runner`/`Vars`
+- [ ] Секреты подставляются внутри outry и не попадают к агенту (значения из keyring/`secrets` маскируются)
 - [ ] Страница в docs: подключение к Claude Code / Cursor
 
 ### 6. Распространение
-- [ ] install.sh и `routy update` для macOS (архивы уже есть) и Windows (`install.ps1`, zip)
+- [ ] install.sh и `outry update` для macOS (архивы уже есть) и Windows (`install.ps1`, zip)
 - [ ] Пакетные менеджеры для CLI: Homebrew tap, AUR, COPR, Scoop/winget
 - [ ] Подпись и нотаризация macOS, подпись Windows-установщика
 
 ### Потом
 - CI-обвязка для этапа 2: JUnit-отчёт (`--report junit.xml`); рецепт для CI в docs (GitHub Actions, GitLab)
-  и готовый `routy-action`
+  и готовый `outry-action`
 - Импорт роутов из других языков (FastAPI, Express, Spring) — когда Go-история заработает
-- Импорт из Postman / Insomnia / OpenAPI в `*.routy`
+- Импорт из Postman / Insomnia / OpenAPI в `*.outry`
 - GraphQL, WebSocket — не раньше этапов 1–4
 
 ## Релизы и автообновление
@@ -186,7 +186,7 @@ flow Checkout {
    и обновить `plugins.updater.pubkey`.
 2. GitHub → Settings → Secrets → Actions:
    `TAURI_SIGNING_PRIVATE_KEY` = содержимое `~/.tauri/routy.key`, `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` = пароль (или пусто).
-3. Если репозиторий не `github.com/1rowvy/routy` — поправить `endpoints` в `tauri.conf.json` и `repository` в `Cargo.toml`.
+3. Если репозиторий не `github.com/1rowvy/outry` — поправить `endpoints` в `tauri.conf.json` и `repository` в `Cargo.toml`.
 
 **Каждый релиз:**
 ```sh
@@ -201,4 +201,4 @@ git commit -am "release v0.2.0" && git tag v0.2.0 && git push && git push origin
 macOS (`.app.tar.gz`), Windows (NSIS-установщик), Linux — только AppImage (`.deb`/`.rpm` обновляются пакетным менеджером).
 
 **Не подписано:** macOS-сборки без Apple Developer ID — Gatekeeper ругается при первом запуске
-(`xattr -dr com.apple.quarantine /Applications/Routy.app`). Секреты для подписи перечислены в шапке `release.yml`.
+(`xattr -dr com.apple.quarantine /Applications/Outry.app`). Секреты для подписи перечислены в шапке `release.yml`.

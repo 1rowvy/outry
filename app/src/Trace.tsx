@@ -1,4 +1,4 @@
-// Запросы, вызванные из *.routy (`Login()`), с вложенностью: что ушло в сеть, что взято из кеша.
+// Запросы, вызванные из *.outry (`Login()`), с вложенностью: что ушло в сеть, что взято из кеша.
 import type { CallTrace } from "./types";
 
 function args(a: Record<string, unknown>): string {

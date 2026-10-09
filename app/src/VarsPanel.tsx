@@ -1,10 +1,10 @@
-// Панель переменных: итоговое значение и откуда оно пришло (как `routy vars`).
+// Панель переменных: итоговое значение и откуда оно пришло (как `outry vars`).
 import type { VarInfo, VarSource } from "./api";
 
 const SOURCES: Record<VarSource, { label: string; title: string }> = {
   override: { label: "override", title: "Set manually" },
   saved: { label: "saved", title: "Captured by > save" },
-  process_env: { label: "ROUTY_*", title: "Process environment variable" },
+  process_env: { label: "OUTRY_*", title: "Process environment variable" },
   env: { label: "env.toml", title: "[env.<name>] or [vars] in env.toml" },
   secret: { label: "keychain", title: "System keychain" },
   dynamic: { label: "dynamic", title: "Generated on every request" },
@@ -14,7 +14,7 @@ interface Props {
   env: string | null;
   vars: VarInfo[];
   onClearSaved: () => void;
-  /** *.routy: новый прогон — забыть кеш вызовов и cookies */
+  /** *.outry: новый прогон — забыть кеш вызовов и cookies */
   onResetRun: () => void;
   onSetSecret: (name: string) => void;
 }
@@ -28,7 +28,7 @@ export function VarsPanel({ env, vars, onClearSaved, onResetRun, onSetSecret }: 
           Environment <b>{env ?? "default"}</b>
         </span>
         <span className="spacer" />
-        <button className="ghost" onClick={onResetRun} title="Forget responses of called requests (Login() and the like) and cookies — the next .routy run starts fresh">
+        <button className="ghost" onClick={onResetRun} title="Forget responses of called requests (Login() and the like) and cookies — the next .outry run starts fresh">
           New run
         </button>
         <button className="ghost" onClick={onClearSaved} disabled={saved === 0} title="Forget values captured by save in this environment">
@@ -65,8 +65,8 @@ export function VarsPanel({ env, vars, onClearSaved, onResetRun, onSetSecret }: 
         </table>
       )}
       <p className="vars-note">
-        First match wins: override → saved → <code>ROUTY_NAME</code> → env.toml → keychain. Keychain secrets and{" "}
-        <code>ROUTY_*</code> are only shown for names that appear in env.toml or its <code>secrets</code> list. Also
+        First match wins: override → saved → <code>OUTRY_NAME</code> → env.toml → keychain. Keychain secrets and{" "}
+        <code>OUTRY_*</code> are only shown for names that appear in env.toml or its <code>secrets</code> list. Also
         available: <code>{"{{$uuid}}"}</code>, <code>{"{{$timestamp}}"}</code>, <code>{"{{$randomInt 1 100}}"}</code>.
       </p>
     </div>

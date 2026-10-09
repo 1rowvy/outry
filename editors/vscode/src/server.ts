@@ -1,4 +1,4 @@
-// `routy lsp` и всё, что расширение у него спрашивает: состояние для панелей, запуск, curl.
+// `outry lsp` и всё, что расширение у него спрашивает: состояние для панелей, запуск, curl.
 import { execFile } from "node:child_process";
 import * as vscode from "vscode";
 import {
@@ -14,16 +14,16 @@ import {
 import { findBinary } from "./binary";
 import type { RunResult, State } from "./protocol";
 
-/** Первая версия с `experimental.routyUi`; со старой `routy lsp` либо нет, либо панели пустые. */
+/** Первая версия с `experimental.outryUi`; со старой `outry lsp` либо нет, либо панели пустые. */
 const MIN_VERSION = [0, 6, 0];
 
 /** Выбранное в строке состояния окружение — на рабочую папку. */
-const ENV_KEY = "routy.env";
+const ENV_KEY = "outry.env";
 
-/** `experimental.routyUi`: ответы, окружение и панели показывает расширение, а не сервер. */
+/** `experimental.outryUi`: ответы, окружение и панели показывает расширение, а не сервер. */
 class UiFeature implements StaticFeature {
   fillClientCapabilities(capabilities: ClientCapabilities): void {
-    capabilities.experimental = { ...(capabilities.experimental as object | undefined), routyUi: true };
+    capabilities.experimental = { ...(capabilities.experimental as object | undefined), outryUi: true };
   }
   initialize(): void {}
   getState(): FeatureState {
@@ -54,23 +54,23 @@ export class Server implements vscode.Disposable {
     const bin = findBinary(this.ctx.extensionPath);
     if (!bin) {
       const pick = await vscode.window.showErrorMessage(
-        "Routy: the `routy` binary was not found. Install it or set `routy.path`.",
+        "Outry: the `outry` binary was not found. Install it or set `outry.path`.",
         "Install",
         "Settings",
       );
       if (pick === "Install") {
-        void vscode.env.openExternal(vscode.Uri.parse("https://1rowvy.github.io/routy/install/"));
+        void vscode.env.openExternal(vscode.Uri.parse("https://1rowvy.github.io/outry/install/"));
       } else if (pick === "Settings") {
-        void vscode.commands.executeCommand("workbench.action.openSettings", "routy.path");
+        void vscode.commands.executeCommand("workbench.action.openSettings", "outry.path");
       }
       return;
     }
     if (!(await this.checkVersion(bin))) {
       return;
     }
-    const cfg = vscode.workspace.getConfiguration("routy");
+    const cfg = vscode.workspace.getConfiguration("outry");
     const options: LanguageClientOptions = {
-      documentSelector: [{ scheme: "file", language: "routy" }],
+      documentSelector: [{ scheme: "file", language: "outry" }],
       initializationOptions: {
         env: this.ctx.workspaceState.get<string>(ENV_KEY) || cfg.get<string>("env") || undefined,
         keyring: cfg.get<boolean>("keyring"),
@@ -79,21 +79,21 @@ export class Server implements vscode.Disposable {
       },
       outputChannel: this.output,
     };
-    const client = new LanguageClient("routy", "Routy", { command: bin, args: ["lsp"] }, options);
+    const client = new LanguageClient("outry", "Outry", { command: bin, args: ["lsp"] }, options);
     client.registerFeature(new UiFeature());
-    client.onNotification("routy/didChange", () => this.scheduleRefresh());
-    this.output.appendLine(`routy: ${bin}`);
+    client.onNotification("outry/didChange", () => this.scheduleRefresh());
+    this.output.appendLine(`outry: ${bin}`);
     try {
       await client.start();
     } catch (e) {
-      void vscode.window.showErrorMessage(`Routy: could not start \`${bin} lsp\`: ${message(e)}`);
+      void vscode.window.showErrorMessage(`Outry: could not start \`${bin} lsp\`: ${message(e)}`);
       return;
     }
     this.client = client;
     await this.refresh();
   }
 
-  /** Старый `routy` падает на `lsp` сразу, и клиент пишет только `write EPIPE` — проверяем заранее. */
+  /** Старый `outry` падает на `lsp` сразу, и клиент пишет только `write EPIPE` — проверяем заранее. */
   private async checkVersion(bin: string): Promise<boolean> {
     const out = await new Promise<string>((resolve) =>
       execFile(bin, ["--version"], { timeout: 10_000 }, (err, stdout) => resolve(err ? "" : stdout)),
@@ -103,18 +103,18 @@ export class Server implements vscode.Disposable {
       return true;
     }
     const what = found ? `is ${found.join(".")}` : "did not report its version";
-    this.output.appendLine(`routy: ${bin} ${what}, need ${MIN_VERSION.join(".")}+`);
+    this.output.appendLine(`outry: ${bin} ${what}, need ${MIN_VERSION.join(".")}+`);
     const pick = await vscode.window.showErrorMessage(
-      `Routy: \`${bin}\` ${what}; the extension needs ${MIN_VERSION.join(".")} or newer.`,
+      `Outry: \`${bin}\` ${what}; the extension needs ${MIN_VERSION.join(".")} or newer.`,
       "Update",
       "Settings",
     );
     if (pick === "Update") {
-      const term = vscode.window.createTerminal("routy update");
+      const term = vscode.window.createTerminal("outry update");
       term.show();
       term.sendText(`"${bin}" update`);
     } else if (pick === "Settings") {
-      void vscode.commands.executeCommand("workbench.action.openSettings", "routy.path");
+      void vscode.commands.executeCommand("workbench.action.openSettings", "outry.path");
     }
     return false;
   }
@@ -134,7 +134,7 @@ export class Server implements vscode.Disposable {
     await this.start();
   }
 
-  /** `routy/didChange` приходит пачками (сохранение нескольких файлов) — перечитываем один раз. */
+  /** `outry/didChange` приходит пачками (сохранение нескольких файлов) — перечитываем один раз. */
   private scheduleRefresh(): void {
     clearTimeout(this.timer);
     this.timer = setTimeout(() => void this.refresh(), 150);
@@ -145,13 +145,13 @@ export class Server implements vscode.Disposable {
       return;
     }
     try {
-      this.state = await this.client.sendRequest<State>("routy/state");
+      this.state = await this.client.sendRequest<State>("outry/state");
     } catch (e) {
       this.state = null;
       if (e instanceof ResponseError && e.code === ErrorCodes.MethodNotFound && !this.warnedOld) {
         this.warnedOld = true;
         void vscode.window.showWarningMessage(
-          "Routy: this `routy` is older than the extension — panels and the response view need a newer one. Run `routy update`.",
+          "Outry: this `outry` is older than the extension — panels and the response view need a newer one. Run `outry update`.",
         );
       }
     }
@@ -167,15 +167,15 @@ export class Server implements vscode.Disposable {
 
   /** Запрос или сценарий на строке `line` (с 1); `env` — другое окружение, не текущее. */
   run(uri: string, line: number, env?: string): Promise<RunResult> {
-    return this.command("routy.run", env ? [uri, line, env] : [uri, line]);
+    return this.command("outry.run", env ? [uri, line, env] : [uri, line]);
   }
 
   curl(uri: string, line: number, env?: string): Promise<string> {
-    return this.command("routy.curl", env ? [uri, line, env] : [uri, line]);
+    return this.command("outry.curl", env ? [uri, line, env] : [uri, line]);
   }
 
   async selectEnv(env: string): Promise<void> {
-    await this.command("routy.selectEnv", [env]);
+    await this.command("outry.selectEnv", [env]);
     await this.ctx.workspaceState.update(ENV_KEY, env);
   }
 

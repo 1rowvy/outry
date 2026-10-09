@@ -1,26 +1,26 @@
 ---
 title: Import routes from Go
-description: Generate .routy requests for every chi, gin and net/http route of a Go service.
+description: Generate .outry requests for every chi, gin and net/http route of a Go service.
 ---
 
-Routy can read your Go service's source code, find the registered routes and create a `.routy` request
+Outry can read your Go service's source code, find the registered routes and create a `.outry` request
 for every route that doesn't have one yet. Existing requests are compared with the code, so the
-collection doesn't drift from the service: `routy import go --check` fails CI when it does, and
+collection doesn't drift from the service: `outry import go --check` fails CI when it does, and
 `--fix` updates the requests. Existing files change only with `--fix`.
 
 ```sh
 cd my-service
-routy init              # once: api/env.toml with `base`
-routy import go .       # scan the whole repository
+outry init              # once: api/env.toml with `base`
+outry import go .       # scan the whole repository
 ```
 
 ```txt
-+ api/users/get.routy        GET /users  internal/http/routes.go:24
-+ api/users/get-by-id.routy  GET /users/{id}  internal/http/routes.go:25
-= api/users/create.routy     POST /users  internal/http/routes.go:26
-~ api/users/update.routy     PUT /users/{id}  internal/http/routes.go:27
-    api/users/update.routy:4:9  error    body field `age` is a string, code expects int
-- api/legacy/get.routy       GET /legacy  (no such route in code)
++ api/users/get.outry        GET /users  internal/http/routes.go:24
++ api/users/get-by-id.outry  GET /users/{id}  internal/http/routes.go:25
+= api/users/create.outry     POST /users  internal/http/routes.go:26
+~ api/users/update.outry     PUT /users/{id}  internal/http/routes.go:27
+    api/users/update.outry:4:9  error    body field `age` is a string, code expects int
+- api/legacy/get.outry       GET /legacy  (no such route in code)
 
 14 Go files, 4 routes: 2 new, 2 existing (1 changed), 1 not in code
 created 2 files
@@ -28,7 +28,7 @@ created 2 files
 ```
 
 - `+` — a new file was created for the route;
-- `=` — a request for this route already exists (under any name, in `.routy` or `.http`);
+- `=` — a request for this route already exists (under any name, in `.outry` or `.http`);
 - `~` — the request exists, but differs from the code: the
   [differences](#differences-from-the-code) are listed under it;
 - `-` — a request points at `base`, but no such route was found in the code.
@@ -58,9 +58,9 @@ preview the file before creating it.
 ## Generated files
 
 Path parameters keep the router notation: `{id}`, `{id:[0-9]+}`, `{path...}`, `:id` and `*path` all turn
-into `{id}` / `{path}` — [parameters](/routy/reference/routy-format/#parameters) of the request.
+into `{id}` / `{path}` — [parameters](/outry/reference/outry-format/#parameters) of the request.
 
-Routy also reads the handler to show what the request expects:
+Outry also reads the handler to show what the request expects:
 
 - **description** — the handler's doc comment, or `@Summary` / `@Description` from swag annotations;
 - **body** — the struct the request is decoded into: `json.NewDecoder(r.Body).Decode(&req)`,
@@ -77,7 +77,7 @@ Routy also reads the handler to show what the request expects:
   and `gin.H` / maps are skipped. The request gets `expect { body matches Order }`, and the struct
   becomes a [shape](#response-shapes).
 
-```routy title="api/users/post.routy"
+```outry title="api/users/post.outry"
 // Sends a welcome email.
 // chi internal/http/users.go:42 → h.CreateUser
 //
@@ -92,7 +92,7 @@ CreateUser: POST /users {
 }
 ```
 
-```routy title="api/users/get.routy"
+```outry title="api/users/get.outry"
 // ListUsers returns a page of users.
 // chi internal/http/users.go:22 → h.ListUsers
 //
@@ -128,24 +128,24 @@ File names follow the path: static segments become folders, trailing parameters 
 
 | Route | File |
 |-------|------|
-| `GET /users` | `users/get.routy` |
-| `POST /users` | `users/post.routy` |
-| `GET /users/{id}` | `users/get-by-id.routy` |
-| `GET /users/{id}/posts` | `users/posts/get.routy` |
-| `GET /` | `root/get.routy` |
+| `GET /users` | `users/get.outry` |
+| `POST /users` | `users/post.outry` |
+| `GET /users/{id}` | `users/get-by-id.outry` |
+| `GET /users/{id}/posts` | `users/posts/get.outry` |
+| `GET /` | `root/get.outry` |
 
-If the name is taken by a file for a different route (`.routy` or `.http`), a suffix is added:
-`users/get-2.routy`.
+If the name is taken by a file for a different route (`.outry` or `.http`), a suffix is added:
+`users/get-2.outry`.
 
 ## Middleware
 
-Routy collects the middleware each route goes through: `r.Use(…)` above it in the same function and
+Outry collects the middleware each route goes through: `r.Use(…)` above it in the same function and
 block, the group's `r.Group("/v1", auth)` (gin), `r.With(auth).Get(…)` and
 `r.Group(func(r chi.Router) { r.Use(auth); … })` (chi), and the middleware of a router passed to another
 function (`routes.Register(authed)`). The generated file lists them under the source line; middleware
 that every route has (logging, recovery) is left out.
 
-Tell Routy which headers a middleware needs in [`env.toml`](/routy/reference/env-toml/), and requests
+Tell Outry which headers a middleware needs in [`env.toml`](/outry/reference/env-toml/), and requests
 for routes behind it get them right away:
 
 ```toml title="api/env.toml"
@@ -153,7 +153,7 @@ for routes behind it get them right away:
 AuthRequired = { headers = { Authorization = "Bearer ${Login().body.token}" } }
 ```
 
-```routy title="api/orders/get.routy"
+```outry title="api/orders/get.outry"
 // gin internal/router/router.go:31 → h.Orders.List
 // middleware: middleware.AuthRequired()
 ListOrders: GET /orders {
@@ -164,14 +164,14 @@ ListOrders: GET /orders {
 
 The key is the middleware's name as written in the code: `AuthRequired` matches
 `middleware.AuthRequired()`, `mw.AuthRequired` and `AuthRequired`; `mw.RequireRole` matches any
-`mw.RequireRole(…)`. A header value is a `.routy` string, so `${…}` is an
-[expression](/routy/reference/expressions/) — here a call of the `Login` request, which is sent once and
+`mw.RequireRole(…)`. A header value is a `.outry` string, so `${…}` is an
+[expression](/outry/reference/expressions/) — here a call of the `Login` request, which is sent once and
 cached. An existing request without the header gets a [warning with a fix](#differences-from-the-code).
 
 ## Matching existing requests
 
 A request counts as the request for a route when its `handler:` names the route's handler. Requests
-without `handler` match by method and path, ignoring the query string: in `.routy` paths starting with
+without `handler` match by method and path, ignoring the query string: in `.outry` paths starting with
 `/` (appended to `base`), in `.http` URLs starting with `{{base}}`. Parameters match any name, so
 `/users/{user_id}` covers `GET /users/{id}`, and so does a concrete value — `/users/42` — unless the code
 has a static `/users/42` route of its own. Rename and reorganize the generated files freely — the next
@@ -213,7 +213,7 @@ parameters and headers, without fixes. Their method and path are what they were 
 
 ### What `--fix` changes
 
-A fix changes only the spot it is about, and the request it touches is reprinted the way `routy fmt`
+A fix changes only the spot it is about, and the request it touches is reprinted the way `outry fmt`
 does; the rest of the file stays as it was.
 
 - a new method or path; path parameters keep the request's names (`{user_id}` stays even if the code
@@ -225,15 +225,15 @@ does; the rest of the file stays as it was.
 - `body matches Order` is added to `expect`;
 - a header from [`[import.middleware]`](#middleware) is added to `headers`.
 
-Parameter renames, query parameters and other headers are left to you — Routy doesn't know their values.
+Parameter renames, query parameters and other headers are left to you — Outry doesn't know their values.
 
 ## Response shapes
 
-A struct the handler responds with becomes a [shape](/routy/reference/routy-format/#shapes), and the
-generated request checks the response with `body matches`. Shapes go to `shapes.routy` in the project
+A struct the handler responds with becomes a [shape](/outry/reference/outry-format/#shapes), and the
+generated request checks the response with `body matches`. Shapes go to `shapes.outry` in the project
 (or the file that already has shapes), one per Go type, with its location in a comment:
 
-```routy title="api/shapes.routy"
+```outry title="api/shapes.outry"
 // dto.Order — internal/dto/order.go:12
 shape Order {
   id: integer,
@@ -254,32 +254,32 @@ The next imports compare the shapes with the code. A shape may be stricter than 
 instead of `string` (`status: "new" | "paid"`), `integer` instead of `number`, no `null` — that is not
 a difference. A field that is not in the struct, or a type that contradicts it, is an error; a field
 missing from the shape is a warning. `--fix` rewrites the shape by the code and keeps your compatible
-fields as they are. Shapes for new types are added by `routy import go` like new requests.
+fields as they are. Shapes for new types are added by `outry import go` like new requests.
 
 ## Checking in CI and fixing
 
 ```sh
-routy import go . --check                  # report by file, exit code 1 on errors
-routy import go . --check --format github  # the same as GitHub Actions annotations
-routy import go . --fix --dry-run          # diff of all fixes
-routy import go . --fix                    # apply them (and create new files)
-routy import go . --prune                  # delete files whose routes are all gone
+outry import go . --check                  # report by file, exit code 1 on errors
+outry import go . --check --format github  # the same as GitHub Actions annotations
+outry import go . --fix --dry-run          # diff of all fixes
+outry import go . --fix                    # apply them (and create new files)
+outry import go . --prune                  # delete files whose routes are all gone
 ```
 
 `--check` writes nothing. It fails on new routes without a request, requests whose route is gone,
 response types without a shape and on differences that are errors:
 
 ```txt
-api/users/update.routy
+api/users/update.outry
   4:9     error    body field `age` is a string, code expects int  ← internal/http/routes.go:27
 
 internal/http/routes.go
-  24:1    error    route GET /users has no request (`routy import go` creates api/users/get.routy)
+  24:1    error    route GET /users has no request (`outry import go` creates api/users/get.outry)
 
-2 routes checked: 2 errors, 0 warnings; 1 fixable with `routy import go --fix`
+2 routes checked: 2 errors, 0 warnings; 1 fixable with `outry import go --fix`
 ```
 
-With `--format github` each line becomes an annotation on the `.routy` file — or on the Go line, for a
+With `--format github` each line becomes an annotation on the `.outry` file — or on the Go line, for a
 new route — so it shows up in the pull request. `--format json` (or `--json`) prints the whole plan:
 `existing[].changes` with `severity`, `go`, `fixable` and the `diff` of each fix, `shape_changes`,
 `new_shapes`, `stale` and `prunable`.
@@ -291,11 +291,11 @@ nothing else (flows, shapes, `let`). Other stale requests are listed for you to 
 
 Routes are found by [tree-sitter queries](https://tree-sitter.github.io/tree-sitter/using-parsers/queries/)
 — the built-in ones live in
-[`crates/routy-core/queries`](https://github.com/1rowvy/routy/tree/master/crates/routy-core/queries).
+[`crates/outry-core/queries`](https://github.com/1rowvy/outry/tree/master/crates/outry-core/queries).
 To support another router, write your own query and pass it with `--query`:
 
 ```scheme title="echo.scm"
-; routy: import github.com/labstack/echo
+; outry: import github.com/labstack/echo
 (call_expression
   function: (selector_expression
     operand: (_) @receiver
@@ -305,7 +305,7 @@ To support another router, write your own query and pass it with `--query`:
 ```
 
 ```sh
-routy import go . --query echo.scm
+outry import go . --query echo.scm
 ```
 
 | Capture | Meaning |
@@ -320,5 +320,5 @@ routy import go . --query echo.scm
 | `@middleware` | Middleware of a `@route` or `@group`, any number: `(argument_list . (_) @path (_)* @middleware (_) @handler .)` |
 | `@use` + `@middleware` | Middleware for the routes of `@receiver`: as a statement (`r.Use(mw)`) for routes below it in the same function and block, inside a call chain (`r.With(mw).Get`) for that call only |
 
-Captures starting with `_` are free for predicates. A `; routy: import <path>` line limits the query to
+Captures starting with `_` are free for predicates. A `; outry: import <path>` line limits the query to
 files importing a package with that prefix.

@@ -7,7 +7,7 @@ import { Aside } from '@astrojs/starlight/components';
 
 ## `expect` — check the response
 
-```routy title="api/users/create.routy"
+```outry title="api/users/create.outry"
 CreateUser: POST /users {
   body { name: "Viktor" }
 
@@ -26,21 +26,21 @@ One check per line; each must be true. All checks run, even after a failure, and
 why:
 
 ```txt
-✗ api/users/create.routy  CreateUser  POST http://localhost:8080/users  201 Created  9ms 211B
+✗ api/users/create.outry  CreateUser  POST http://localhost:8080/users  201 Created  9ms 211B
     ✓ status == 201
     ✗ body.name == "Viktor"  — body.name is "viktor"
     ✗ body matches { id: string, name: string, tags?: [string] }  — body.id: expected string, got 42
 ```
 
 Comparisons don't coerce types (`"1" != 1`), a missing field is `null` instead of an error, and
-`matches` takes a regular expression, an inline shape, a named [shape](/routy/reference/routy-format/#shapes)
-or a JSON Schema file. All operators and methods: [Expressions](/routy/reference/routy-format/#expressions).
+`matches` takes a regular expression, an inline shape, a named [shape](/outry/reference/outry-format/#shapes)
+or a JSON Schema file. All operators and methods: [Expressions](/outry/reference/outry-format/#expressions).
 
 ## Calling another request
 
 A request is a function: call it by name, and the result is its response.
 
-```routy title="api/auth/login.routy"
+```outry title="api/auth/login.outry"
 Login: POST /auth/login {
   params {
     email: "dev@example.com"
@@ -52,7 +52,7 @@ Login: POST /auth/login {
 }
 ```
 
-```routy title="api/users/me.routy"
+```outry title="api/users/me.outry"
 Me: GET /me {
   headers { Authorization: "Bearer ${Login().body.token}" }
   expect { status == 200 }
@@ -60,11 +60,11 @@ Me: GET /me {
 ```
 
 ```sh
-routy run api/users/me.routy   # logs in first, by itself
+outry run api/users/me.outry   # logs in first, by itself
 ```
 
 ```txt
-✓ api/users/me.routy  Me  GET http://localhost:8080/me  200 OK  8ms 96B
+✓ api/users/me.outry  Me  GET http://localhost:8080/me  200 OK  8ms 96B
     ↳ Login  200  31ms
     ✓ status == 200
 ```
@@ -78,17 +78,17 @@ routy run api/users/me.routy   # logs in first, by itself
 - **Failures propagate.** If `Login` fails its `expect`, `Me` fails too, with the chain:
 
   ```txt
-  ✗ api/users/me.routy  Me
+  ✗ api/users/me.outry  Me
       Me → Login: status == 200 — status is 401
   ```
 - **Cookies** from `Set-Cookie` are kept for the whole run, like in a browser.
 
 Request names are unique in the project; when two folders have a `Create`, call `users.Create()`.
-`routy check` reports unknown names, wrong arguments and call cycles.
+`outry check` reports unknown names, wrong arguments and call cycles.
 
 ## `flow` — a scenario
 
-```routy title="api/flows/checkout.routy"
+```outry title="api/flows/checkout.outry"
 // Checkout
 flow Checkout {
   user = CreateUser(name: "Bob")
@@ -100,30 +100,30 @@ flow Checkout {
 ```
 
 Steps run top to bottom and the flow stops at the first failure. In the app the flow shows a trace of
-every request it called. Run it by name: `routy run Checkout`.
+every request it called. Run it by name: `outry run Checkout`.
 
 ## `save` — keep a value
 
-```routy
+```outry
 save order_id = body.id
 ```
 
 A saved value is a variable for later requests in the run **and** is remembered between runs, per
-project and environment — so after one `routy run CreateOrder`, `GetOrder` alone still knows `order_id`.
-Values are stored outside the repository; see [Saved values](/routy/guides/variables/#saved-values).
+project and environment — so after one `outry run CreateOrder`, `GetOrder` alone still knows `order_id`.
+Values are stored outside the repository; see [Saved values](/outry/guides/variables/#saved-values).
 Prefer calls for things like tokens: they don't depend on what ran before.
 
 ## Exit codes
 
-`routy run` exits with:
+`outry run` exits with:
 
 - `0` — every request was sent and every check and save succeeded;
 - `1` — at least one request failed (a check, a save, a network error, a missing variable);
-- `2` — Routy could not start: invalid arguments, unknown environment, broken `env.toml`.
+- `2` — Outry could not start: invalid arguments, unknown environment, broken `env.toml`.
 
 Use `--fail-fast` to stop at the first failed request.
 
 <Aside>
 In `.http` files the same is done with `> save` and `> assert` lines at the end of the file — see
-[.http directives](/routy/reference/expressions/).
+[.http directives](/outry/reference/expressions/).
 </Aside>

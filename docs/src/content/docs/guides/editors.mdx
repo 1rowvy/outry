@@ -1,49 +1,49 @@
 ---
 title: Editors
-description: Edit .routy files in VS Code, Neovim, Helix or any editor with an LSP client — errors, completion, go to definition and sending requests come from `routy lsp`.
+description: Edit .outry files in VS Code, Neovim, Helix or any editor with an LSP client — errors, completion, go to definition and sending requests come from `outry lsp`.
 ---
 
 import { Aside } from '@astrojs/starlight/components';
 
-`routy lsp` is a language server built into the CLI: the same checks, names and variables as
-`routy check` and the desktop app, in your own editor. For VS Code (and Cursor, Windsurf, VSCodium) there is
+`outry lsp` is a language server built into the CLI: the same checks, names and variables as
+`outry check` and the desktop app, in your own editor. For VS Code (and Cursor, Windsurf, VSCodium) there is
 an extension with a response view; any other editor with an LSP client can use the server directly, with
 syntax highlighting from the tree-sitter grammar in
-[`editors/tree-sitter-routy`](https://github.com/1rowvy/routy/tree/master/editors/tree-sitter-routy).
+[`editors/tree-sitter-outry`](https://github.com/1rowvy/outry/tree/master/editors/tree-sitter-outry).
 
 ## What you get
 
-- **Errors as you type** — everything [`routy check`](/routy/reference/cli/#routy-check) reports: syntax,
+- **Errors as you type** — everything [`outry check`](/outry/reference/cli/#outry-check) reports: syntax,
   unknown requests and shapes (with a quick fix for “did you mean”), call arguments, cycles.
-- **Environment warnings** — what `routy check --env` reports for the current environment: variables
+- **Environment warnings** — what `outry check --env` reports for the current environment: variables
   that aren't defined and calls to requests limited by `only`.
 - **Differences from the Go code** — in a Go project, what
-  [`routy import go --check`](/routy/guides/import-go/#differences-from-the-code) reports, on the lines of
+  [`outry import go --check`](/outry/guides/import-go/#differences-from-the-code) reports, on the lines of
   the request, with a link to the handler. Differences that `--fix` can fix have a quick fix, and
   “Fix all differences with the code” fixes the whole file. Unsaved edits count.
 - **Completion** — request fields at the start of a line, requests and flows with their parameters,
   call arguments, variables of the current environment (secrets masked), saved values, file `let`s,
   parameters, built-in functions, value methods after `.`, shapes after `matches`, environments in
   `only: [...]`, common header names.
-- **Hover** — a variable's value and where it comes from (`env.toml`, keychain, `ROUTY_*`, `save`;
+- **Hover** — a variable's value and where it comes from (`env.toml`, keychain, `OUTRY_*`, `save`;
   secrets masked), a called request's method, path, description and parameters, a shape's fields.
 - **Go to definition** — a call → the request or flow; a variable → its line in `env.toml` and the
   `save`s that set it; a shape → its declaration, and from the declaration → the Go struct; `handler:` →
   the route in Go.
 - **Send** — a code lens “▶ Send · dev” above every request (“▶ Run flow” above flows), and the same
-  in the code actions menu. The response is written to `~/.cache/routy/responses/<Name>.http` and opened
+  in the code actions menu. The response is written to `~/.cache/outry/responses/<Name>.http` and opened
   next to the request; the result is shown as a message. Calls, the run cache, cookies and saved values
   work as in the app; `confirm: true` asks first.
-- **Format** — `routy fmt` as document formatting.
+- **Format** — `outry fmt` as document formatting.
 - **Outline** — requests, flows, shapes and `let`s of the file.
 
 ## VS Code
 
-Install **Routy API Client** from the [Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=routy.routy-vscode)
-or, in Cursor, Windsurf and VSCodium, from [Open VSX](https://open-vsx.org/extension/routy/routy-vscode). The packages for
-Linux, macOS and Windows include `routy`, so nothing else is needed. Elsewhere [install the CLI](/routy/install/):
-the extension finds it on `PATH` or in `~/.local/bin`, or set `routy.path`. Each
-[release](https://github.com/1rowvy/routy/releases) also has the `.vsix` files for
+Install **Outry API Client** from the [Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=outry.outry-vscode)
+or, in Cursor, Windsurf and VSCodium, from [Open VSX](https://open-vsx.org/extension/outry/outry-vscode). The packages for
+Linux, macOS and Windows include `outry`, so nothing else is needed. Elsewhere [install the CLI](/outry/install/):
+the extension finds it on `PATH` or in `~/.local/bin`, or set `outry.path`. Each
+[release](https://github.com/1rowvy/outry/releases) also has the `.vsix` files for
 **Extensions → ⋯ → Install from VSIX…**.
 
 Besides everything above, the extension adds:
@@ -61,23 +61,23 @@ Besides everything above, the extension adds:
 
 | Setting | Default | |
 |---------|---------|---|
-| `routy.path` | the bundled binary, then `PATH` | Path to `routy` |
-| `routy.env` | `default` from `env.toml` | Environment to start with |
-| `routy.keyring`, `routy.import`, `routy.goDir` | | As `keyring`, `import`, `goDir` in [Settings](#settings) |
+| `outry.path` | the bundled binary, then `PATH` | Path to `outry` |
+| `outry.env` | `default` from `env.toml` | Environment to start with |
+| `outry.keyring`, `outry.import`, `outry.goDir` | | As `keyring`, `import`, `goDir` in [Settings](#settings) |
 
-The output of the language server is in **Output → Routy**; **Routy: Restart Language Server** restarts it
-(after `routy update`, for example).
+The output of the language server is in **Output → Outry**; **Outry: Restart Language Server** restarts it
+(after `outry update`, for example).
 
 ## Neovim
 
 Neovim 0.11 or newer:
 
 ```lua
-vim.filetype.add({ extension = { routy = "routy" } })
+vim.filetype.add({ extension = { outry = "outry" } })
 
-vim.lsp.config("routy", {
-  cmd = { "routy", "lsp" },
-  filetypes = { "routy" },
+vim.lsp.config("outry", {
+  cmd = { "outry", "lsp" },
+  filetypes = { "outry" },
   root_markers = { "env.toml", ".git" },
   -- init_options = { env = "dev" },
   handlers = {
@@ -89,30 +89,30 @@ vim.lsp.config("routy", {
     end,
   },
 })
-vim.lsp.enable("routy")
+vim.lsp.enable("outry")
 
 -- Code lenses: keep them fresh and send the request under the cursor.
 vim.api.nvim_create_autocmd({ "LspAttach", "BufEnter", "InsertLeave" }, {
-  pattern = "*.routy",
+  pattern = "*.outry",
   callback = function(ev) vim.lsp.codelens.refresh({ bufnr = ev.buf }) end,
 })
-vim.keymap.set("n", "<leader>rs", vim.lsp.codelens.run, { desc = "Routy: send" })
+vim.keymap.set("n", "<leader>rs", vim.lsp.codelens.run, { desc = "Outry: send" })
 ```
 
 Highlighting: build the parser and copy the queries (Neovim reads `parser/` and `queries/` from its
 runtime path):
 
 ```sh
-git clone --depth 1 https://github.com/1rowvy/routy /tmp/routy
-cd /tmp/routy/editors/tree-sitter-routy
-mkdir -p ~/.local/share/nvim/site/parser ~/.config/nvim/queries/routy
-cc -shared -fPIC -O2 -I src -o ~/.local/share/nvim/site/parser/routy.so src/parser.c
-cp queries/highlights.scm ~/.config/nvim/queries/routy/
+git clone --depth 1 https://github.com/1rowvy/outry /tmp/outry
+cd /tmp/outry/editors/tree-sitter-outry
+mkdir -p ~/.local/share/nvim/site/parser ~/.config/nvim/queries/outry
+cc -shared -fPIC -O2 -I src -o ~/.local/share/nvim/site/parser/outry.so src/parser.c
+cp queries/highlights.scm ~/.config/nvim/queries/outry/
 ```
 
 ```lua
 vim.api.nvim_create_autocmd("FileType", {
-  pattern = "routy",
+  pattern = "outry",
   callback = function() vim.treesitter.start() end,
 })
 ```
@@ -122,31 +122,31 @@ vim.api.nvim_create_autocmd("FileType", {
 In `~/.config/helix/languages.toml`:
 
 ```toml
-[language-server.routy]
-command = "routy"
+[language-server.outry]
+command = "outry"
 args = ["lsp"]
 
 [[language]]
-name = "routy"
-scope = "source.routy"
-file-types = ["routy"]
+name = "outry"
+scope = "source.outry"
+file-types = ["outry"]
 roots = ["env.toml"]
 comment-token = "//"
 block-comment-tokens = { start = "/*", end = "*/" }
 indent = { tab-width = 2, unit = "  " }
-language-servers = ["routy"]
+language-servers = ["outry"]
 
 [[grammar]]
-name = "routy"
-# rev: a branch, tag or commit of the routy repository
-source = { git = "https://github.com/1rowvy/routy", rev = "master", subpath = "editors/tree-sitter-routy" }
+name = "outry"
+# rev: a branch, tag or commit of the outry repository
+source = { git = "https://github.com/1rowvy/outry", rev = "master", subpath = "editors/tree-sitter-outry" }
 ```
 
 ```sh
 hx --grammar fetch && hx --grammar build
-mkdir -p ~/.config/helix/runtime/queries/routy
-curl -fsSL https://raw.githubusercontent.com/1rowvy/routy/master/editors/tree-sitter-routy/queries/helix/highlights.scm \
-  -o ~/.config/helix/runtime/queries/routy/highlights.scm
+mkdir -p ~/.config/helix/runtime/queries/outry
+curl -fsSL https://raw.githubusercontent.com/1rowvy/outry/master/editors/tree-sitter-outry/queries/helix/highlights.scm \
+  -o ~/.config/helix/runtime/queries/outry/highlights.scm
 ```
 
 Helix has no code lenses: **Send** is in the code actions menu (<kbd>Space</kbd> <kbd>a</kbd>) on any
@@ -154,16 +154,16 @@ line of a request. If the response file is already open, `:reload` shows the new
 
 ## Other editors
 
-Any LSP client works: the command is `routy lsp` over stdio (`--stdio` is accepted and ignored), the
-language id is `routy`, files are `*.routy`.
+Any LSP client works: the command is `outry lsp` over stdio (`--stdio` is accepted and ignored), the
+language id is `outry`, files are `*.outry`.
 
-The grammar in `editors/tree-sitter-routy` (with `queries/highlights.scm` in the capture names of
+The grammar in `editors/tree-sitter-outry` (with `queries/highlights.scm` in the capture names of
 nvim-treesitter and Zed) can be used by any editor that loads tree-sitter grammars.
 
 ## Settings
 
 Pass them as `initializationOptions` (`init_options` in Neovim), or later with
-`workspace/didChangeConfiguration` as `{ "routy": { … } }`:
+`workspace/didChangeConfiguration` as `{ "outry": { … } }`:
 
 | Setting | Default | Meaning |
 |---------|---------|---------|
@@ -172,21 +172,21 @@ Pass them as `initializationOptions` (`init_options` in Neovim), or later with
 | `import` | `true` | Compare requests with the Go code |
 | `goDir` | the parent of `api/`, else the project folder | Folder with the Go code, relative to the workspace root |
 
-`routy lsp --env <ENV>` and `--no-keyring` do the same from the command line.
+`outry lsp --env <ENV>` and `--no-keyring` do the same from the command line.
 
 Commands (`workspace/executeCommand`), for key bindings and editor extensions:
 
 | Command | Arguments | |
 |---------|-----------|---|
-| `routy.run` | `[uri, line, env?]` | Send the request or run the flow at `line` (1-based), in `env` if given instead of the current environment. Returns the outcome as JSON |
-| `routy.curl` | `[uri, line, env?]` | The request at `line` as a `curl` command (a string). Calls in it are sent, the request is not |
-| `routy.selectEnv` | `[env]` or none | Switch the environment; without an argument the editor shows a choice |
+| `outry.run` | `[uri, line, env?]` | Send the request or run the flow at `line` (1-based), in `env` if given instead of the current environment. Returns the outcome as JSON |
+| `outry.curl` | `[uri, line, env?]` | The request at `line` as a `curl` command (a string). Calls in it are sent, the request is not |
+| `outry.selectEnv` | `[env]` or none | Switch the environment; without an argument the editor shows a choice |
 
 When the project has several environments, the code lens “env: dev” above the first request runs
-`routy.selectEnv`.
+`outry.selectEnv`.
 
 <Aside>
 The project is found the same way as by the CLI: from the workspace folder up to `env.toml` or
-`api/env.toml`. Values saved by **Send** go to the same state file as `routy run` and the app use, so
+`api/env.toml`. Values saved by **Send** go to the same state file as `outry run` and the app use, so
 they are shared.
 </Aside>

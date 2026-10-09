@@ -26,11 +26,11 @@ import { UpdateBanner } from "./UpdateBanner";
 import { useUpdates } from "./updater";
 import { VarsPanel } from "./VarsPanel";
 
-const LAST_PROJECT_KEY = "routy.lastProject";
-const AUTO_UPDATE_KEY = "routy.autoUpdate";
-const PERSIST_HISTORY_KEY = "routy.persistHistory";
+const LAST_PROJECT_KEY = "outry.lastProject";
+const AUTO_UPDATE_KEY = "outry.autoUpdate";
+const PERSIST_HISTORY_KEY = "outry.persistHistory";
 /** + корень проекта: каталог с Go-кодом для синхронизации роутов */
-const IMPORT_DIR_KEY = "routy.importDir:";
+const IMPORT_DIR_KEY = "outry.importDir:";
 const CONFIG = "env.toml";
 const CONFIG_EXAMPLE = `default = "dev"
 secrets = ["token"]
@@ -44,16 +44,16 @@ base = "http://localhost:8080"
 [env.prod]
 base = "https://api.example.com"`;
 const NEW_REQUEST = "GET {{base}}/\n\n> assert status == 200\n";
-const NEW_ROUTY = "GET / {\n  expect { status == 200 }\n}\n";
-const REQUEST_EXT = /\.(http|routy)$/;
+const NEW_OUTRY = "GET / {\n  expect { status == 200 }\n}\n";
+const REQUEST_EXT = /\.(http|outry)$/;
 
-const isRouty = (path: string | null) => !!path?.endsWith(".routy");
+const isOutry = (path: string | null) => !!path?.endsWith(".outry");
 
 // Метод из строки запроса — только для метки в шапке; разбирает ядро.
-// В *.routy — запрос или сценарий, на котором стоит курсор.
-function requestMethod(text: string, routy: boolean, cursor: number): string {
+// В *.outry — запрос или сценарий, на котором стоит курсор.
+function requestMethod(text: string, outry: boolean, cursor: number): string {
   const lines = text.split("\n");
-  if (routy) {
+  if (outry) {
     let found = "";
     for (let i = 0; i < lines.length; i++) {
       const m = /^(?:[\p{L}_][\p{L}\p{N}_]*:\s+)?([A-Z]{2,})\s|^(flow)\s/u.exec(lines[i]);
@@ -74,9 +74,9 @@ function requestMethod(text: string, routy: boolean, cursor: number): string {
 /** Последний ответ, ошибка и запрос в полёте — на каждый файл, чтобы запросы шли параллельно. */
 interface Run {
   entry?: Entry;
-  /** *.routy: итог сценария */
+  /** *.outry: итог сценария */
   flow?: FlowOutcome;
-  /** *.routy: что запускали */
+  /** *.outry: что запускали */
   name?: string;
   error?: string;
   /** id для отмены */
@@ -91,8 +91,8 @@ interface PathForm {
   value: string;
 }
 
-/** `users/create` → `users/create.routy` (или с расширением `ext`); каталоги — без расширения. */
-function normalizePath(value: string, isDir: boolean, ext = ".routy"): string {
+/** `users/create` → `users/create.outry` (или с расширением `ext`); каталоги — без расширения. */
+function normalizePath(value: string, isDir: boolean, ext = ".outry"): string {
   const p = value.trim().replace(/^\/+|\/+$/g, "");
   return isDir || REQUEST_EXT.test(p) ? p : p + ext;
 }
@@ -105,7 +105,7 @@ function movedPath(path: string, from: string, to: string): string | null {
 }
 
 /** Вопрос с «OK»/«Cancel»: `window.confirm` у Tauri асинхронный и сам по себе не ждёт ответа. */
-const sure = (message: string) => confirm(message, { title: "Routy", kind: "warning" });
+const sure = (message: string) => confirm(message, { title: "Outry", kind: "warning" });
 
 function storage(key: string, value?: string | null): string | null {
   try {
@@ -169,9 +169,9 @@ export default function App() {
   const shown = opened ?? run?.entry ?? null;
   const bump = () => setTick((t) => t + 1);
   const isConfig = selected === CONFIG;
-  const routy = isRouty(selected);
+  const outry = isOutry(selected);
   const parseError = parseErrors[0] ?? null;
-  const method = requestMethod(content, routy, cursor);
+  const method = requestMethod(content, outry, cursor);
   const cut = (selected ?? "").lastIndexOf("/") + 1;
   const dir = (selected ?? "").slice(0, cut);
   const name = (selected ?? "").slice(cut).replace(REQUEST_EXT, "");
@@ -271,23 +271,23 @@ export default function App() {
     api.history().then(setHistory, () => setHistory([]));
   }, [root, tick]);
 
-  // Проверка на лету: синтаксис, а в *.routy — ещё имена вызовов, аргументы и формы (routy check).
+  // Проверка на лету: синтаксис, а в *.outry — ещё имена вызовов, аргументы и формы (outry check).
   useEffect(() => {
     if (!selected) return;
     const one = (e: ParseError | null) => setParseErrors(e ? [e] : []);
     const t = window.setTimeout(() => {
       if (selected === CONFIG) api.checkConfig(content).then(one);
-      else if (isRouty(selected)) api.checkRouty(selected, content).then(setParseErrors, (e) => one({ line: null, col: null, message: String(e) }));
+      else if (isOutry(selected)) api.checkOutry(selected, content).then(setParseErrors, (e) => one({ line: null, col: null, message: String(e) }));
       else api.checkRequest(content).then(one);
     }, 150);
     return () => clearTimeout(t);
   }, [content, selected]);
 
-  // Имена запросов и сценариев для автодополнения в *.routy.
+  // Имена запросов и сценариев для автодополнения в *.outry.
   useEffect(() => {
-    if (!project || !routy) return;
-    api.routySymbols().then(setSymbols, () => setSymbols(null));
-  }, [project, routy, selected, savedContent]);
+    if (!project || !outry) return;
+    api.outrySymbols().then(setSymbols, () => setSymbols(null));
+  }, [project, outry, selected, savedContent]);
 
   const select = async (path: string) => {
     if (dirty && !(await sure("You have unsaved changes. Open another file?"))) return;
@@ -322,8 +322,8 @@ export default function App() {
     setOpened(null);
     setView("response");
     try {
-      if (isRouty(path)) {
-        const res = await api.runRouty(id, env, path, content, line ?? cursor);
+      if (isOutry(path)) {
+        const res = await api.runOutry(id, env, path, content, line ?? cursor);
         setRuns((r) => ({ ...r, [path]: { entry: res.entry ?? undefined, flow: res.flow ?? undefined, name: res.name } }));
       } else {
         const entry = await api.sendRequest(id, env, path, content);
@@ -420,13 +420,13 @@ export default function App() {
   const submitPath = async () => {
     if (!pathForm) return;
     const from = pathForm.from;
-    const ext = from?.isFile ? (from.path.match(REQUEST_EXT)?.[0] ?? ".routy") : ".routy";
+    const ext = from?.isFile ? (from.path.match(REQUEST_EXT)?.[0] ?? ".outry") : ".outry";
     const path = normalizePath(pathForm.value, from ? !from.isFile : false, ext);
     if (!path || REQUEST_EXT.test(path) && path.replace(REQUEST_EXT, "") === "") return;
     try {
       if (!from) {
         if (project?.files.includes(path)) throw new Error(`${path} already exists`);
-        await api.writeRequest(path, isRouty(path) ? NEW_ROUTY : NEW_REQUEST);
+        await api.writeRequest(path, isOutry(path) ? NEW_OUTRY : NEW_REQUEST);
         setPathForm(null);
         await refresh();
         await select(path);
@@ -462,7 +462,7 @@ export default function App() {
   };
 
   const duplicate = async (path: string) => {
-    const ext = path.match(REQUEST_EXT)?.[0] ?? ".routy";
+    const ext = path.match(REQUEST_EXT)?.[0] ?? ".outry";
     const base = path.replace(REQUEST_EXT, "");
     let copy = `${base}-copy${ext}`;
     for (let i = 2; project?.files.includes(copy); i++) copy = `${base}-copy${i}${ext}`;
@@ -648,7 +648,7 @@ export default function App() {
           <div className="panel empty">
             <h1>Open a project</h1>
             <p>
-              Routy will find <code>api/env.toml</code> and every <code>*.routy</code> and <code>*.http</code> file in the
+              Outry will find <code>api/env.toml</code> and every <code>*.outry</code> and <code>*.http</code> file in the
               folder.
             </p>
             <button className="primary" onClick={pickFolder}>Choose folder</button>
@@ -696,9 +696,9 @@ export default function App() {
                               className="primary"
                               onClick={() => send()}
                               disabled={!!parseError}
-                              title={routy ? "Run the request or flow at the cursor (Ctrl+Enter)" : "Ctrl+Enter"}
+                              title={outry ? "Run the request or flow at the cursor (Ctrl+Enter)" : "Ctrl+Enter"}
                             >
-                              {routy ? "Run" : "Send"}
+                              {outry ? "Run" : "Send"}
                             </button>
                           )}
                         </>
@@ -708,7 +708,7 @@ export default function App() {
                       docKey={selected}
                       value={content}
                       onChange={setContent}
-                      language={isConfig ? "toml" : routy ? "routy" : "http"}
+                      language={isConfig ? "toml" : outry ? "outry" : "http"}
                       errors={parseErrors}
                       vars={vars}
                       symbols={symbols}
@@ -799,7 +799,7 @@ export default function App() {
                     <pre>{CONFIG_EXAMPLE}</pre>
                     <p>
                       Don't put tokens or passwords here — they belong in the system keychain: "Add secret" at the bottom
-                      left, or a <code>ROUTY_NAME</code> environment variable. List their names in <code>secrets</code> and
+                      left, or a <code>OUTRY_NAME</code> environment variable. List their names in <code>secrets</code> and
                       the Variables tab will show which ones are missing.
                     </p>
                   </div>

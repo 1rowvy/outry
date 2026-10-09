@@ -1,25 +1,25 @@
 ---
 title: CLI
-description: Все команды и флаги routy.
+description: Все команды и флаги outry.
 ---
 
 ```txt
-routy <КОМАНДА>
+outry <КОМАНДА>
 ```
 
-## `routy run`
+## `outry run`
 
 Отправить запросы и выполнить их директивы.
 
 ```sh
-routy run <ПУТИ|ИМЕНА>...
+outry run <ПУТИ|ИМЕНА>...
 ```
 
-Папки раскрываются во все `*.routy` и `*.http` внутри них по алфавиту; файл `.routy` выполняет все свои
+Папки раскрываются во все `*.outry` и `*.http` внутри них по алфавиту; файл `.outry` выполняет все свои
 запросы и сценарии сверху вниз. Явно указанные файлы выполняются в заданном порядке. Запрос или сценарий
-можно указать по имени (`CreateOrder`, `users.Create`) или по строке (`api/orders.routy:12`). Значения из
-`save` передаются следующим запросам; запросы, вызванные из `.routy`, делят один
-[кеш прогона](/routy/ru/reference/routy-format/#кеширование) и cookies.
+можно указать по имени (`CreateOrder`, `users.Create`) или по строке (`api/orders.outry:12`). Значения из
+`save` передаются следующим запросам; запросы, вызванные из `.outry`, делят один
+[кеш прогона](/outry/ru/reference/outry-format/#кеширование) и cookies.
 
 | Флаг | Описание |
 |------|----------|
@@ -34,132 +34,132 @@ routy run <ПУТИ|ИМЕНА>...
 | `--no-keyring` | Не искать секреты в системном хранилище паролей |
 | `--yes` | Отправлять запросы с `confirm: true` без вопроса |
 
-Код выхода: `0` — всё прошло, `1` — хотя бы один запрос упал, `2` — Routy не смог запуститься.
+Код выхода: `0` — всё прошло, `1` — хотя бы один запрос упал, `2` — Outry не смог запуститься.
 
-## `routy check`
+## `outry check`
 
 Проверить проект без отправки запросов. Код выхода `1`, если есть ошибка.
 
 ```sh
-routy check [ПУТИ]... [--env <ENV>] [--var <NAME=VALUE>]... [--no-keyring]
+outry check [ПУТИ]... [--env <ENV>] [--var <NAME=VALUE>]... [--no-keyring]
             [--no-fmt] [--go <DIR> | --no-go] [--format text|github]
 ```
 
-Без путей (или с путём к самому проекту, `routy check api`) проверяется всё:
+Без путей (или с путём к самому проекту, `outry check api`) проверяется всё:
 
-- синтаксис, а в `.routy` ещё имена вызываемых запросов, их аргументы, формы, файлы `schema()` и циклы вызовов;
+- синтаксис, а в `.outry` ещё имена вызываемых запросов, их аргументы, формы, файлы `schema()` и циклы вызовов;
 - каждое окружение: вызовы запросов, которым `only` его запрещает, неизвестные окружения в `only` и
   переменные, которых в окружении нет нигде (имена из `save` где-либо в проекте считаются заданными).
   Хранилище паролей не читается — секрет считается заданным, если он перечислен в `secrets`. Одна и та же
   ошибка в нескольких окружениях печатается один раз;
-- формат, как `routy fmt --check` (`--no-fmt` выключает);
-- Go-код, как [`routy import go --check`](/routy/ru/guides/import-go/), если `go.mod` нашёлся в каталоге
+- формат, как `outry fmt --check` (`--no-fmt` выключает);
+- Go-код, как [`outry import go --check`](/outry/ru/guides/import-go/), если `go.mod` нашёлся в каталоге
   проекта или выше, до корня репозитория. `--go <DIR>` указывает сервис, `--no-go` пропускает.
 
 С путями проверяются только эти файлы, без Go. `--env` проверяет одно окружение с настоящими переменными —
-`--var`, `ROUTY_*`, `env.toml` и хранилище паролей (`--no-keyring` выключает). `--format github` печатает
+`--var`, `OUTRY_*`, `env.toml` и хранилище паролей (`--no-keyring` выключает). `--format github` печатает
 аннотации GitHub Actions.
 
 ```txt
-api/orders/create.routy:1:1: error: not formatted (`routy fmt`)
-api/orders/create.routy:7:22: error: variable `api_key` is not defined in staging, prod
-api/orders/create.routy:9:13: error: `Seed` is limited to dev and cannot be called in prod
-main.go:42:1: error: route DELETE /orders/{id} has no request (`routy import go` creates api/orders/delete.routy)
+api/orders/create.outry:1:1: error: not formatted (`outry fmt`)
+api/orders/create.outry:7:22: error: variable `api_key` is not defined in staging, prod
+api/orders/create.outry:9:13: error: `Seed` is limited to dev and cannot be called in prod
+main.go:42:1: error: route DELETE /orders/{id} has no request (`outry import go` creates api/orders/delete.outry)
 12 files, 3 environments, 18 Go routes: 4 errors, 0 warnings
 ```
 
-## `routy fmt`
+## `outry fmt`
 
-Привести файлы `.routy` к каноническому виду, как `gofmt`; комментарии сохраняются. Печатает изменённые
+Привести файлы `.outry` к каноническому виду, как `gofmt`; комментарии сохраняются. Печатает изменённые
 файлы.
 
 ```sh
-routy fmt [ПУТИ]... [--check]
+outry fmt [ПУТИ]... [--check]
 ```
 
 По умолчанию — текущая папка. `--check` ничего не меняет и завершается с кодом `1`, если файл не
 отформатирован, — для CI.
 
-## `routy convert`
+## `outry convert`
 
-Переписать файлы `.http` в `.routy` рядом с ними. Существующий `.routy` не перезаписывается. См.
-[Файлы .http](/routy/ru/guides/request-format/#перевод-в-routy).
+Переписать файлы `.http` в `.outry` рядом с ними. Существующий `.outry` не перезаписывается. См.
+[Файлы .http](/outry/ru/guides/request-format/#перевод-в-outry).
 
 ```sh
-routy convert [ПУТИ]... [--dry-run] [--rm]
+outry convert [ПУТИ]... [--dry-run] [--rm]
 ```
 
 | Флаг | Описание |
 |------|----------|
 | `--dry-run` | Напечатать результат вместо записи файлов |
-| `--rm` | Удалить `.http` после того, как записан его `.routy` |
+| `--rm` | Удалить `.http` после того, как записан его `.outry` |
 
-## `routy vars`
+## `outry vars`
 
 Показать итоговое значение каждой переменной окружения и откуда оно взялось. Значения секретов (из
 хранилища паролей или из списка `secrets`) замаскированы.
 
 ```sh
-routy vars [-e <ОКРУЖЕНИЕ>] [--project <ПАПКА>] [--var <ИМЯ=ЗНАЧЕНИЕ>]...
+outry vars [-e <ОКРУЖЕНИЕ>] [--project <ПАПКА>] [--var <ИМЯ=ЗНАЧЕНИЕ>]...
 ```
 
 ```txt
 project billing-api · env dev
 base     env.toml   http://localhost:8080
 token    keychain   eyJ…(212 chars)
-api_key  missing    not set: routy secret set api_key --env dev
+api_key  missing    not set: outry secret set api_key --env dev
 user_id  saved      42
 ```
 
 | Флаг | Описание |
 |------|----------|
-| `--var <ИМЯ=ЗНАЧЕНИЕ>` | Переопределить переменную, как в `routy run` |
+| `--var <ИМЯ=ЗНАЧЕНИЕ>` | Переопределить переменную, как в `outry run` |
 | `--fresh` | Не учитывать значения из `save` |
 | `--no-keyring` | Не искать секреты в хранилище паролей |
 | `--reveal` | Показать значения секретов целиком |
 | `--json` | Вывести JSON-массив |
 
-Переменные из `ROUTY_*` и хранилища паролей показываются только для имён, которые есть в `env.toml`
+Переменные из `OUTRY_*` и хранилища паролей показываются только для имён, которые есть в `env.toml`
 (включая `secrets`) или среди сохранённых значений.
 
-## `routy envs`
+## `outry envs`
 
 Показать окружения проекта; `*` — окружение по умолчанию.
 
 ```sh
-routy envs [--dir <DIR>]
+outry envs [--dir <DIR>]
 ```
 
-## `routy secret`
+## `outry secret`
 
 Сохранить или удалить секрет в системном хранилище паролей. `set` читает значение из stdin.
 
 ```sh
-routy secret set <NAME> [-e <ENV>] [--project <DIR>]
-routy secret rm <NAME> [-e <ENV>] [--project <DIR>]
+outry secret set <NAME> [-e <ENV>] [--project <DIR>]
+outry secret rm <NAME> [-e <ENV>] [--project <DIR>]
 ```
 
 ```sh
-echo -n "$TOKEN" | routy secret set token --env prod
+echo -n "$TOKEN" | outry secret set token --env prod
 ```
 
-## `routy init`
+## `outry init`
 
 Создать `api/env.toml` и пример запроса в указанной папке (по умолчанию — текущей). Если `env.toml` уже
 есть, завершается с ошибкой.
 
 ```sh
-routy init [DIR]
+outry init [DIR]
 ```
 
-## `routy import go`
+## `outry import go`
 
-Создать запрос `.routy` для каждого роута Go-сервиса (chi, gin, `net/http`), у которого его ещё нет.
-[Расхождения с кодом](/routy/ru/guides/import-go/#расхождения-с-кодом) существующих запросов выводятся
-под роутом; меняются файлы только с `--fix`. Подробнее — [Импорт роутов из Go](/routy/ru/guides/import-go/).
+Создать запрос `.outry` для каждого роута Go-сервиса (chi, gin, `net/http`), у которого его ещё нет.
+[Расхождения с кодом](/outry/ru/guides/import-go/#расхождения-с-кодом) существующих запросов выводятся
+под роутом; меняются файлы только с `--fix`. Подробнее — [Импорт роутов из Go](/outry/ru/guides/import-go/).
 
 ```sh
-routy import go [DIR]
+outry import go [DIR]
 ```
 
 `DIR` — папка с Go-кодом, сканируется рекурсивно (по умолчанию — текущая). Файлы создаются в проекте,
@@ -177,14 +177,14 @@ routy import go [DIR]
 | `--project <DIR>` | Папка проекта с `env.toml` |
 | `--json` | То же, что `--format json` |
 
-## `routy lsp`
+## `outry lsp`
 
-Языковой сервер для файлов `.routy` через stdin/stdout: ошибки `routy check`, предупреждения окружения,
+Языковой сервер для файлов `.outry` через stdin/stdout: ошибки `outry check`, предупреждения окружения,
 расхождения с Go-кодом с Quick Fix, автодополнение, подсказки, переход к определению, форматирование и
-code lens «▶ Send». Запускается редактором — см. [Редакторы](/routy/ru/guides/editors/).
+code lens «▶ Send». Запускается редактором — см. [Редакторы](/outry/ru/guides/editors/).
 
 ```sh
-routy lsp [--env <ENV>] [--no-keyring]
+outry lsp [--env <ENV>] [--no-keyring]
 ```
 
 | Флаг | Описание |
@@ -192,35 +192,35 @@ routy lsp [--env <ENV>] [--no-keyring]
 | `--env <ENV>` | Окружение для переменных и отправки, по умолчанию — `default` из `env.toml` |
 | `--no-keyring` | Не брать секреты из системного хранилища паролей |
 
-## `routy update`
+## `outry update`
 
 Обновить CLI до последнего релиза на GitHub. Перед заменой бинаря проверяется контрольная сумма SHA-256
 архива.
 
 ```sh
-routy update [--check]
+outry update [--check]
 ```
 
 `--check` только сообщает, есть ли новая версия.
 
-## `routy completions`
+## `outry completions`
 
 Напечатать скрипт автодополнения для шелла: `bash`, `zsh`, `fish`, `powershell` или `elvish`.
 Дополняются команды, флаги и их описания.
 
 ```sh
-routy completions fish > ~/.config/fish/completions/routy.fish
-routy completions bash > ~/.local/share/bash-completion/completions/routy
-echo 'source <(routy completions zsh)' >> ~/.zshrc
+outry completions fish > ~/.config/fish/completions/outry.fish
+outry completions bash > ~/.local/share/bash-completion/completions/outry
+echo 'source <(outry completions zsh)' >> ~/.zshrc
 ```
 
-После `routy update` запустите снова, чтобы подхватить новые команды.
+После `outry update` запустите снова, чтобы подхватить новые команды.
 
 ## Переменные окружения
 
 | Переменная | Что делает |
 |------------|------------|
-| `ROUTY_<NAME>` | Значение переменной `name`; см. [Переменные](/routy/ru/guides/variables/#откуда-берётся-значение) |
-| `ROUTY_NO_UPDATE_NOTIFIER=1` | Отключить напоминание о новой версии (`NO_UPDATE_NOTIFIER` тоже работает) |
+| `OUTRY_<NAME>` | Значение переменной `name`; см. [Переменные](/outry/ru/guides/variables/#откуда-берётся-значение) |
+| `OUTRY_NO_UPDATE_NOTIFIER=1` | Отключить напоминание о новой версии (`NO_UPDATE_NOTIFIER` тоже работает) |
 | `CI` | Если задана, напоминание о новой версии отключено |
 | `NO_COLOR` | Отключить цветной вывод |

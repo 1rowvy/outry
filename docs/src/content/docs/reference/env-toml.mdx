@@ -24,12 +24,12 @@ base = "https://api.example.com"
 |-----|-------------|
 | `project` | Namespace for secrets and saved values. Default: the project folder name, or its parent's name if the folder is called `api` |
 | `default` | Environment used when `--env` is not given. Default: the first environment in alphabetical order |
-| `secrets` | Names of variables that are secrets. Values live in the keychain or `ROUTY_*`; the list lets `routy vars` and the app point out missing ones |
+| `secrets` | Names of variables that are secrets. Values live in the keychain or `OUTRY_*`; the list lets `outry vars` and the app point out missing ones |
 | `[vars]` | Variables shared by all environments |
 | `[env.<name>]` | An environment; its variables override `[vars]` |
-| `[import.middleware]` | Headers that requests for routes behind a Go middleware need: `AuthRequired = { headers = { Authorization = "Bearer ${Login().body.token}" } }`. Used by `routy import go`, see [Middleware](/routy/guides/import-go/#middleware) |
+| `[import.middleware]` | Headers that requests for routes behind a Go middleware need: `AuthRequired = { headers = { Authorization = "Bearer ${Login().body.token}" } }`. Used by `outry import go`, see [Middleware](/outry/guides/import-go/#middleware) |
 
 Values may be strings, numbers or booleans; non-strings are inserted as written (`port = 8080` →
 `8080`). Unknown keys are an error, so typos like `defualt` are caught.
 
-Secrets do not belong here — see [Secrets](/routy/guides/secrets/).
+Secrets do not belong here — see [Secrets](/outry/guides/secrets/).

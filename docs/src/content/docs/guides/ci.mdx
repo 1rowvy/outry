@@ -1,9 +1,9 @@
 ---
-title: Running Routy in CI
+title: Running Outry in CI
 description: Use your request files as API tests in GitHub Actions and other CI systems.
 ---
 
-The same `.routy` (and `.http`) files you click through in the app can run as API tests on every push.
+The same `.outry` (and `.http`) files you click through in the app can run as API tests on every push.
 `expect` checks decide whether the job passes.
 
 ## GitHub Actions
@@ -21,22 +21,22 @@ jobs:
 
       # Start the service under test here (docker compose, a binary, …)
 
-      - name: Install routy
+      - name: Install outry
         run: |
-          curl -fsSL https://raw.githubusercontent.com/1rowvy/routy/master/install.sh | sh
+          curl -fsSL https://raw.githubusercontent.com/1rowvy/outry/master/install.sh | sh
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: Check request files
-        run: routy check api --format github
+        run: outry check api --format github
 
       - name: Run API tests
-        run: routy run api --env ci --no-keyring --fail-fast
+        run: outry run api --env ci --no-keyring --fail-fast
         env:
-          ROUTY_TOKEN: ${{ secrets.API_TOKEN }}
+          OUTRY_TOKEN: ${{ secrets.API_TOKEN }}
 ```
 
-- Pin a version for reproducible builds: `ROUTY_VERSION=v0.2.0` before `sh`.
-- Secrets come from `ROUTY_<NAME>` variables — see [Secrets](/routy/guides/secrets/#in-ci-environment-variables).
+- Pin a version for reproducible builds: `OUTRY_VERSION=v0.2.0` before `sh`.
+- Secrets come from `OUTRY_<NAME>` variables — see [Secrets](/outry/guides/secrets/#in-ci-environment-variables).
 - `--no-keyring` skips the keychain lookup, which does not exist on runners anyway.
 - The update notice is disabled automatically when the `CI` variable is set.
 
@@ -45,35 +45,35 @@ jobs:
 `--json` prints one JSON object per request (JSON Lines) instead of the human-readable report:
 
 ```sh
-routy run api --json > results.jsonl
+outry run api --json > results.jsonl
 ```
 
 ```json
-{"file":"api/users/get.routy","name":"GetUser","passed":true,"outcome":{"kind":"request","request":{…},"response":{"status":200,…},"asserts":[…],"calls":[…],"saved":{}}}
-{"file":"api/users/bad.routy","name":"GetUser","passed":false,"error":"undefined variable(s): id"}
+{"file":"api/users/get.outry","name":"GetUser","passed":true,"outcome":{"kind":"request","request":{…},"response":{"status":200,…},"asserts":[…],"calls":[…],"saved":{}}}
+{"file":"api/users/bad.outry","name":"GetUser","passed":false,"error":"undefined variable(s): id"}
 ```
 
 A flow's `outcome` has `"kind":"flow"` with `checks`, `calls`, `saved` and `error`.
 
 ## Lint without sending
 
-`routy check` checks the whole project without sending requests — one fast lint step: syntax, names of
+`outry check` checks the whole project without sending requests — one fast lint step: syntax, names of
 called requests, their arguments, shapes and call cycles, every environment (requests whose `only`
 excludes it, variables that are not defined in it), formatting, and — if there is a `go.mod` above the
-project — routes in the Go code (as `routy import go --check`):
+project — routes in the Go code (as `outry import go --check`):
 
 ```sh
-routy check                    # the project found from the current directory
-routy check api --env ci       # one environment, secrets from the keychain / ROUTY_*
-routy check --format github    # annotations on the PR diff
+outry check                    # the project found from the current directory
+outry check api --env ci       # one environment, secrets from the keychain / OUTRY_*
+outry check --format github    # annotations on the PR diff
 ```
 
 ```txt
-api/orders/create.routy:1:1: error: not formatted (`routy fmt`)
-api/orders/create.routy:7:22: error: variable `api_key` is not defined in staging, prod
-api/orders/create.routy:9:13: error: `Seed` is limited to dev and cannot be called in prod
-main.go:42:1: error: route DELETE /orders/{id} has no request (`routy import go` creates api/orders/delete.routy)
+api/orders/create.outry:1:1: error: not formatted (`outry fmt`)
+api/orders/create.outry:7:22: error: variable `api_key` is not defined in staging, prod
+api/orders/create.outry:9:13: error: `Seed` is limited to dev and cannot be called in prod
+main.go:42:1: error: route DELETE /orders/{id} has no request (`outry import go` creates api/orders/delete.outry)
 12 files, 3 environments, 18 Go routes: 4 errors, 0 warnings
 ```
 
-Details and flags: [`routy check`](/routy/reference/cli/#routy-check).
+Details and flags: [`outry check`](/outry/reference/cli/#outry-check).

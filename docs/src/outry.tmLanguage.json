@@ -1,0 +1,143 @@
+{
+  "name": "outry",
+  "scopeName": "source.outry",
+  "fileTypes": ["outry"],
+  "patterns": [{ "include": "#main" }],
+  "repository": {
+    "main": {
+      "patterns": [
+        { "include": "#comments" },
+        { "include": "#request-line" },
+        { "include": "#declarations" },
+        { "include": "#strings" },
+        { "include": "#regex" },
+        { "include": "#durations" },
+        { "include": "#numbers" },
+        { "include": "#keywords" },
+        { "include": "#builtins" },
+        { "include": "#types" },
+        { "include": "#fields" },
+        { "include": "#calls" },
+        { "include": "#operators" }
+      ]
+    },
+    "comments": {
+      "patterns": [
+        { "name": "comment.line.double-slash.outry", "match": "//.*$" },
+        { "name": "comment.block.outry", "begin": "/\\*", "end": "\\*/" }
+      ]
+    },
+    "request-line": {
+      "match": "^\\s*([A-Z][A-Z]+)\\s+(\\S+)",
+      "captures": {
+        "1": { "name": "keyword.other.method.outry" },
+        "2": {
+          "name": "string.unquoted.target.outry",
+          "patterns": [
+            { "name": "variable.parameter.path.outry", "match": "\\{[^}]+\\}" }
+          ]
+        }
+      }
+    },
+    "declarations": {
+      "match": "\\b(flow|shape|let)\\s+([\\p{L}_][\\p{L}\\p{N}_]*)",
+      "captures": {
+        "1": { "name": "storage.type.outry" },
+        "2": { "name": "entity.name.function.outry" }
+      }
+    },
+    "strings": {
+      "patterns": [
+        {
+          "name": "string.quoted.triple.outry",
+          "begin": "\"\"\"",
+          "end": "\"\"\"",
+          "patterns": [{ "include": "#interpolation" }]
+        },
+        {
+          "name": "string.quoted.double.outry",
+          "begin": "\"",
+          "end": "\"",
+          "patterns": [
+            { "name": "constant.character.escape.outry", "match": "\\\\." },
+            { "include": "#interpolation" }
+          ]
+        },
+        {
+          "name": "string.quoted.single.outry",
+          "begin": "'",
+          "end": "'",
+          "patterns": [
+            { "name": "constant.character.escape.outry", "match": "\\\\." },
+            { "include": "#interpolation" }
+          ]
+        }
+      ]
+    },
+    "interpolation": {
+      "name": "meta.interpolation.outry",
+      "begin": "\\$\\{",
+      "end": "\\}",
+      "beginCaptures": { "0": { "name": "punctuation.section.interpolation.begin.outry" } },
+      "endCaptures": { "0": { "name": "punctuation.section.interpolation.end.outry" } },
+      "patterns": [{ "include": "#main" }]
+    },
+    "regex": {
+      "match": "(?<=matches\\s)(/(?:[^/\\\\\\n]|\\\\.)+/[a-z]*)",
+      "captures": { "1": { "name": "string.regexp.outry" } }
+    },
+    "durations": {
+      "name": "constant.numeric.duration.outry",
+      "match": "\\b\\d+(?:ms|s|m|h)\\b"
+    },
+    "numbers": {
+      "name": "constant.numeric.outry",
+      "match": "-?\\b\\d+(?:\\.\\d+)?(?:[eE][+-]?\\d+)?\\b"
+    },
+    "keywords": {
+      "patterns": [
+        {
+          "name": "keyword.control.outry",
+          "match": "\\b(save|expect|poll|every|for|fresh|matches|in|typeof|params|query|headers|body|form|multipart)\\b"
+        },
+        { "name": "constant.language.outry", "match": "\\b(true|false|null)\\b" },
+        { "name": "variable.language.outry", "match": "\\b(status|duration|env|vars)\\b" }
+      ]
+    },
+    "builtins": {
+      "name": "support.function.builtin.outry",
+      "match": "\\b(uuid|now|nowIso|randomInt|randomString|number|string|json|base64|unbase64|file|schema)(?=\\()"
+    },
+    "types": {
+      "name": "support.type.outry",
+      "match": "\\b(string|number|integer|boolean|any)\\b(?!\\()"
+    },
+    "fields": {
+      "match": "([\\p{L}_][\\p{L}\\p{N}_-]*)(\\??)(?=\\s*:(?!:))",
+      "captures": {
+        "1": { "name": "variable.other.property.outry" },
+        "2": { "name": "keyword.operator.optional.outry" }
+      }
+    },
+    "calls": {
+      "patterns": [
+        {
+          "match": "\\.([\\p{L}_][\\p{L}\\p{N}_]*)(?=\\()",
+          "captures": { "1": { "name": "entity.name.function.method.outry" } }
+        },
+        {
+          "match": "\\b(\\p{Lu}[\\p{L}\\p{N}_]*)(?=\\s*\\()",
+          "captures": { "1": { "name": "entity.name.function.outry" } }
+        },
+        {
+          "match": "\\b(\\p{Lu}[\\p{L}\\p{N}_]*)\\b",
+          "captures": { "1": { "name": "entity.name.type.outry" } }
+        }
+      ]
+    },
+    "operators": {
+      "name": "keyword.operator.outry",
+      "match": "=>|==|!=|<=|>=|&&|\\|\\||[!<>=+\\-*/%|]"
+    }
+  }
+}

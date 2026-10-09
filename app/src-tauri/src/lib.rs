@@ -1,4 +1,4 @@
-//! Тонкая прослойка между React-фронтом и `routy-core`. Вся логика — в core,
+//! Тонкая прослойка между React-фронтом и `outry-core`. Вся логика — в core,
 //! здесь только команды Tauri, состояние открытого проекта и слежение за файлами.
 
 use std::collections::HashMap;
@@ -7,12 +7,12 @@ use std::sync::Arc;
 
 use base64::Engine;
 use notify::{RecursiveMode, Watcher};
-use routy_core::history::{Entry, History, history_path};
-use routy_core::lang::exec::{FlowOutcome, Outcome, Run};
-use routy_core::lang::{Workspace, ast::Item};
-use routy_core::runner::Options;
-use routy_core::vars::{VarInfo, mask};
-use routy_core::{Project, Runner, discover, dynamic};
+use outry_core::history::{Entry, History, history_path};
+use outry_core::lang::exec::{FlowOutcome, Outcome, Run};
+use outry_core::lang::{Workspace, ast::Item};
+use outry_core::runner::Options;
+use outry_core::vars::{VarInfo, mask};
+use outry_core::{Project, Runner, discover, dynamic};
 use serde::Serialize;
 use tauri::{Emitter, State};
 use tokio::sync::{Mutex, oneshot};
@@ -23,7 +23,7 @@ fn err(e: impl std::fmt::Display) -> String {
     e.to_string()
 }
 
-/// Прогон `*.routy`: кеш вызовов и cookies живут, пока не сменили окружение или не сбросили.
+/// Прогон `*.outry`: кеш вызовов и cookies живут, пока не сменили окружение или не сбросили.
 /// Свой раннер — чтобы долгий сценарий не держал сессию; сохранённые значения синхронизируются
 /// с раннером окружения до и после запуска.
 struct LangRun {
@@ -54,7 +54,7 @@ impl Session {
         Ok(self.runners.get_mut(&env).expect("inserted above"))
     }
 
-    /// Прогон `*.routy` окружения; другое окружение — новый прогон.
+    /// Прогон `*.outry` окружения; другое окружение — новый прогон.
     fn lang_run(&mut self, env: Option<&str>) -> CmdResult<(String, Arc<Mutex<LangRun>>)> {
         let env = self.project.resolve_env(env).map_err(err)?;
         if let Some((e, l)) = &self.lang {
@@ -71,8 +71,8 @@ impl Session {
     }
 }
 
-fn is_routy(path: &str) -> bool {
-    path.ends_with(&format!(".{}", discover::ROUTY_EXTENSION))
+fn is_outry(path: &str) -> bool {
+    path.ends_with(&format!(".{}", discover::OUTRY_EXTENSION))
 }
 
 #[derive(Default)]
@@ -94,20 +94,20 @@ struct ProjectInfo {
     files: Vec<String>,
     /// Метод каждого файла (для значков в дереве)
     methods: HashMap<String, String>,
-    /// Имена запросов и сценариев `*.routy` (подпись в дереве вместо имени файла)
+    /// Имена запросов и сценариев `*.outry` (подпись в дереве вместо имени файла)
     names: HashMap<String, Vec<String>>,
 }
 
 /// Метод из строки запроса без полного разбора: файл с ошибкой тоже получает значок.
-/// В `*.routy` — первый запрос файла, а если в нём только сценарии — `FLOW`, только shape — `SHAPE`.
-fn request_method(src: &str, routy: bool) -> String {
+/// В `*.outry` — первый запрос файла, а если в нём только сценарии — `FLOW`, только shape — `SHAPE`.
+fn request_method(src: &str, outry: bool) -> String {
     let word = |l: &str| l.split_whitespace().next().unwrap_or_default().to_string();
     let mut lines = src
         .lines()
         .map(str::trim)
         .filter(|l| !l.is_empty() && !l.starts_with('#') && !l.starts_with("//"));
     let is_method = |w: &str| w.len() >= 2 && w.bytes().all(|b| b.is_ascii_uppercase());
-    if routy {
+    if outry {
         // `Login: POST /login` — метод после имени.
         let words: Vec<String> = lines
             .map(|l| match l.split_once(':') {
@@ -132,7 +132,7 @@ fn request_method(src: &str, routy: bool) -> String {
 /// Имена запросов и сценариев файла. Файл с ошибкой — по строкам `Name: METHOD …`.
 fn item_names(src: &str, file: &str) -> Vec<String> {
     let stem = Path::new(file).file_stem().and_then(|s| s.to_str());
-    match routy_core::lang::parse::parse(src, stem) {
+    match outry_core::lang::parse::parse(src, stem) {
         Ok(f) => f
             .items
             .iter()
@@ -156,7 +156,7 @@ fn item_names(src: &str, file: &str) -> Vec<String> {
 }
 
 fn project_info(p: &Project) -> CmdResult<ProjectInfo> {
-    let exts = [discover::EXTENSION, discover::ROUTY_EXTENSION];
+    let exts = [discover::EXTENSION, discover::OUTRY_EXTENSION];
     let files: Vec<String> = discover::files(&p.root, &exts)
         .map_err(err)?
         .into_iter()
@@ -166,8 +166,8 @@ fn project_info(p: &Project) -> CmdResult<ProjectInfo> {
     let mut names = HashMap::new();
     for f in &files {
         let src = std::fs::read_to_string(p.root.join(f)).unwrap_or_default();
-        methods.insert(f.clone(), request_method(&src, is_routy(f)));
-        if is_routy(f) {
+        methods.insert(f.clone(), request_method(&src, is_outry(f)));
+        if is_outry(f) {
             names.insert(f.clone(), item_names(&src, f));
         }
     }
@@ -240,7 +240,7 @@ async fn open_project(
     open(app, &state, &dir).await
 }
 
-/// `routy init` для открытого каталога без env.toml: создаёт api/env.toml и
+/// `outry init` для открытого каталога без env.toml: создаёт api/env.toml и
 /// переоткрывает проект — корнем становится api/.
 #[tauri::command]
 async fn init_project(app: tauri::AppHandle, state: State<'_, AppState>) -> CmdResult<ProjectInfo> {
@@ -252,7 +252,7 @@ async fn init_project(app: tauri::AppHandle, state: State<'_, AppState>) -> CmdR
         }
         s.project.root.clone()
     };
-    let api = routy_core::project::init(&root).map_err(err)?;
+    let api = outry_core::project::init(&root).map_err(err)?;
     open(app, &state, &api).await
 }
 
@@ -310,7 +310,7 @@ async fn rename_path(state: State<'_, AppState>, from: String, to: String) -> Cm
     Ok(())
 }
 
-/// Удаляет файл запроса или все `*.http` и `*.routy` в каталоге. Прочие файлы не трогаем:
+/// Удаляет файл запроса или все `*.http` и `*.outry` в каталоге. Прочие файлы не трогаем:
 /// каталог исчезает, только если в нём больше ничего не осталось.
 #[tauri::command]
 async fn delete_path(state: State<'_, AppState>, path: String) -> CmdResult<()> {
@@ -319,7 +319,7 @@ async fn delete_path(state: State<'_, AppState>, path: String) -> CmdResult<()> 
     let root = &s.project.root;
     let full = inside(root, &path)?;
     if full.is_dir() {
-        let exts = [discover::EXTENSION, discover::ROUTY_EXTENSION];
+        let exts = [discover::EXTENSION, discover::OUTRY_EXTENSION];
         for f in discover::files(&full, &exts).map_err(err)? {
             let f = full.join(f);
             std::fs::remove_file(&f).map_err(err)?;
@@ -328,7 +328,7 @@ async fn delete_path(state: State<'_, AppState>, path: String) -> CmdResult<()> 
         prune_empty(root, Some(&full));
     } else if full
         .extension()
-        .is_some_and(|e| e == discover::EXTENSION || e == discover::ROUTY_EXTENSION)
+        .is_some_and(|e| e == discover::EXTENSION || e == discover::OUTRY_EXTENSION)
     {
         std::fs::remove_file(&full).map_err(err)?;
         prune_empty(root, full.parent());
@@ -351,19 +351,19 @@ fn prune_empty(root: &Path, mut dir: Option<&Path>) {
 #[derive(Serialize)]
 struct ParseError {
     line: Option<usize>,
-    /// Столбец (с 1) — есть у ошибок `*.routy`.
+    /// Столбец (с 1) — есть у ошибок `*.outry`.
     col: Option<usize>,
     message: String,
 }
 
-fn parse_error(e: routy_core::Error) -> ParseError {
+fn parse_error(e: outry_core::Error) -> ParseError {
     match e {
-        routy_core::Error::Parse { line, msg } => ParseError {
+        outry_core::Error::Parse { line, msg } => ParseError {
             line: Some(line),
             col: None,
             message: msg,
         },
-        routy_core::Error::Syntax { line, col, msg } => ParseError {
+        outry_core::Error::Syntax { line, col, msg } => ParseError {
             line: Some(line),
             col: Some(col),
             message: msg,
@@ -376,16 +376,16 @@ fn parse_error(e: routy_core::Error) -> ParseError {
     }
 }
 
-/// Все `*.routy` проекта, а файл `path` — с текстом из редактора.
+/// Все `*.outry` проекта, а файл `path` — с текстом из редактора.
 fn workspace(root: &Path, path: &str, content: String) -> CmdResult<Workspace> {
     let mut ws = Workspace::load(root).map_err(err)?;
     ws.add(PathBuf::from(path), content);
     Ok(ws)
 }
 
-/// `routy check` для открытого `*.routy` на лету: синтаксис, имена вызовов, аргументы, формы, циклы.
+/// `outry check` для открытого `*.outry` на лету: синтаксис, имена вызовов, аргументы, формы, циклы.
 #[tauri::command]
-async fn check_routy(
+async fn check_outry(
     state: State<'_, AppState>,
     path: String,
     content: String,
@@ -426,9 +426,9 @@ struct Symbols {
     shapes: Vec<String>,
 }
 
-/// Запросы, сценарии и формы проекта — для автодополнения в `*.routy`.
+/// Запросы, сценарии и формы проекта — для автодополнения в `*.outry`.
 #[tauri::command]
-async fn routy_symbols(state: State<'_, AppState>) -> CmdResult<Symbols> {
+async fn outry_symbols(state: State<'_, AppState>) -> CmdResult<Symbols> {
     let root = {
         let guard = state.session.lock().await;
         guard
@@ -484,7 +484,7 @@ async fn routy_symbols(state: State<'_, AppState>) -> CmdResult<Symbols> {
 }
 
 #[derive(Serialize)]
-struct RoutyResult {
+struct OutryResult {
     /// Имя запущенного запроса или сценария
     name: String,
     /// Запрос: ответ (он же запись истории)
@@ -493,10 +493,10 @@ struct RoutyResult {
     flow: Option<FlowOutcome>,
 }
 
-/// Запрос или сценарий `*.routy` на строке `line` (текст — из редактора, даже несохранённый).
+/// Запрос или сценарий `*.outry` на строке `line` (текст — из редактора, даже несохранённый).
 /// Сессия заблокирована только на подготовку и запись результата — HTTP идёт без неё.
 #[tauri::command]
-async fn run_routy(
+async fn run_outry(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
     id: u64,
@@ -504,7 +504,7 @@ async fn run_routy(
     path: String,
     content: String,
     line: usize,
-) -> CmdResult<RoutyResult> {
+) -> CmdResult<OutryResult> {
     let (lang, root, saved, cached) = {
         let mut guard = state.session.lock().await;
         let s = guard.as_mut().ok_or("no project open")?;
@@ -570,12 +570,12 @@ async fn run_routy(
     runner.persist_saved().map_err(err)?;
     let env = runner.env.clone();
     match result.ok_or("cancelled")?.map_err(err)? {
-        Outcome::Request(outcome) => Ok(RoutyResult {
+        Outcome::Request(outcome) => Ok(OutryResult {
             name,
             entry: Some(s.history.push(&path, &env, outcome).cloned().map_err(err)?),
             flow: None,
         }),
-        Outcome::Flow(flow) => Ok(RoutyResult {
+        Outcome::Flow(flow) => Ok(OutryResult {
             name,
             entry: None,
             flow: Some(flow),
@@ -583,7 +583,7 @@ async fn run_routy(
     }
 }
 
-/// Новый прогон `*.routy`: забыть кеш вызовов и cookies.
+/// Новый прогон `*.outry`: забыть кеш вызовов и cookies.
 #[tauri::command]
 async fn reset_run(state: State<'_, AppState>) -> CmdResult<()> {
     let mut guard = state.session.lock().await;
@@ -595,13 +595,13 @@ async fn reset_run(state: State<'_, AppState>) -> CmdResult<()> {
 /// Проверка синтаксиса на лету, без отправки.
 #[tauri::command]
 fn check_request(content: String) -> Option<ParseError> {
-    routy_core::parse(&content).err().map(parse_error)
+    outry_core::parse(&content).err().map(parse_error)
 }
 
 /// То же для env.toml, открытого в редакторе.
 #[tauri::command]
 fn check_config(content: String) -> Option<ParseError> {
-    routy_core::project::check_config(&content)
+    outry_core::project::check_config(&content)
         .err()
         .map(parse_error)
 }
@@ -616,7 +616,7 @@ async fn send_request(
     path: String,
     content: String,
 ) -> CmdResult<Entry> {
-    let file = routy_core::parse(&content).map_err(err)?;
+    let file = outry_core::parse(&content).map_err(err)?;
     let (client, request) = {
         let mut guard = state.session.lock().await;
         let s = guard.as_mut().ok_or("no project open")?;
@@ -627,7 +627,7 @@ async fn send_request(
     let (cancel, cancelled) = oneshot::channel();
     state.inflight.lock().unwrap().insert(id, cancel);
     let result = tokio::select! {
-        r = routy_core::runner::send(&client, &request) => Some(r),
+        r = outry_core::runner::send(&client, &request) => Some(r),
         _ = cancelled => None,
     };
     state.inflight.lock().unwrap().remove(&id);
@@ -810,7 +810,7 @@ async fn set_secret(
     let guard = state.session.lock().await;
     let s = guard.as_ref().ok_or("no project open")?;
     let env = s.project.resolve_env(env.as_deref()).map_err(err)?;
-    let store = routy_core::runner::secret_store(&s.project, &env)
+    let store = outry_core::runner::secret_store(&s.project, &env)
         .ok_or("no keyring support in this build")?;
     store.set(&name, &value).map_err(err)
 }
@@ -820,7 +820,7 @@ async fn set_secret(
 struct ImportReport {
     /// Каталог, который сканировался
     dir: PathBuf,
-    plan: routy_core::import::Plan,
+    plan: outry_core::import::Plan,
     /// Созданные (при `apply`), исправленные и удалённые файлы, относительно проекта
     created: Vec<String>,
 }
@@ -833,7 +833,7 @@ fn default_source_dir(root: &Path) -> PathBuf {
     }
 }
 
-/// Роуты из Go-кода в `dir` против файлов проекта (`routy import go`); `apply` — создать недостающие.
+/// Роуты из Go-кода в `dir` против файлов проекта (`outry import go`); `apply` — создать недостающие.
 #[tauri::command]
 async fn import_go(
     state: State<'_, AppState>,
@@ -850,7 +850,7 @@ async fn import_go(
     };
     let dir = dir.unwrap_or_else(|| default_source_dir(&root));
     tauri::async_runtime::spawn_blocking(move || {
-        use routy_core::import;
+        use outry_core::import;
         let plan = import::plan_go(&dir, &root, &[], import::DEFAULT_BASE).map_err(err)?;
         let created = if apply {
             import::apply(&root, &plan).map_err(err)?
@@ -870,7 +870,7 @@ async fn import_go(
     .map_err(err)?
 }
 
-/// Исправить расхождения с кодом (`routy import go --fix`): `ids` — выбранные (`Change::id`),
+/// Исправить расхождения с кодом (`outry import go --fix`): `ids` — выбранные (`Change::id`),
 /// без них — все исправимые; `prune` — удалить файлы, где все запросы — к пропавшим роутам.
 /// Возвращает новый план.
 #[tauri::command]
@@ -887,7 +887,7 @@ async fn import_fix(
     };
     let dir = dir.unwrap_or_else(|| default_source_dir(&root));
     tauri::async_runtime::spawn_blocking(move || {
-        use routy_core::import;
+        use outry_core::import;
         let plan = import::plan_go(&dir, &root, &[], import::DEFAULT_BASE).map_err(err)?;
         let fixes = import::fixes(&plan, |c| {
             ids.as_ref().is_none_or(|ids| ids.contains(&c.id))
@@ -934,9 +934,9 @@ pub fn run() {
             read_request,
             write_request,
             check_request,
-            check_routy,
-            routy_symbols,
-            run_routy,
+            check_outry,
+            outry_symbols,
+            run_outry,
             reset_run,
             check_config,
             rename_path,
@@ -956,5 +956,5 @@ pub fn run() {
             import_fix,
         ])
         .run(tauri::generate_context!())
-        .expect("error while running Routy");
+        .expect("error while running Outry");
 }

@@ -7,7 +7,7 @@ import { Aside } from '@astrojs/starlight/components';
 
 ## `expect` — проверка ответа
 
-```routy title="api/users/create.routy"
+```outry title="api/users/create.outry"
 CreateUser: POST /users {
   body { name: "Viktor" }
 
@@ -26,21 +26,21 @@ CreateUser: POST /users {
 упавшей видно, почему:
 
 ```txt
-✗ api/users/create.routy  CreateUser  POST http://localhost:8080/users  201 Created  9ms 211B
+✗ api/users/create.outry  CreateUser  POST http://localhost:8080/users  201 Created  9ms 211B
     ✓ status == 201
     ✗ body.name == "Viktor"  — body.name is "viktor"
     ✗ body matches { id: string, name: string, tags?: [string] }  — body.id: expected string, got 42
 ```
 
 Сравнение не приводит типы (`"1" != 1`), отсутствующее поле — это `null`, а не ошибка, а `matches`
-принимает регулярное выражение, форму прямо в файле, именованную [форму](/routy/ru/reference/routy-format/#формы)
-или файл JSON Schema. Все операторы и методы — в разделе [Выражения](/routy/ru/reference/routy-format/#выражения).
+принимает регулярное выражение, форму прямо в файле, именованную [форму](/outry/ru/reference/outry-format/#формы)
+или файл JSON Schema. Все операторы и методы — в разделе [Выражения](/outry/ru/reference/outry-format/#выражения).
 
 ## Вызов другого запроса
 
 Запрос — это функция: вызовите его по имени, результат — его ответ.
 
-```routy title="api/auth/login.routy"
+```outry title="api/auth/login.outry"
 Login: POST /auth/login {
   params {
     email: "dev@example.com"
@@ -52,7 +52,7 @@ Login: POST /auth/login {
 }
 ```
 
-```routy title="api/users/me.routy"
+```outry title="api/users/me.outry"
 Me: GET /me {
   headers { Authorization: "Bearer ${Login().body.token}" }
   expect { status == 200 }
@@ -60,11 +60,11 @@ Me: GET /me {
 ```
 
 ```sh
-routy run api/users/me.routy   # сам сначала залогинится
+outry run api/users/me.outry   # сам сначала залогинится
 ```
 
 ```txt
-✓ api/users/me.routy  Me  GET http://localhost:8080/me  200 OK  8ms 96B
+✓ api/users/me.outry  Me  GET http://localhost:8080/me  200 OK  8ms 96B
     ↳ Login  200  31ms
     ✓ status == 200
 ```
@@ -78,17 +78,17 @@ routy run api/users/me.routy   # сам сначала залогинится
 - **Ошибки поднимаются наверх.** Если у `Login` упал `expect`, падает и `Me` — с цепочкой:
 
   ```txt
-  ✗ api/users/me.routy  Me
+  ✗ api/users/me.outry  Me
       Me → Login: status == 200 — status is 401
   ```
 - **Cookies** из `Set-Cookie` хранятся весь прогон, как в браузере.
 
 Имена запросов уникальны в проекте; если `Create` есть в двух папках, вызывайте `users.Create()`.
-`routy check` сообщает о неизвестных именах, неверных аргументах и циклах вызовов.
+`outry check` сообщает о неизвестных именах, неверных аргументах и циклах вызовов.
 
 ## `flow` — сценарий
 
-```routy title="api/flows/checkout.routy"
+```outry title="api/flows/checkout.outry"
 // Checkout
 flow Checkout {
   user = CreateUser(name: "Bob")
@@ -99,30 +99,30 @@ flow Checkout {
 ```
 
 Шаги выполняются сверху вниз, сценарий останавливается на первом упавшем. В приложении сценарий
-показывает trace всех вызванных запросов. Запуск по имени: `routy run Checkout`.
+показывает trace всех вызванных запросов. Запуск по имени: `outry run Checkout`.
 
 ## `save` — сохранить значение
 
-```routy
+```outry
 save order_id = body.id
 ```
 
 Сохранённое значение — переменная для следующих запросов прогона **и** запоминается между запусками, для
-каждого проекта и окружения: после одного `routy run CreateOrder` запрос `GetOrder` и сам по себе знает
-`order_id`. Значения хранятся вне репозитория, см. [Сохранённые значения](/routy/ru/guides/variables/#сохранённые-значения).
+каждого проекта и окружения: после одного `outry run CreateOrder` запрос `GetOrder` и сам по себе знает
+`order_id`. Значения хранятся вне репозитория, см. [Сохранённые значения](/outry/ru/guides/variables/#сохранённые-значения).
 Для токенов и подобного лучше вызовы: они не зависят от того, что запускалось раньше.
 
 ## Коды выхода
 
-`routy run` завершается с кодом:
+`outry run` завершается с кодом:
 
 - `0` — все запросы отправлены, все проверки и сохранения прошли;
 - `1` — хотя бы один запрос упал (проверка, сохранение, сетевая ошибка, нет переменной);
-- `2` — Routy не смог запуститься: неверные аргументы, неизвестное окружение, сломанный `env.toml`.
+- `2` — Outry не смог запуститься: неверные аргументы, неизвестное окружение, сломанный `env.toml`.
 
 С `--fail-fast` прогон останавливается на первом упавшем запросе.
 
 <Aside>
 В файлах `.http` то же делается строками `> save` и `> assert` в конце файла — см.
-[Директивы .http](/routy/ru/reference/expressions/).
+[Директивы .http](/outry/ru/reference/expressions/).
 </Aside>

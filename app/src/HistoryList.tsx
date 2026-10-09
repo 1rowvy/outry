@@ -47,7 +47,7 @@ export function HistoryList({ entries, file, openedId, persistent, onOpen, onCle
                 <button className={e.id === openedId ? "active" : ""} onClick={() => onOpen(e)} title={e.outcome.request.url}>
                   <span className={"h-status " + (r.status < 400 ? "ok" : "bad")}>{r.status}</span>
                   <span className={"method m-" + e.outcome.request.method.toLowerCase()}>{e.outcome.request.method}</span>
-                  <span className="ellipsis h-file">{all || file === null ? e.file.replace(/\.(http|routy)$/, "") : e.outcome.request.url}</span>
+                  <span className="ellipsis h-file">{all || file === null ? e.file.replace(/\.(http|outry)$/, "") : e.outcome.request.url}</span>
                   {!passed && <span className="bad" title="Some checks failed">✗</span>}
                   <span className="h-meta">
                     {e.env} · {r.duration_ms} ms · {time(e.at)}

@@ -12,7 +12,7 @@ function label(item: Item): string {
   return item.name ?? `${item.method} ${item.target}`;
 }
 
-/** Дерево из плоского списка: путь `users/create.routy` → папка `users` → файл → элементы. */
+/** Дерево из плоского списка: путь `users/create.outry` → папка `users` → файл → элементы. */
 function tree(items: Item[]): Node[] {
   const top: Node[] = [];
   const folders = new Map<string, Node[]>();
@@ -133,7 +133,7 @@ function methodColor(item: Item): string {
 const SOURCES: Record<string, string> = {
   override: "--var",
   saved: "saved by `save`",
-  process_env: "ROUTY_* environment variable",
+  process_env: "OUTRY_* environment variable",
   env: "env.toml",
   secret: "system keychain",
   dynamic: "dynamic",

@@ -1,23 +1,23 @@
 ---
 title: Example project
-description: A Gin service whose api/ folder uses every feature of Routy — run it, then change the code and watch the requests notice.
+description: A Gin service whose api/ folder uses every feature of Outry — run it, then change the code and watch the requests notice.
 ---
 
 import { Steps } from '@astrojs/starlight/components';
 
-[routy-example-gin](https://github.com/1rowvy/routy-example-gin) is a small shop API written with
+[outry-example-gin](https://github.com/1rowvy/outry-example-gin) is a small shop API written with
 [Gin](https://github.com/gin-gonic/gin): login, users, orders and asynchronous payments. Its `api/` folder
-describes every route in `.routy` files and uses every feature of the format, so it doubles as a tour.
+describes every route in `.outry` files and uses every feature of the format, so it doubles as a tour.
 
 ## Run it
 
 <Steps>
 
-1. Install the CLI ([other platforms](/routy/install/)) and clone the project:
+1. Install the CLI ([other platforms](/outry/install/)) and clone the project:
 
    ```sh
-   curl -fsSL https://raw.githubusercontent.com/1rowvy/routy/master/install.sh | sh
-   git clone https://github.com/1rowvy/routy-example-gin && cd routy-example-gin
+   curl -fsSL https://raw.githubusercontent.com/1rowvy/outry/master/install.sh | sh
+   git clone https://github.com/1rowvy/outry-example-gin && cd outry-example-gin
    ```
 
 2. Start the service — it keeps everything in memory, the admin password is `admin`:
@@ -26,21 +26,21 @@ describes every route in `.routy` files and uses every feature of the format, so
    go run . &
    ```
 
-3. Give Routy the password. `admin_password` is declared as a [secret](/routy/guides/secrets/) in
-   `api/env.toml`, so it comes from the keychain or a `ROUTY_*` variable, never from a file:
+3. Give Outry the password. `admin_password` is declared as a [secret](/outry/guides/secrets/) in
+   `api/env.toml`, so it comes from the keychain or a `OUTRY_*` variable, never from a file:
 
    ```sh
-   export ROUTY_ADMIN_PASSWORD=admin   # or: routy secret set admin_password
+   export OUTRY_ADMIN_PASSWORD=admin   # or: outry secret set admin_password
    ```
 
 4. Run every request and flow:
 
    ```sh
-   routy run api
+   outry run api
    ```
 
    ```txt
-   ✓ api/flows/checkout.routy  Checkout  flow
+   ✓ api/flows/checkout.outry  Checkout  flow
        ↳ CreateUser  201  0ms
          ↳ Login  cached
        ↳ CreateOrder  201  0ms
@@ -53,7 +53,7 @@ describes every route in `.routy` files and uses every feature of the format, so
    22 passed, 0 failed
    ```
 
-   `DeleteUser` has `confirm: true`, so Routy asks before sending it; `--yes` answers for you.
+   `DeleteUser` has `confirm: true`, so Outry asks before sending it; `--yes` answers for you.
 
 </Steps>
 
@@ -68,35 +68,35 @@ struct in `internal/model/model.go`:
 +	FullName string `json:"full_name" binding:"required"` // full name
 ```
 
-`routy check` reads the Go source — nothing has to compile or run:
+`outry check` reads the Go source — nothing has to compile or run:
 
 ```txt
-api/v1/users/post.routy:17:8: error: required field `full_name` (string) is missing from body  ← internal/api/users.go:13
-api/v1/users/post.routy:17:10: error: body field `name` is not in model.CreateUser  ← internal/api/users.go:13
-14 files, 2 environments, 12 Go routes: 2 errors, 0 warnings; 2 fixable with `routy import go --fix`
+api/v1/users/post.outry:17:8: error: required field `full_name` (string) is missing from body  ← internal/api/users.go:13
+api/v1/users/post.outry:17:10: error: body field `name` is not in model.CreateUser  ← internal/api/users.go:13
+14 files, 2 environments, 12 Go routes: 2 errors, 0 warnings; 2 fixable with `outry import go --fix`
 ```
 
-`routy import go . --fix` rewrites the body. In a pull request the project's workflow
-(`routy check --format github`) puts the same errors on the changed lines. Add a route, and
-`routy import go .` creates its request with the body, query, headers and a response check filled in.
+`outry import go . --fix` rewrites the body. In a pull request the project's workflow
+(`outry check --format github`) puts the same errors on the changed lines. Add a route, and
+`outry import go .` creates its request with the body, query, headers and a response check filled in.
 
 ## What is where
 
 | Feature | File |
 |---------|------|
 | Environments, shared variables, a secret, middleware → headers | `api/env.toml` |
-| Checks of status, fields, headers, timing; a JSON Schema | `api/health.routy` |
-| Parameters with defaults, `cache: 50m` between runs, a negative test | `api/auth/login/post.routy` |
-| `form` body, the cookie jar, `cookies.session` | `api/auth/session.routy` |
-| Calls: `Login().body.token`, `CreateUser().body.id`, sent once per run | `api/v1/users/get-by-id.routy` |
-| Calls with arguments, `only: [dev]`, `confirm: true` | `api/v1/users/delete-by-id.routy` |
-| `multipart` file upload | `api/v1/users/avatar/post.routy` |
-| File-level `let`, `uuid()`, arithmetic, `all` / `map`, `save` | `api/v1/orders/post.routy` |
-| `null` query parameters left out | `api/v1/orders/get.routy` |
-| `poll` until the payment is confirmed | `api/v1/orders/pay/post.routy` |
-| Flows; an idempotent retry with `fresh` | `api/flows/checkout.routy` |
-| Shapes from Go structs, made stricter by hand | `api/shapes.routy` |
-| `routy check` and `routy run` in GitHub Actions | `.github/workflows/api.yml` |
+| Checks of status, fields, headers, timing; a JSON Schema | `api/health.outry` |
+| Parameters with defaults, `cache: 50m` between runs, a negative test | `api/auth/login/post.outry` |
+| `form` body, the cookie jar, `cookies.session` | `api/auth/session.outry` |
+| Calls: `Login().body.token`, `CreateUser().body.id`, sent once per run | `api/v1/users/get-by-id.outry` |
+| Calls with arguments, `only: [dev]`, `confirm: true` | `api/v1/users/delete-by-id.outry` |
+| `multipart` file upload | `api/v1/users/avatar/post.outry` |
+| File-level `let`, `uuid()`, arithmetic, `all` / `map`, `save` | `api/v1/orders/post.outry` |
+| `null` query parameters left out | `api/v1/orders/get.outry` |
+| `poll` until the payment is confirmed | `api/v1/orders/pay/post.outry` |
+| Flows; an idempotent retry with `fresh` | `api/flows/checkout.outry` |
+| Shapes from Go structs, made stricter by hand | `api/shapes.outry` |
+| `outry check` and `outry run` in GitHub Actions | `.github/workflows/api.yml` |
 
-The collection started as `routy init` and `routy import go .`; the requests then got checks, parameters
-and calls, and some files were moved — `routy import` still recognizes them by `handler:`.
+The collection started as `outry init` and `outry import go .`; the requests then got checks, parameters
+and calls, and some files were moved — `outry import` still recognizes them by `handler:`.

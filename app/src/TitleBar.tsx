@@ -24,7 +24,7 @@ export function TitleBar({ version, menu }: { version: string | null; menu?: Rea
     <header className={"titlebar" + (isMac ? " mac" : "")} data-tauri-drag-region>
       <div className="brand" data-tauri-drag-region>
         <img src={logo} alt="" draggable={false} />
-        <span>routy</span>
+        <span>outry</span>
         {version && <span className="version">v{version}</span>}
       </div>
       {menu}

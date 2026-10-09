@@ -1,4 +1,4 @@
-// Синхронизация с кодом: роуты из Go (как `routy import go`) против файлов проекта.
+// Синхронизация с кодом: роуты из Go (как `outry import go`) против файлов проекта.
 import { useState } from "react";
 import type { Field, ImportReport, Route, RouteChange } from "./api";
 
@@ -58,7 +58,7 @@ function RouteLine({ method, path, file, route }: { method: string; path: string
   );
 }
 
-/** `/users/{{id}}` (так ядро хранит параметры) → `/users/{id}`, как в роутере и `.routy`. */
+/** `/users/{{id}}` (так ядро хранит параметры) → `/users/{id}`, как в роутере и `.outry`. */
 const routePath = (p: string) => p.replaceAll("{{", "{").replaceAll("}}", "}");
 
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
@@ -145,7 +145,7 @@ export function RoutesPanel({ report, busy, onScan, onPickDir, onCreate, onOpen,
           {busy ? "Scanning…" : "Rescan"}
         </button>
         {fixable > 0 && (
-          <button className="ghost" onClick={() => onFix(null)} disabled={busy} title="routy import go --fix">
+          <button className="ghost" onClick={() => onFix(null)} disabled={busy} title="outry import go --fix">
             Fix {fixable}
           </button>
         )}
@@ -253,7 +253,7 @@ export function RoutesPanel({ report, busy, onScan, onPickDir, onCreate, onOpen,
             A request matches a route by its <code>handler:</code>, or by method and path (after{" "}
             <code>{"{{base}}"}</code> in <code>.http</code>); path parameters match any name. Matched requests are
             compared with the handler; <b>Apply</b> changes only that spot of the file. CLI:{" "}
-            <code>routy import go --check</code>, <code>--fix</code>
+            <code>outry import go --check</code>, <code>--fix</code>
           </p>
         </div>
       )}

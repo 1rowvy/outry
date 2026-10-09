@@ -1,6 +1,6 @@
 ---
 title: Desktop app
-description: Browse, edit and send requests in the Routy desktop app.
+description: Browse, edit and send requests in the Outry desktop app.
 ---
 
 import { Aside } from '@astrojs/starlight/components';
@@ -10,7 +10,7 @@ opens your project folder.
 
 ## Opening a project
 
-Click **Open project** and choose your repository (or the `api/` folder). Routy finds `env.toml` the
+Click **Open project** and choose your repository (or the `api/` folder). Outry finds `env.toml` the
 same way the CLI does. If the folder has no `env.toml`, the app offers to create `api/env.toml` with
 example environments.
 
@@ -18,40 +18,40 @@ The app remembers the last project and reopens it on start.
 
 ## Working with requests
 
-- The left panel shows every `.routy` and `.http` file in the project; **+** next to **Requests** creates
-  a new one (`users/create` becomes `users/create.routy`; type `.http` at the end for the old format).
+- The left panel shows every `.outry` and `.http` file in the project; **+** next to **Requests** creates
+  a new one (`users/create` becomes `users/create.outry`; type `.http` at the end for the old format).
   A file with only flows is marked **FLOW**.
 - Right-click a request or a folder to open, duplicate, rename or delete it. **Rename / Move…** takes a
   path, so `users/create` → `admin/users/create` moves the file to another folder. Deleting a folder
   removes only the request files in it; other files stay.
-- The editor highlights the syntax and checks the file as you type, like `routy check`: a wrong name of
+- The editor highlights the syntax and checks the file as you type, like `outry check`: a wrong name of
   a called request, an unknown argument or shape is underlined, and the message is shown below the
   editor.
-- In `.routy` the editor suggests fields at the start of a line, names of requests and flows of the
+- In `.outry` the editor suggests fields at the start of a line, names of requests and flows of the
   project (with their parameters), built-in functions, variables of the current environment and, after
   `.`, methods like `.contains()`; after `matches` — types and shapes.
 - In `.http`, after `{{` the editor suggests variables (from `env.toml`, `> save`, the `secrets` list
-  and [dynamic variables](/routy/guides/variables/#dynamic-variables-in-http)); on `>` lines it suggests
+  and [dynamic variables](/outry/guides/variables/#dynamic-variables-in-http)); on `>` lines it suggests
   directives, paths and operators.
 - The switcher under the project name selects an environment from `env.toml`.
 - **Add secret** at the bottom left stores a value in the system keychain for the current environment.
 
 | Shortcut | Action |
 |----------|--------|
-| <kbd>Ctrl</kbd>/<kbd>⌘</kbd> + <kbd>Enter</kbd> | Send the request; in `.routy` — run the request or flow at the cursor |
+| <kbd>Ctrl</kbd>/<kbd>⌘</kbd> + <kbd>Enter</kbd> | Send the request; in `.outry` — run the request or flow at the cursor |
 | <kbd>Ctrl</kbd>/<kbd>⌘</kbd> + <kbd>S</kbd> | Save the file |
 | <kbd>Ctrl</kbd> + <kbd>Space</kbd> | Show suggestions |
 | <kbd>Ctrl</kbd>/<kbd>⌘</kbd> + <kbd>F</kbd> | Search in the file |
 
 The editor's current text is sent, even if it is not saved yet — handy for quick experiments.
 
-## Running .routy
+## Running .outry
 
-A `.routy` file may hold several requests and flows. **Run** (or <kbd>Ctrl</kbd> + <kbd>Enter</kbd>) runs
+A `.outry` file may hold several requests and flows. **Run** (or <kbd>Ctrl</kbd> + <kbd>Enter</kbd>) runs
 the one at the cursor; the ▶ next to each request and `flow` line runs that one.
 
 Requests called from the one you run (`Login()` in a header) are sent once and then reused, as in
-[`routy run`](/routy/reference/routy-format/#caching); cookies are kept the same way. This *run* lasts
+[`outry run`](/outry/reference/outry-format/#caching); cookies are kept the same way. This *run* lasts
 until you switch the environment or click **New run** on the **Variables** tab. A request with
 `confirm: true` asks before it is sent.
 
@@ -65,7 +65,7 @@ it in the meantime: requests run in parallel, and each file keeps its own last r
 ## Editing env.toml
 
 Click **env.toml** under the environment switcher to open the project's
-[`env.toml`](/routy/reference/env-toml/) in the editor. The app checks the TOML as you type and won't
+[`env.toml`](/outry/reference/env-toml/) in the editor. The app checks the TOML as you type and won't
 save a file with an error. After saving, new environments appear in the switcher and new values are
 used by the next request. Keep tokens and passwords out of this file — use **Add secret** instead.
 
@@ -80,7 +80,7 @@ these views:
 - **headers** — response headers;
 - **tests** — the result of every check (`expect`, `> assert`) and `save`, with the reason for a failed
   one;
-- **trace** — `.routy` only: the requests it called;
+- **trace** — `.outry` only: the requests it called;
 - **request** — the request exactly as it was sent, after variable substitution.
 
 The download button saves the body to a file, byte for byte.
@@ -95,19 +95,19 @@ repository, next to saved values, and responses may contain tokens — **Clear**
 ## Variables
 
 **Variables** shows every variable of the selected environment, its final value and where it comes
-from — `env.toml`, `saved`, `ROUTY_*` or `keychain` — like [`routy vars`](/routy/reference/cli/#routy-vars).
-Secrets are masked. Secrets listed in [`secrets`](/routy/reference/env-toml/) but not set anywhere are
+from — `env.toml`, `saved`, `OUTRY_*` or `keychain` — like [`outry vars`](/outry/reference/cli/#outry-vars).
+Secrets are masked. Secrets listed in [`secrets`](/outry/reference/env-toml/) but not set anywhere are
 marked **missing**, with a button to add them. **Clear saved** forgets the values captured by `save`
-in this environment; **New run** forgets the responses of called requests and the cookies of `.routy`
+in this environment; **New run** forgets the responses of called requests and the cookies of `.outry`
 runs.
 
 ## Routes
 
 **Routes** compares the routes of your Go service with the project's requests, like
-[`routy import go`](/routy/guides/import-go/): new routes, routes that already have a request, and
-requests whose route is gone from the code. **Create files** writes `.routy` requests for the new ones
+[`outry import go`](/outry/guides/import-go/): new routes, routes that already have a request, and
+requests whose route is gone from the code. **Create files** writes `.outry` requests for the new ones
 and shapes for new response types. A request that differs from its handler gets a **changed** badge
-and the list of [differences](/routy/guides/import-go/#differences-from-the-code): **Diff** shows what a
+and the list of [differences](/outry/guides/import-go/#differences-from-the-code): **Diff** shows what a
 fix changes, **Apply** writes it, **Fix N** in the toolbar applies all of them, and **Remove N files**
 deletes files whose routes are all gone. The sync button next to **Requests** opens the tab and rescans. The Go folder defaults to
 the one above `api/`; click its path to choose another.
@@ -128,5 +128,5 @@ restart.
 
 <Aside>
 On Linux only the AppImage build updates itself. For `.deb` and `.rpm`, install the new package from
-the [releases page](https://github.com/1rowvy/routy/releases/latest).
+the [releases page](https://github.com/1rowvy/outry/releases/latest).
 </Aside>

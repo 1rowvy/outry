@@ -1,6 +1,6 @@
-// Что расширению отдаёт `routy lsp` сверх LSP (см. crates/routy-cli/src/lsp.rs, клиент с `routyUi`).
+// Что расширению отдаёт `outry lsp` сверх LSP (см. crates/outry-cli/src/lsp.rs, клиент с `outryUi`).
 
-/** Запрос или сценарий проекта — `routy/state`. */
+/** Запрос или сценарий проекта — `outry/state`. */
 export interface Item {
   uri: string;
   /** путь относительно корня проекта, через `/` */
@@ -21,7 +21,7 @@ export interface Var {
   secret: boolean;
 }
 
-/** Ответ на `routy/state`. */
+/** Ответ на `outry/state`. */
 export interface State {
   root: string;
   env: string;
@@ -30,7 +30,7 @@ export interface State {
   vars: Var[];
 }
 
-/** Ответ `routy.run`. `outcome` — `exec::Outcome` ядра: `kind` + RunOutcome / FlowOutcome. */
+/** Ответ `outry.run`. `outcome` — `exec::Outcome` ядра: `kind` + RunOutcome / FlowOutcome. */
 export interface RunResult {
   name: string;
   env: string;

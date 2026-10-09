@@ -1,21 +1,22 @@
 ---
-title: Routy
+title: Outry
 description: Executable API specs that live in your repository — run them anywhere, keep them in sync with your Go code.
 template: splash
 hero:
-  tagline: Executable API specs that live in your repository. Describe every endpoint in plain .routy files next to the code, run them from the terminal, your editor, the desktop app or CI — and when the code changes, Routy shows which requests no longer match it.
+  tagline: Executable API specs that live in your repository. Describe every endpoint in plain .outry files next to the code, run them from the terminal, your editor, the desktop app or CI — and when the code changes, Outry shows which requests no longer match it.
   image:
-    file: ../../assets/logo.svg
+    light: ../../assets/logo-light.svg
+    dark: ../../assets/logo-dark.svg
   actions:
     - text: Get started
-      link: /routy/getting-started/
+      link: /outry/getting-started/
       icon: right-arrow
     - text: Example project
-      link: /routy/example/
+      link: /outry/example/
       icon: open-book
       variant: secondary
     - text: GitHub
-      link: https://github.com/1rowvy/routy
+      link: https://github.com/1rowvy/outry
       icon: external
       variant: minimal
 ---
@@ -23,10 +24,10 @@ hero:
 import { Card, CardGrid } from '@astrojs/starlight/components';
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/1rowvy/routy/master/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/1rowvy/outry/master/install.sh | sh
 ```
 
-```routy title="api/orders/create.routy"
+```outry title="api/orders/create.outry"
 CreateOrder: POST /v1/orders {
   headers { Authorization: "Bearer ${Login().body.token}" }
   body { user_id: CreateUser().body.id, items: [{ sku: "BOOK-1", qty: 2 }] }
@@ -42,19 +43,19 @@ CreateOrder: POST /v1/orders {
 ```
 
 ```console
-$ routy check
-api/v1/users/post.routy:17:8: error: required field `full_name` (string) is missing from body  ← internal/api/users.go:13
-api/v1/users/post.routy:17:10: error: body field `name` is not in model.CreateUser  ← internal/api/users.go:13
-14 files, 2 environments, 12 Go routes: 2 errors, 0 warnings; 2 fixable with `routy import go --fix`
+$ outry check
+api/v1/users/post.outry:17:8: error: required field `full_name` (string) is missing from body  ← internal/api/users.go:13
+api/v1/users/post.outry:17:10: error: body field `name` is not in model.CreateUser  ← internal/api/users.go:13
+14 files, 2 environments, 12 Go routes: 2 errors, 0 warnings; 2 fixable with `outry import go --fix`
 ```
 
 <CardGrid>
 	<Card title="The spec is the test" icon="approve-check">
-		A `.routy` file documents an endpoint, sends it, checks the answer and is a step of bigger
+		A `.outry` file documents an endpoint, sends it, checks the answer and is a step of bigger
 		scenarios. One artifact instead of a wiki page, a collection and a test suite that disagree.
 	</Card>
 	<Card title="It notices when the code moves" icon="random">
-		Routy reads your Go service (chi, gin, `net/http`) and compares every request with its handler:
+		Outry reads your Go service (chi, gin, `net/http`) and compares every request with its handler:
 		path, body fields, query, headers, middleware, response type. Drift fails CI on the exact line.
 	</Card>
 	<Card title="Requests compose like functions" icon="puzzle">
@@ -63,14 +64,14 @@ api/v1/users/post.routy:17:10: error: body field `name` is not in model.CreateUs
 	</Card>
 	<Card title="It lives with the code" icon="document">
 		Plain text in your repository — reviewed in pull requests, versioned with the service, readable
-		without Routy. Secrets stay in the system keychain or `ROUTY_*` variables.
+		without Outry. Secrets stay in the system keychain or `OUTRY_*` variables.
 	</Card>
 	<Card title="One engine everywhere" icon="laptop">
-		The CLI, the desktop app, VS Code and any editor through `routy lsp` share one Rust core: what works
+		The CLI, the desktop app, VS Code and any editor through `outry lsp` share one Rust core: what works
 		on your machine works in CI.
 	</Card>
 	<Card title="See it on a real service" icon="rocket">
-		[routy-example-gin](/routy/example/) — a Gin API whose `api/` folder uses every feature. Clone it and
+		[outry-example-gin](/outry/example/) — a Gin API whose `api/` folder uses every feature. Clone it and
 		run it in two minutes.
 	</Card>
 </CardGrid>

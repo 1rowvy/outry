@@ -1,5 +1,5 @@
 // Ответы и итоги запусков, как их отдаёт ядро (serde): приложение — командами Tauri,
-// `routy lsp` — в ответе `routy.run`. Без зависимостей от Tauri: файл собирается и в webview
+// `outry lsp` — в ответе `outry.run`. Без зависимостей от Tauri: файл собирается и в webview
 // расширения VS Code (editors/vscode).
 
 export interface Header {
@@ -11,11 +11,11 @@ export interface AssertOutcome {
   source: string;
   passed: boolean;
   actual: unknown;
-  /** *.routy: почему не прошла — `body.total is 0` */
+  /** *.outry: почему не прошла — `body.total is 0` */
   detail?: string;
 }
 
-/** Запрос, вызванный из *.routy (`Login()`), — для вкладки Trace. */
+/** Запрос, вызванный из *.outry (`Login()`), — для вкладки Trace. */
 export interface CallTrace {
   name: string;
   /** 0 — вызван прямо из запущенного */
@@ -40,7 +40,7 @@ export interface RunOutcome {
   saved: Record<string, string>;
   asserts: AssertOutcome[];
   save_misses: string[];
-  /** *.routy: вызванные запросы */
+  /** *.outry: вызванные запросы */
   calls?: CallTrace[];
 }
 

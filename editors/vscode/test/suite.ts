@@ -1,4 +1,4 @@
-// Запускается внутри VS Code (test/run.mjs): расширение поднимает `routy lsp` для временного
+// Запускается внутри VS Code (test/run.mjs): расширение поднимает `outry lsp` для временного
 // проекта, дальше — то, что видит пользователь.
 import * as assert from "node:assert/strict";
 import * as path from "node:path";
@@ -16,47 +16,47 @@ async function until<T>(what: string, f: () => T | undefined | null | false, ms 
 }
 
 export async function run(): Promise<void> {
-  const ws = process.env.ROUTY_TEST_WS!;
-  const ext = vscode.extensions.getExtension<Api>("routy.routy-vscode")!;
+  const ws = process.env.OUTRY_TEST_WS!;
+  const ext = vscode.extensions.getExtension<Api>("outry.outry-vscode")!;
   const api = await ext.activate();
-  const state = await until("routy/state", () => api.server.state);
+  const state = await until("outry/state", () => api.server.state);
   assert.equal(state.env, "dev");
   assert.deepEqual(state.envs, ["dev", "staging"]);
   assert.ok(state.items.some((i) => i.name === "CreateOrder" && i.method === "POST"));
   assert.equal(state.vars.find((v) => v.name === "key")?.value, "012…(16 chars)");
 
-  // Дерево: папка auth, файл orders.routy.
+  // Дерево: папка auth, файл orders.outry.
   const roots = api.requests.getChildren();
   assert.deepEqual(
     roots.map((n) => (n.kind === "item" ? "?" : n.name)),
-    ["auth", "orders.routy"],
+    ["auth", "orders.outry"],
   );
 
-  const uri = vscode.Uri.file(path.join(ws, "api/orders.routy"));
+  const uri = vscode.Uri.file(path.join(ws, "api/orders.outry"));
   const doc = await vscode.workspace.openTextDocument(uri);
   const editor = await vscode.window.showTextDocument(doc);
-  assert.equal(doc.languageId, "routy");
+  assert.equal(doc.languageId, "outry");
 
   // Code lens от сервера ведут на команды расширения.
   const got = await vscode.commands.executeCommand<vscode.CodeLens[]>("vscode.executeCodeLensProvider", uri);
   assert.deepEqual(
     got.map((l) => [l.command?.title, l.command?.command]),
     [
-      ["▶ Send · dev", "routy.send"],
-      ["in…", "routy.sendIn"],
-      ["Copy as curl", "routy.copyCurl"],
+      ["▶ Send · dev", "outry.send"],
+      ["in…", "outry.sendIn"],
+      ["Copy as curl", "outry.copyCurl"],
     ],
   );
 
   // Copy as curl: Login() вызван, токен подставлен.
-  await vscode.commands.executeCommand("routy.copyCurl", uri.toString(), 2);
+  await vscode.commands.executeCommand("outry.copyCurl", uri.toString(), 2);
   const curl = await vscode.env.clipboard.readText();
   assert.match(curl, /^curl -X POST http:\/\/127\.0\.0\.1:\d+\/orders \\/);
   assert.ok(curl.includes("-H 'Authorization: Bearer tok-1'"), curl);
 
   // Send с курсора: ответ — во вкладке рядом.
   editor.selection = new vscode.Selection(3, 0, 3, 0);
-  await vscode.commands.executeCommand("routy.send");
+  await vscode.commands.executeCommand("outry.send");
   const shown = await until("response", () => {
     const c = api.panel.current;
     return c?.type === "result" || c?.type === "error" ? c : null;
@@ -74,7 +74,7 @@ export async function run(): Promise<void> {
       .find(
         (t) =>
           t.input instanceof vscode.TabInputWebview &&
-          t.input.viewType.endsWith("routy.response") &&
+          t.input.viewType.endsWith("outry.response") &&
           t.label === "CreateOrder · dev",
       ),
   );
@@ -87,7 +87,7 @@ export async function run(): Promise<void> {
   await api.server.selectEnv("staging");
   await until("env switch", () => api.server.state?.env === "staging");
 
-  // Ошибки как в `routy check`.
+  // Ошибки как в `outry check`.
   await editor.edit((e) => e.replace(new vscode.Range(2, 0, 2, 0), "  query { x: Logn() }\n"));
   const diags = await until("diagnostics", () => {
     const d = vscode.languages.getDiagnostics(uri);

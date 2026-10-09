@@ -1,6 +1,6 @@
 ---
 title: Getting started
-description: Install Routy, create a project and send your first request in a minute.
+description: Install Outry, create a project and send your first request in a minute.
 ---
 
 import { Steps, Aside } from '@astrojs/starlight/components';
@@ -10,20 +10,20 @@ import { Steps, Aside } from '@astrojs/starlight/components';
 1. Install the CLI (Linux):
 
    ```sh
-   curl -fsSL https://raw.githubusercontent.com/1rowvy/routy/master/install.sh | sh
+   curl -fsSL https://raw.githubusercontent.com/1rowvy/outry/master/install.sh | sh
    ```
 
-   The desktop app and other platforms are covered in [Installation](/routy/install/).
+   The desktop app and other platforms are covered in [Installation](/outry/install/).
 
 2. Create a project in your repository:
 
    ```sh
    cd my-service
-   routy init
+   outry init
    ```
 
    This creates `api/env.toml` with `dev` and `prod` environments and an example request
-   `api/health.routy`.
+   `api/health.outry`.
 
 3. Point `base` at your API in `api/env.toml`:
 
@@ -39,7 +39,7 @@ import { Steps, Aside } from '@astrojs/starlight/components';
 
 4. Write a request. The name comes before the method, the path is appended to `base`:
 
-   ```routy title="api/users/list.routy"
+   ```outry title="api/users/list.outry"
    ListUsers: GET /users {
      query { page: 1 }
 
@@ -55,14 +55,14 @@ import { Steps, Aside } from '@astrojs/starlight/components';
 5. Run it:
 
    ```sh
-   routy run api/users/list.routy
-   routy run ListUsers        # by name
-   routy run api              # every *.routy and *.http under api/, in alphabetical order
-   routy run api --env prod   # another environment
+   outry run api/users/list.outry
+   outry run ListUsers        # by name
+   outry run api              # every *.outry and *.http under api/, in alphabetical order
+   outry run api --env prod   # another environment
    ```
 
    ```txt
-   ✓ api/users/list.routy  ListUsers  GET http://localhost:8080/users?page=1  200 OK  12ms 532B
+   ✓ api/users/list.outry  ListUsers  GET http://localhost:8080/users?page=1  200 OK  12ms 532B
        ✓ status == 200
        ✓ body.items.length > 0
    ```
@@ -70,21 +70,21 @@ import { Steps, Aside } from '@astrojs/starlight/components';
 </Steps>
 
 <Aside type="tip">
-Prefer a GUI? Open the same folder in the [desktop app](/routy/guides/desktop-app/) — it reads the same
+Prefer a GUI? Open the same folder in the [desktop app](/outry/guides/desktop-app/) — it reads the same
 files, and edits made in your editor show up immediately.
 </Aside>
 
-Have a Go service? `routy import go .` writes a request for every chi, gin or `net/http` route, and
-`routy check` then tells you when the code and the requests drift apart — see
-[Import routes from Go](/routy/guides/import-go/).
+Have a Go service? `outry import go .` writes a request for every chi, gin or `net/http` route, and
+`outry check` then tells you when the code and the requests drift apart — see
+[Import routes from Go](/outry/guides/import-go/).
 
-Already have `.http` files? `routy convert api/` rewrites them into `.routy` — see
-[.http files](/routy/guides/request-format/).
+Already have `.http` files? `outry convert api/` rewrites them into `.outry` — see
+[.http files](/outry/guides/request-format/).
 
 ## Next steps
 
-- [Example project](/routy/example/) — a Gin service that uses every feature
-- [.routy format](/routy/reference/routy-format/) — the full reference
-- [Calling requests and checks](/routy/guides/chains-and-assertions/)
-- [Variables and environments](/routy/guides/variables/)
-- [Running Routy in CI](/routy/guides/ci/)
+- [Example project](/outry/example/) — a Gin service that uses every feature
+- [.outry format](/outry/reference/outry-format/) — the full reference
+- [Calling requests and checks](/outry/guides/chains-and-assertions/)
+- [Variables and environments](/outry/guides/variables/)
+- [Running Outry in CI](/outry/guides/ci/)

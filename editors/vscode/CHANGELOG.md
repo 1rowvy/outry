@@ -1,7 +1,12 @@
 # Changelog
 
-The extension is released together with `routy`: versions match, notes are in the
-[GitHub releases](https://github.com/1rowvy/routy/releases).
+The extension is released together with `outry`: versions match, notes are in the
+[GitHub releases](https://github.com/1rowvy/outry/releases).
+
+## 0.10.0
+
+- Renamed to Outry: the extension id is now `outry.outry-vscode` (install it again; `routy.routy-vscode` gets no more updates),
+  the binary is `outry`, files are `*.outry`, settings are `outry.*`.
 
 ## 0.7.0
 
@@ -19,5 +24,5 @@ The extension is released together with `routy`: versions match, notes are in th
 
 ## 0.6.0
 
-- First release: `routy lsp` client, response view, environments, requests and variables in the sidebar,
+- First release: `outry lsp` client, response view, environments, requests and variables in the sidebar,
   Copy as curl, syntax highlighting.

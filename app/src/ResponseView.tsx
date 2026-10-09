@@ -164,7 +164,7 @@ export function ResponseView({ entry, host }: { entry: Entry; host: ResponseHost
           {checks === 0 ? (
             <p className="muted">
               No checks. Add{" "}
-              {entry.file.endsWith(".routy") ? (
+              {entry.file.endsWith(".outry") ? (
                 <code>expect {"{ status == 200 }"}</code>
               ) : (
                 <>

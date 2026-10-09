@@ -1,14 +1,14 @@
-// Где взять `routy`: настройка `routy.path` → бинарь из платформенного VSIX → PATH и места,
+// Где взять `outry`: настройка `outry.path` → бинарь из платформенного VSIX → PATH и места,
 // куда его ставит install.sh (у VS Code, запущенного из меню, PATH бывает короче, чем в терминале).
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import * as path from "node:path";
 import * as vscode from "vscode";
 
-const EXE = process.platform === "win32" ? "routy.exe" : "routy";
+const EXE = process.platform === "win32" ? "outry.exe" : "outry";
 
 export function findBinary(extensionPath: string): string | null {
-  const configured = vscode.workspace.getConfiguration("routy").get<string>("path")?.trim();
+  const configured = vscode.workspace.getConfiguration("outry").get<string>("path")?.trim();
   if (configured) {
     return configured.replace(/^~(?=$|[\\/])/, homedir());
   }

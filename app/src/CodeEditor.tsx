@@ -1,5 +1,5 @@
-// Редактор на CodeMirror 6: подсветка .http/.routy/env.toml, ошибки на строке,
-// автодополнение `{{var}}` и директив (.http), имён, вызовов и полей (.routy), ▶ у запросов .routy.
+// Редактор на CodeMirror 6: подсветка .http/.outry/env.toml, ошибки на строке,
+// автодополнение `{{var}}` и директив (.http), имён, вызовов и полей (.outry), ▶ у запросов .outry.
 import { useEffect, useRef } from "react";
 import { EditorState, Prec, type Extension } from "@codemirror/state";
 import {
@@ -32,9 +32,9 @@ import { highlightSelectionMatches, searchKeymap } from "@codemirror/search";
 import type { ParseError, Symbols, VarName } from "./api";
 import { highlight, theme } from "./editorTheme";
 import { httpLanguage } from "./httpLanguage";
-import { BUILTINS, FIELDS, KEYWORDS, TYPES, routyLanguage } from "./routyLanguage";
+import { BUILTINS, FIELDS, KEYWORDS, TYPES, outryLanguage } from "./outryLanguage";
 
-export type EditorLanguage = "http" | "toml" | "routy";
+export type EditorLanguage = "http" | "toml" | "outry";
 
 const PATHS: Completion[] = [
   { label: "status", type: "property", detail: "HTTP status" },
@@ -110,8 +110,8 @@ const RESPONSE: Completion[] = [
   { label: "env", type: "variable", detail: "environment name" },
 ];
 
-/** Автодополнение *.routy: поля в начале строки, вызовы запросов, функции, переменные, формы. */
-function routyCompletions(vars: () => VarName[], symbols: () => Symbols | null) {
+/** Автодополнение *.outry: поля в начале строки, вызовы запросов, функции, переменные, формы. */
+function outryCompletions(vars: () => VarName[], symbols: () => Symbols | null) {
   return (ctx: CompletionContext): CompletionResult | null => {
     const word = ctx.matchBefore(/[\p{L}_][\p{L}\p{N}_-]*$/u) ?? (ctx.explicit ? { from: ctx.pos, to: ctx.pos, text: "" } : null);
     if (!word) return null;
@@ -195,7 +195,7 @@ interface Props {
   language: EditorLanguage;
   errors: ParseError[];
   vars: VarName[];
-  /** *.routy: запросы и сценарии проекта для автодополнения */
+  /** *.outry: запросы и сценарии проекта для автодополнения */
   symbols?: Symbols | null;
   /** Строка курсора (с 1) — что запускать по Ctrl+Enter */
   onCursor?: (line: number) => void;
@@ -242,10 +242,10 @@ export function CodeEditor({ docKey, value, onChange, language, errors, vars, sy
         autocompletion({ override: [completions(() => live.current.vars)], icons: false }),
         placeholder("GET {{base}}/path"),
       );
-    } else if (language === "routy") {
+    } else if (language === "outry") {
       extensions.push(
-        routyLanguage,
-        autocompletion({ override: [routyCompletions(() => live.current.vars, () => live.current.symbols ?? null)], icons: false }),
+        outryLanguage,
+        autocompletion({ override: [outryCompletions(() => live.current.vars, () => live.current.symbols ?? null)], icons: false }),
         placeholder("GET /path"),
         gutter({
           class: "cm-run-gutter",

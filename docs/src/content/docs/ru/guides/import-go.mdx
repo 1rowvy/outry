@@ -1,26 +1,26 @@
 ---
 title: Импорт роутов из Go
-description: Запросы .routy для всех роутов chi, gin и net/http в Go-сервисе.
+description: Запросы .outry для всех роутов chi, gin и net/http в Go-сервисе.
 ---
 
-Routy читает исходники Go-сервиса, находит зарегистрированные роуты и создаёт запрос `.routy` для
+Outry читает исходники Go-сервиса, находит зарегистрированные роуты и создаёт запрос `.outry` для
 каждого роута, у которого его ещё нет. Существующие запросы сравниваются с кодом, чтобы коллекция не
-разъезжалась с сервисом: `routy import go --check` роняет CI, когда это случилось, а `--fix` обновляет
+разъезжалась с сервисом: `outry import go --check` роняет CI, когда это случилось, а `--fix` обновляет
 запросы. Существующие файлы меняются только с `--fix`.
 
 ```sh
 cd my-service
-routy init              # один раз: api/env.toml с `base`
-routy import go .       # сканировать весь репозиторий
+outry init              # один раз: api/env.toml с `base`
+outry import go .       # сканировать весь репозиторий
 ```
 
 ```txt
-+ api/users/get.routy        GET /users  internal/http/routes.go:24
-+ api/users/get-by-id.routy  GET /users/{id}  internal/http/routes.go:25
-= api/users/create.routy     POST /users  internal/http/routes.go:26
-~ api/users/update.routy     PUT /users/{id}  internal/http/routes.go:27
-    api/users/update.routy:4:9  error    body field `age` is a string, code expects int
-- api/legacy/get.routy       GET /legacy  (no such route in code)
++ api/users/get.outry        GET /users  internal/http/routes.go:24
++ api/users/get-by-id.outry  GET /users/{id}  internal/http/routes.go:25
+= api/users/create.outry     POST /users  internal/http/routes.go:26
+~ api/users/update.outry     PUT /users/{id}  internal/http/routes.go:27
+    api/users/update.outry:4:9  error    body field `age` is a string, code expects int
+- api/legacy/get.outry       GET /legacy  (no such route in code)
 
 14 Go files, 4 routes: 2 new, 2 existing (1 changed), 1 not in code
 created 2 files
@@ -28,7 +28,7 @@ created 2 files
 ```
 
 - `+` — для роута создан новый файл;
-- `=` — запрос для этого роута уже есть (под любым именем, в `.routy` или `.http`);
+- `=` — запрос для этого роута уже есть (под любым именем, в `.outry` или `.http`);
 - `~` — запрос есть, но расходится с кодом: [расхождения](#расхождения-с-кодом) перечислены под ним;
 - `-` — запрос указывает на `base`, но такого роута в коде нет.
 
@@ -57,9 +57,9 @@ created 2 files
 ## Что создаётся
 
 Параметры пути остаются в записи роутера: `{id}`, `{id:[0-9]+}`, `{path...}`, `:id` и `*path`
-превращаются в `{id}` / `{path}` — [параметры](/routy/ru/reference/routy-format/#параметры) запроса.
+превращаются в `{id}` / `{path}` — [параметры](/outry/ru/reference/outry-format/#параметры) запроса.
 
-Routy также читает обработчик и показывает, что запрос ожидает:
+Outry также читает обработчик и показывает, что запрос ожидает:
 
 - **описание** — doc-комментарий обработчика или `@Summary` / `@Description` из аннотаций swag;
 - **тело** — структура, в которую декодируется запрос: `json.NewDecoder(r.Body).Decode(&req)`,
@@ -76,7 +76,7 @@ Routy также читает обработчик и показывает, чт
   `gin.H` / map пропускаются. Запрос получает `expect { body matches Order }`, а структура
   становится [shape](#shape-ответов).
 
-```routy title="api/users/post.routy"
+```outry title="api/users/post.outry"
 // Отправляет приветственное письмо.
 // chi internal/http/users.go:42 → h.CreateUser
 //
@@ -91,7 +91,7 @@ CreateUser: POST /users {
 }
 ```
 
-```routy title="api/users/get.routy"
+```outry title="api/users/get.outry"
 // ListUsers returns a page of users.
 // chi internal/http/users.go:22 → h.ListUsers
 //
@@ -127,23 +127,23 @@ ListUsers: GET /users {
 
 | Роут | Файл |
 |------|------|
-| `GET /users` | `users/get.routy` |
-| `POST /users` | `users/post.routy` |
-| `GET /users/{id}` | `users/get-by-id.routy` |
-| `GET /users/{id}/posts` | `users/posts/get.routy` |
-| `GET /` | `root/get.routy` |
+| `GET /users` | `users/get.outry` |
+| `POST /users` | `users/post.outry` |
+| `GET /users/{id}` | `users/get-by-id.outry` |
+| `GET /users/{id}/posts` | `users/posts/get.outry` |
+| `GET /` | `root/get.outry` |
 
-Если имя занято файлом другого роута (`.routy` или `.http`), добавляется суффикс: `users/get-2.routy`.
+Если имя занято файлом другого роута (`.outry` или `.http`), добавляется суффикс: `users/get-2.outry`.
 
 ## Middleware
 
-Routy собирает middleware, через которые проходит роут: `r.Use(…)` выше в той же функции и том же
+Outry собирает middleware, через которые проходит роут: `r.Use(…)` выше в той же функции и том же
 блоке, группу `r.Group("/v1", auth)` (gin), `r.With(auth).Get(…)` и
 `r.Group(func(r chi.Router) { r.Use(auth); … })` (chi), а также middleware роутера, переданного в другую
 функцию (`routes.Register(authed)`). В созданном файле они перечислены под строкой с источником;
 middleware, которые есть у всех роутов (логирование, recovery), не пишутся.
 
-Какие заголовки нужны middleware, задаётся в [`env.toml`](/routy/ru/reference/env-toml/), и запросы к
+Какие заголовки нужны middleware, задаётся в [`env.toml`](/outry/ru/reference/env-toml/), и запросы к
 роутам за ним получают их сразу:
 
 ```toml title="api/env.toml"
@@ -151,7 +151,7 @@ middleware, которые есть у всех роутов (логирован
 AuthRequired = { headers = { Authorization = "Bearer ${Login().body.token}" } }
 ```
 
-```routy title="api/orders/get.routy"
+```outry title="api/orders/get.outry"
 // gin internal/router/router.go:31 → h.Orders.List
 // middleware: middleware.AuthRequired()
 ListOrders: GET /orders {
@@ -162,14 +162,14 @@ ListOrders: GET /orders {
 
 Ключ — имя middleware, как в коде: `AuthRequired` подходит к `middleware.AuthRequired()`,
 `mw.AuthRequired` и `AuthRequired`; `mw.RequireRole` — к любому `mw.RequireRole(…)`. Значение
-заголовка — строка `.routy`, так что `${…}` — [выражение](/routy/ru/reference/expressions/), здесь вызов
+заголовка — строка `.outry`, так что `${…}` — [выражение](/outry/ru/reference/expressions/), здесь вызов
 запроса `Login`, который отправляется один раз и кешируется. Существующий запрос без заголовка получает
 [предупреждение с правкой](#расхождения-с-кодом).
 
 ## Сопоставление с существующими запросами
 
 Запрос считается запросом для роута, если его `handler:` называет обработчик роута. Запросы без
-`handler` сопоставляются по методу и пути (query-строка не учитывается): в `.routy` — пути, начинающиеся
+`handler` сопоставляются по методу и пути (query-строка не учитывается): в `.outry` — пути, начинающиеся
 с `/` (они дописываются к `base`), в `.http` — URL, начинающиеся с `{{base}}`. Параметры совпадают с
 любым именем, так что `/users/{user_id}` подходит для `GET /users/{id}`, как и конкретное значение —
 `/users/42`, если в коде нет отдельного статического роута `/users/42`. Созданные файлы можно свободно
@@ -210,7 +210,7 @@ ListOrders: GET /orders {
 
 ### Что меняет `--fix`
 
-Правка меняет только своё место, а затронутый запрос печатается заново, как это делает `routy fmt`;
+Правка меняет только своё место, а затронутый запрос печатается заново, как это делает `outry fmt`;
 остальной файл остаётся как был.
 
 - новый метод или путь; параметры пути сохраняют имена из запроса (`{user_id}` остаётся, даже если в
@@ -222,15 +222,15 @@ ListOrders: GET /orders {
 - в `expect` добавляется `body matches Order`;
 - в `headers` добавляется заголовок из [`[import.middleware]`](#middleware).
 
-Переименование параметров, query-параметры и остальные заголовки остаются вам — их значений Routy не знает.
+Переименование параметров, query-параметры и остальные заголовки остаются вам — их значений Outry не знает.
 
 ## Shape ответов
 
-Структура, которой отвечает обработчик, становится [shape](/routy/ru/reference/routy-format/#формы),
-а созданный запрос проверяет ответ через `body matches`. Shape пишутся в `shapes.routy` проекта (или в
+Структура, которой отвечает обработчик, становится [shape](/outry/ru/reference/outry-format/#формы),
+а созданный запрос проверяет ответ через `body matches`. Shape пишутся в `shapes.outry` проекта (или в
 файл, где shape уже есть), по одному на тип Go, с его местом в комментарии:
 
-```routy title="api/shapes.routy"
+```outry title="api/shapes.outry"
 // dto.Order — internal/dto/order.go:12
 shape Order {
   id: integer,
@@ -250,32 +250,32 @@ shape Order {
 (`status: "new" | "paid"`), `integer` вместо `number`, без `null` — это не расхождение. Поле, которого
 нет в структуре, или тип, который ей противоречит, — ошибка; поле, которого нет в shape, —
 предупреждение. `--fix` переписывает shape по коду, оставляя ваши совместимые поля как есть. Shape для
-новых типов добавляет `routy import go`, как и новые запросы.
+новых типов добавляет `outry import go`, как и новые запросы.
 
 ## Проверка в CI и исправление
 
 ```sh
-routy import go . --check                  # отчёт по файлам, код выхода 1 при ошибках
-routy import go . --check --format github  # то же аннотациями GitHub Actions
-routy import go . --fix --dry-run          # diff всех правок
-routy import go . --fix                    # применить (и создать новые файлы)
-routy import go . --prune                  # удалить файлы, все роуты которых пропали
+outry import go . --check                  # отчёт по файлам, код выхода 1 при ошибках
+outry import go . --check --format github  # то же аннотациями GitHub Actions
+outry import go . --fix --dry-run          # diff всех правок
+outry import go . --fix                    # применить (и создать новые файлы)
+outry import go . --prune                  # удалить файлы, все роуты которых пропали
 ```
 
 `--check` ничего не пишет. Он падает на новых роутах без запроса, запросах, чьего роута больше нет,
 типах ответа без shape и расхождениях-ошибках:
 
 ```txt
-api/users/update.routy
+api/users/update.outry
   4:9     error    body field `age` is a string, code expects int  ← internal/http/routes.go:27
 
 internal/http/routes.go
-  24:1    error    route GET /users has no request (`routy import go` creates api/users/get.routy)
+  24:1    error    route GET /users has no request (`outry import go` creates api/users/get.outry)
 
-2 routes checked: 2 errors, 0 warnings; 1 fixable with `routy import go --fix`
+2 routes checked: 2 errors, 0 warnings; 1 fixable with `outry import go --fix`
 ```
 
-С `--format github` каждая строка становится аннотацией на файле `.routy` — или на строке Go, для
+С `--format github` каждая строка становится аннотацией на файле `.outry` — или на строке Go, для
 нового роута, — и видна в pull request. `--format json` (или `--json`) выводит весь план:
 `existing[].changes` с `severity`, `go`, `fixable` и `diff` каждой правки, `shape_changes`,
 `new_shapes`, `stale` и `prunable`.
@@ -287,11 +287,11 @@ internal/http/routes.go
 
 Роуты находятся [запросами tree-sitter](https://tree-sitter.github.io/tree-sitter/using-parsers/queries/) —
 встроенные лежат в
-[`crates/routy-core/queries`](https://github.com/1rowvy/routy/tree/master/crates/routy-core/queries).
+[`crates/outry-core/queries`](https://github.com/1rowvy/outry/tree/master/crates/outry-core/queries).
 Чтобы поддержать другой роутер, напишите свой запрос и передайте его через `--query`:
 
 ```scheme title="echo.scm"
-; routy: import github.com/labstack/echo
+; outry: import github.com/labstack/echo
 (call_expression
   function: (selector_expression
     operand: (_) @receiver
@@ -301,7 +301,7 @@ internal/http/routes.go
 ```
 
 ```sh
-routy import go . --query echo.scm
+outry import go . --query echo.scm
 ```
 
 | Захват | Значение |
@@ -316,5 +316,5 @@ routy import go . --query echo.scm
 | `@middleware` | Middleware `@route` или `@group`, сколько угодно: `(argument_list . (_) @path (_)* @middleware (_) @handler .)` |
 | `@use` + `@middleware` | Middleware для роутов `@receiver`: отдельной инструкцией (`r.Use(mw)`) — для роутов ниже в той же функции и том же блоке, в цепочке вызовов (`r.With(mw).Get`) — только для этого вызова |
 
-Захваты, начинающиеся с `_`, — для предикатов. Строка `; routy: import <путь>` ограничивает запрос
+Захваты, начинающиеся с `_`, — для предикатов. Строка `; outry: import <путь>` ограничивает запрос
 файлами, импортирующими пакет с таким префиксом.

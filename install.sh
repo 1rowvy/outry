@@ -1,19 +1,19 @@
 #!/bin/sh
-# Установка Routy CLI:
-#   curl -fsSL https://raw.githubusercontent.com/1rowvy/routy/master/install.sh | sh
+# Установка Outry CLI:
+#   curl -fsSL https://raw.githubusercontent.com/1rowvy/outry/master/install.sh | sh
 #
 # Переменные:
-#   ROUTY_VERSION      версия, например v0.2.0 (по умолчанию — последний релиз)
-#   ROUTY_INSTALL_DIR  куда положить бинарь (по умолчанию ~/.local/bin)
+#   OUTRY_VERSION      версия, например v0.2.0 (по умолчанию — последний релиз)
+#   OUTRY_INSTALL_DIR  куда положить бинарь (по умолчанию ~/.local/bin)
 #
-# Обновление потом: `routy update`. Удаление: rm ~/.local/bin/routy
+# Обновление потом: `outry update`. Удаление: rm ~/.local/bin/outry
 
 set -eu
 
-REPO="1rowvy/routy"
+REPO="1rowvy/outry"
 
 say() { printf '%s\n' "$*"; }
-err() { printf 'routy install: %s\n' "$*" >&2; exit 1; }
+err() { printf 'outry install: %s\n' "$*" >&2; exit 1; }
 
 # Всё в функции: если скачивание скрипта оборвётся на середине, sh не выполнит половину.
 main() {
@@ -45,40 +45,40 @@ main() {
         err "нужен sha256sum или shasum для проверки архива"
     fi
 
-    version="${ROUTY_VERSION:-}"
+    version="${OUTRY_VERSION:-}"
     if [ -z "$version" ]; then
         version="$(fetch_stdout "https://api.github.com/repos/$REPO/releases/latest" |
             sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -n 1)"
-        [ -n "$version" ] || err "не удалось узнать последнюю версию (лимит GitHub API? задайте ROUTY_VERSION)"
+        [ -n "$version" ] || err "не удалось узнать последнюю версию (лимит GitHub API? задайте OUTRY_VERSION)"
     fi
     case "$version" in v*) ;; *) version="v$version" ;; esac
 
-    name="routy-cli-${version}-${target}"
+    name="outry-cli-${version}-${target}"
     url="https://github.com/$REPO/releases/download/${version}/${name}.tar.gz"
-    dir="${ROUTY_INSTALL_DIR:-$HOME/.local/bin}"
+    dir="${OUTRY_INSTALL_DIR:-$HOME/.local/bin}"
 
     tmp="$(mktemp -d)"
     trap 'rm -rf "$tmp"' EXIT INT TERM
 
-    say "routy ${version} (${target})"
-    fetch "$url" "$tmp/routy.tar.gz" || err "не удалось скачать $url"
-    fetch "$url.sha256" "$tmp/routy.tar.gz.sha256" || err "не удалось скачать контрольную сумму $url.sha256"
+    say "outry ${version} (${target})"
+    fetch "$url" "$tmp/outry.tar.gz" || err "не удалось скачать $url"
+    fetch "$url.sha256" "$tmp/outry.tar.gz.sha256" || err "не удалось скачать контрольную сумму $url.sha256"
 
-    expected="$(cut -d' ' -f1 <"$tmp/routy.tar.gz.sha256")"
-    actual="$(sha256 "$tmp/routy.tar.gz")"
+    expected="$(cut -d' ' -f1 <"$tmp/outry.tar.gz.sha256")"
+    actual="$(sha256 "$tmp/outry.tar.gz")"
     [ "$expected" = "$actual" ] || err "sha256 не совпадает: ожидали $expected, получили $actual"
 
-    tar -xzf "$tmp/routy.tar.gz" -C "$tmp"
+    tar -xzf "$tmp/outry.tar.gz" -C "$tmp"
     mkdir -p "$dir"
-    # Через временный файл и mv: не ломаем запущенный routy и не оставляем половину файла.
-    cp "$tmp/$name/routy" "$dir/.routy.new"
-    chmod 755 "$dir/.routy.new"
-    mv -f "$dir/.routy.new" "$dir/routy"
+    # Через временный файл и mv: не ломаем запущенный outry и не оставляем половину файла.
+    cp "$tmp/$name/outry" "$dir/.outry.new"
+    chmod 755 "$dir/.outry.new"
+    mv -f "$dir/.outry.new" "$dir/outry"
 
-    say "установлен в $dir/routy"
+    say "установлен в $dir/outry"
     completions
     case ":$PATH:" in
-        *":$dir:"*) "$dir/routy" --version ;;
+        *":$dir:"*) "$dir/outry" --version ;;
         *)
             say ""
             say "$dir нет в PATH. Добавьте в профиль оболочки:"
@@ -88,24 +88,24 @@ main() {
     esac
 }
 
-# Автодополнение для fish и bash. Файлы не содержат сам скрипт, а вызывают `routy completions`
-# при загрузке — после `routy update` подсказки сразу новые. Для root (sudo) не ставим.
+# Автодополнение для fish и bash. Файлы не содержат сам скрипт, а вызывают `outry completions`
+# при загрузке — после `outry update` подсказки сразу новые. Для root (sudo) не ставим.
 completions() {
     [ "$(id -u)" != 0 ] || return 0
     if command -v fish >/dev/null 2>&1; then
-        f="${XDG_CONFIG_HOME:-$HOME/.config}/fish/completions/routy.fish"
+        f="${XDG_CONFIG_HOME:-$HOME/.config}/fish/completions/outry.fish"
         mkdir -p "$(dirname "$f")" &&
-            echo 'command -q routy; and routy completions fish | source' >"$f" &&
+            echo 'command -q outry; and outry completions fish | source' >"$f" &&
             say "автодополнение fish: $f"
     fi
     if command -v bash >/dev/null 2>&1; then
-        f="${XDG_DATA_HOME:-$HOME/.local/share}/bash-completion/completions/routy"
+        f="${XDG_DATA_HOME:-$HOME/.local/share}/bash-completion/completions/outry"
         mkdir -p "$(dirname "$f")" &&
-            echo 'command -v routy >/dev/null && source <(routy completions bash)' >"$f" &&
+            echo 'command -v outry >/dev/null && source <(outry completions bash)' >"$f" &&
             say "автодополнение bash: $f (нужен пакет bash-completion)"
     fi
     if command -v zsh >/dev/null 2>&1; then
-        say "автодополнение zsh: добавьте в ~/.zshrc  source <(routy completions zsh)"
+        say "автодополнение zsh: добавьте в ~/.zshrc  source <(outry completions zsh)"
     fi
 }
 

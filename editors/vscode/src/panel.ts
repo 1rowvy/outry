@@ -58,7 +58,7 @@ export class ResponsePanel implements vscode.Disposable {
     }
     const root = vscode.Uri.joinPath(this.ctx.extensionUri, "dist", "webview");
     const panel = vscode.window.createWebviewPanel(
-      "routy.response",
+      "outry.response",
       "Response",
       { viewColumn: vscode.ViewColumn.Beside, preserveFocus: true },
       { enableScripts: true, retainContextWhenHidden: true, localResourceRoots: [root] },

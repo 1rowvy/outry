@@ -24,12 +24,12 @@ base = "https://api.example.com"
 |------|----------|
 | `project` | Пространство имён для секретов и сохранённых значений. По умолчанию — имя папки проекта или родительской папки, если она называется `api` |
 | `default` | Окружение, если не указан `--env`. По умолчанию — первое по алфавиту |
-| `secrets` | Имена переменных-секретов. Значения — в хранилище паролей или `ROUTY_*`; по списку `routy vars` и приложение подсказывают, каких не хватает |
+| `secrets` | Имена переменных-секретов. Значения — в хранилище паролей или `OUTRY_*`; по списку `outry vars` и приложение подсказывают, каких не хватает |
 | `[vars]` | Переменные, общие для всех окружений |
 | `[env.<имя>]` | Окружение; его переменные перекрывают `[vars]` |
-| `[import.middleware]` | Заголовки, которые нужны запросам к роутам за middleware в Go: `AuthRequired = { headers = { Authorization = "Bearer ${Login().body.token}" } }`. Для `routy import go`, см. [Middleware](/routy/ru/guides/import-go/#middleware) |
+| `[import.middleware]` | Заголовки, которые нужны запросам к роутам за middleware в Go: `AuthRequired = { headers = { Authorization = "Bearer ${Login().body.token}" } }`. Для `outry import go`, см. [Middleware](/outry/ru/guides/import-go/#middleware) |
 
 Значения — строки, числа или булевы; не-строки подставляются как написаны (`port = 8080` → `8080`).
 Неизвестные ключи — ошибка, так что опечатки вроде `defualt` не пройдут незамеченными.
 
-Секретам здесь не место — см. [Секреты](/routy/ru/guides/secrets/).
+Секретам здесь не место — см. [Секреты](/outry/ru/guides/secrets/).

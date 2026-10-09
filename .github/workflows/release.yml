@@ -5,7 +5,7 @@
 # Секреты репозитория:
 #   TAURI_SIGNING_PRIVATE_KEY            — содержимое ~/.tauri/routy.key
 #   TAURI_SIGNING_PRIVATE_KEY_PASSWORD   — пароль ключа (пустой, если без пароля)
-#   (опционально) VSCE_PAT — токен VS Code Marketplace (издатель routy), OVSX_PAT — Open VSX;
+#   (опционально) VSCE_PAT — токен VS Code Marketplace (издатель outry), OVSX_PAT — Open VSX;
 #                 без них VSIX только прикладываются к релизу
 #   (опционально, macOS) APPLE_CERTIFICATE, APPLE_CERTIFICATE_PASSWORD, APPLE_SIGNING_IDENTITY,
 #                        APPLE_ID, APPLE_PASSWORD, APPLE_TEAM_ID — подпись и нотаризация
@@ -39,7 +39,7 @@ jobs:
           ref: ${{ env.TAG }}
       - name: Тег совпадает с версией в Cargo.toml и package.json
         run: |
-          cargo_version=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "routy-app") | .version')
+          cargo_version=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "outry-app") | .version')
           npm_version=$(jq -r .version app/package.json)
           vscode_version=$(jq -r .version editors/vscode/package.json)
           echo "tag=$TAG cargo=$cargo_version npm=$npm_version vscode=$vscode_version"
@@ -52,7 +52,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           if ! gh release view "$TAG" >/dev/null 2>&1; then
-            gh release create "$TAG" --draft --title "Routy ${TAG#v}" --generate-notes --verify-tag
+            gh release create "$TAG" --draft --title "Outry ${TAG#v}" --generate-notes --verify-tag
           fi
           # Черновик не находится поиском по tag_name в списке релизов — берём ID напрямую.
           # Сразу после создания API может его ещё не отдавать — несколько попыток.
@@ -157,13 +157,13 @@ jobs:
           sudo apt-get update && sudo apt-get install -y musl-tools
           # ring собирает C/asm-код; cc-rs сам не находит musl-gcc.
           echo "CC_$(echo '${{ matrix.target }}' | tr '-' '_')=musl-gcc" >> "$GITHUB_ENV"
-      - run: cargo build --release --locked -p routy-cli --target ${{ matrix.target }}
+      - run: cargo build --release --locked -p outry-cli --target ${{ matrix.target }}
       - name: Смоук-тест
         # x86_64-бинарь на arm64-раннере macOS требует Rosetta — не рассчитываем на неё.
         if: matrix.target != 'x86_64-apple-darwin'
         shell: bash
         run: |
-          bin="target/${{ matrix.target }}/release/routy"
+          bin="target/${{ matrix.target }}/release/outry"
           "$bin" --version
           "$bin" check examples/api
       - name: Упаковать и загрузить
@@ -171,24 +171,24 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          name="routy-cli-${TAG}-${{ matrix.target }}"
+          name="outry-cli-${TAG}-${{ matrix.target }}"
           dir="target/${{ matrix.target }}/release"
           mkdir -p "dist/$name"
           cp README.md LICENSE "dist/$name/"
           if [ "$RUNNER_OS" = "Windows" ]; then
-            cp "$dir/routy.exe" "dist/$name/"
+            cp "$dir/outry.exe" "dist/$name/"
             (cd dist && 7z a "$name.zip" "$name" >/dev/null)
             asset="dist/$name.zip"
           else
-            cp "$dir/routy" "dist/$name/"
+            cp "$dir/outry" "dist/$name/"
             tar -C dist -czf "dist/$name.tar.gz" "$name"
             asset="dist/$name.tar.gz"
           fi
-          # Контрольная сумма рядом с архивом: её проверяют install.sh и `routy update`.
+          # Контрольная сумма рядом с архивом: её проверяют install.sh и `outry update`.
           (cd dist && if command -v sha256sum >/dev/null; then sha256sum "${asset#dist/}"; else shasum -a 256 "${asset#dist/}"; fi) > "$asset.sha256"
           gh release upload "$TAG" "$asset" "$asset.sha256" --clobber
 
-  # Расширение VS Code: по VSIX на платформу с бинарём `routy` из архивов CLI этого релиза
+  # Расширение VS Code: по VSIX на платформу с бинарём `outry` из архивов CLI этого релиза
   # (linux — musl, работает и на Alpine) и один без бинаря для остальных платформ.
   vscode:
     needs: [create-release, cli]
@@ -217,18 +217,18 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p ../../dist/vsix cli
-          gh release download "$TAG" --dir cli --pattern 'routy-cli-*'
+          gh release download "$TAG" --dir cli --pattern 'outry-cli-*'
           (cd cli && for f in *.tar.gz *.zip; do sha256sum -c "$f.sha256"; done)
           pack() { # <vscode target> <rust target>
             rm -rf bin && mkdir bin
-            name="routy-cli-${TAG}-$2"
+            name="outry-cli-${TAG}-$2"
             if [ -f "cli/$name.zip" ]; then
-              unzip -q -j "cli/$name.zip" "$name/routy.exe" -d bin
+              unzip -q -j "cli/$name.zip" "$name/outry.exe" -d bin
             else
-              tar -xzf "cli/$name.tar.gz" -C bin --strip-components=1 "$name/routy"
-              chmod +x bin/routy
+              tar -xzf "cli/$name.tar.gz" -C bin --strip-components=1 "$name/outry"
+              chmod +x bin/outry
             fi
-            npx vsce package --no-dependencies --target "$1" -o "../../dist/vsix/routy-${TAG}-$1.vsix"
+            npx vsce package --no-dependencies --target "$1" -o "../../dist/vsix/outry-${TAG}-$1.vsix"
           }
           pack linux-x64 x86_64-unknown-linux-musl
           pack alpine-x64 x86_64-unknown-linux-musl
@@ -238,7 +238,7 @@ jobs:
           pack darwin-x64 x86_64-apple-darwin
           pack win32-x64 x86_64-pc-windows-msvc
           rm -rf bin
-          npx vsce package --no-dependencies -o "../../dist/vsix/routy-${TAG}-universal.vsix"
+          npx vsce package --no-dependencies -o "../../dist/vsix/outry-${TAG}-universal.vsix"
           gh release upload "$TAG" ../../dist/vsix/*.vsix --clobber
       - name: VS Code Marketplace
         if: ${{ env.VSCE_PAT != '' && !contains(env.TAG, '-') }}

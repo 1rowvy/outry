@@ -1,6 +1,6 @@
 ---
 title: Установка
-description: Установка CLI и приложения Routy и их обновление.
+description: Установка CLI и приложения Outry и их обновление.
 ---
 
 import { Tabs, TabItem, Aside } from '@astrojs/starlight/components';
@@ -11,30 +11,30 @@ import { Tabs, TabItem, Aside } from '@astrojs/starlight/components';
 <TabItem label="Linux">
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/1rowvy/routy/master/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/1rowvy/outry/master/install.sh | sh
 ```
 
 Скрипт скачивает статический бинарь из последнего релиза (x86_64 или aarch64 — работает на любом
-дистрибутиве, включая Alpine), проверяет контрольную сумму SHA-256 и кладёт его в `~/.local/bin/routy`.
-Заодно он включает автодополнение для fish и bash; для zsh добавьте `source <(routy completions zsh)` в
-`~/.zshrc`. Подсказки генерирует установленный бинарь, поэтому после `routy update` они сразу новые.
+дистрибутиве, включая Alpine), проверяет контрольную сумму SHA-256 и кладёт его в `~/.local/bin/outry`.
+Заодно он включает автодополнение для fish и bash; для zsh добавьте `source <(outry completions zsh)` в
+`~/.zshrc`. Подсказки генерирует установленный бинарь, поэтому после `outry update` они сразу новые.
 
 Настройки передаются переменными окружения:
 
 ```sh
 # конкретная версия
-curl -fsSL https://raw.githubusercontent.com/1rowvy/routy/master/install.sh | ROUTY_VERSION=v0.2.0 sh
+curl -fsSL https://raw.githubusercontent.com/1rowvy/outry/master/install.sh | OUTRY_VERSION=v0.2.0 sh
 
-# для всех пользователей (обновлять потом через `sudo routy update`)
-curl -fsSL https://raw.githubusercontent.com/1rowvy/routy/master/install.sh | sudo ROUTY_INSTALL_DIR=/usr/local/bin sh
+# для всех пользователей (обновлять потом через `sudo outry update`)
+curl -fsSL https://raw.githubusercontent.com/1rowvy/outry/master/install.sh | sudo OUTRY_INSTALL_DIR=/usr/local/bin sh
 ```
 
 </TabItem>
 <TabItem label="macOS / Windows">
 
-Скачайте `routy-cli-<версия>-<платформа>` из
-[последнего релиза](https://github.com/1rowvy/routy/releases/latest), распакуйте и положите `routy`
-(`routy.exe`) в любую папку из `PATH`. Рядом с каждым архивом лежит файл `.sha256`.
+Скачайте `outry-cli-<версия>-<платформа>` из
+[последнего релиза](https://github.com/1rowvy/outry/releases/latest), распакуйте и положите `outry`
+(`outry.exe`) в любую папку из `PATH`. Рядом с каждым архивом лежит файл `.sha256`.
 
 Скрипт установки для этих платформ в планах.
 
@@ -44,31 +44,31 @@ curl -fsSL https://raw.githubusercontent.com/1rowvy/routy/master/install.sh | su
 ### Обновление
 
 ```sh
-routy update           # скачать и поставить последний релиз (с проверкой SHA-256)
-routy update --check   # только проверить, есть ли новая версия
+outry update           # скачать и поставить последний релиз (с проверкой SHA-256)
+outry update --check   # только проверить, есть ли новая версия
 ```
 
-Как и npm, Routy раз в сутки в фоне проверяет новую версию и после команды коротко напоминает, если она
+Как и npm, Outry раз в сутки в фоне проверяет новую версию и после команды коротко напоминает, если она
 вышла. Команды при этом сеть не ждут. Напоминание не показывается в пайпах, в CI и при
-`ROUTY_NO_UPDATE_NOTIFIER=1`.
+`OUTRY_NO_UPDATE_NOTIFIER=1`.
 
 <Aside>
-Если `routy` поставлен пакетным менеджером (`/usr/bin`, Homebrew, Nix), `routy update` его не трогает —
+Если `outry` поставлен пакетным менеджером (`/usr/bin`, Homebrew, Nix), `outry update` его не трогает —
 обновляйте тем же пакетным менеджером.
 </Aside>
 
 ### Удаление
 
 ```sh
-rm ~/.local/bin/routy                                    # бинарь
-rm ~/.config/fish/completions/routy.fish                 # автодополнение
-rm ~/.local/share/bash-completion/completions/routy
-rm -rf ~/.local/share/routy ~/.cache/routy               # сохранённые значения, история, кэш ответов
+rm ~/.local/bin/outry                                    # бинарь
+rm ~/.config/fish/completions/outry.fish                 # автодополнение
+rm ~/.local/share/bash-completion/completions/outry
+rm -rf ~/.local/share/outry ~/.cache/outry               # сохранённые значения, история, кэш ответов
 ```
 
-На macOS данные лежат в `~/Library/Application Support/routy` и `~/Library/Caches/routy`.
-Секреты остаются в системном хранилище паролей: удалите их через `routy secret rm <ИМЯ> --env <ОКРУЖЕНИЕ>`
-до удаления бинаря или в приложении хранилища (записи с именем `routy`). Ваши `.routy`-файлы и `env.toml`
+На macOS данные лежат в `~/Library/Application Support/outry` и `~/Library/Caches/outry`.
+Секреты остаются в системном хранилище паролей: удалите их через `outry secret rm <ИМЯ> --env <ОКРУЖЕНИЕ>`
+до удаления бинаря или в приложении хранилища (записи с именем `outry`). Ваши `.outry`-файлы и `env.toml`
 лежат в репозиториях и не затрагиваются.
 
 Чтобы переустановить начисто, выполните команды выше и снова запустите скрипт установки.
@@ -76,7 +76,7 @@ rm -rf ~/.local/share/routy ~/.cache/routy               # сохранённы�
 ## Приложение
 
 Установщики для macOS (`.dmg`), Windows (`.exe`, `.msi`) и Linux (AppImage, `.deb`, `.rpm`) — на
-[странице релизов](https://github.com/1rowvy/routy/releases/latest).
+[странице релизов](https://github.com/1rowvy/outry/releases/latest).
 
 Приложение обновляется само: при запуске проверяет новую версию и предлагает установить её и
 перезапуститься. Обновления подписаны и проверяются перед установкой. На Linux сами обновляются только
@@ -84,5 +84,5 @@ AppImage; `.deb` и `.rpm` обновляются установкой ново�
 
 <Aside type="caution">
 Сборки для macOS пока не нотаризованы. Если при первом запуске macOS пишет, что приложение повреждено,
-выполните `xattr -dr com.apple.quarantine /Applications/Routy.app`.
+выполните `xattr -dr com.apple.quarantine /Applications/Outry.app`.
 </Aside>

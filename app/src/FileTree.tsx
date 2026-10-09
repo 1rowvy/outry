@@ -37,10 +37,10 @@ function buildTree(files: string[], methods: Record<string, string>, names: Reco
   return compact(root.children, "");
 }
 
-/** `users/get.routy` → `users`, `users/get-by-id.routy` → `by-id`, `users/create.http` → `create`. */
+/** `users/get.outry` → `users`, `users/get-by-id.outry` → `by-id`, `users/create.http` → `create`. */
 function fileLabel(node: Node, parent: string): string {
   if (node.names.length) return node.names.join(", ");
-  const base = node.name.replace(/\.(http|routy)$/, "");
+  const base = node.name.replace(/\.(http|outry)$/, "");
   const m = node.method.toLowerCase();
   if (base === m) return parent || base;
   if (base.startsWith(m + "-")) return base.slice(m.length + 1);
@@ -115,7 +115,7 @@ export function FileTree(props: Props) {
   }, [props.files, props.methods, props.names, filter]);
   const tree = useMemo(() => buildTree(shown, props.methods, props.names), [shown, props.methods, props.names]);
   if (props.files.length === 0) {
-    return <p className="muted pad">No *.routy or *.http files</p>;
+    return <p className="muted pad">No *.outry or *.http files</p>;
   }
   return (
     <>

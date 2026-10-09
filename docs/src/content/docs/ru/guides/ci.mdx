@@ -1,9 +1,9 @@
 ---
-title: Routy в CI
+title: Outry в CI
 description: Используйте файлы запросов как API-тесты в GitHub Actions и других CI.
 ---
 
-Те же `.routy`- (и `.http`-) файлы, что вы гоняете в приложении, могут запускаться как API-тесты на каждый
+Те же `.outry`- (и `.http`-) файлы, что вы гоняете в приложении, могут запускаться как API-тесты на каждый
 пуш. Пройдёт ли джоба, решают проверки `expect`.
 
 ## GitHub Actions
@@ -21,22 +21,22 @@ jobs:
 
       # Здесь поднимите тестируемый сервис (docker compose, бинарь, …)
 
-      - name: Install routy
+      - name: Install outry
         run: |
-          curl -fsSL https://raw.githubusercontent.com/1rowvy/routy/master/install.sh | sh
+          curl -fsSL https://raw.githubusercontent.com/1rowvy/outry/master/install.sh | sh
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: Check request files
-        run: routy check api --format github
+        run: outry check api --format github
 
       - name: Run API tests
-        run: routy run api --env ci --no-keyring --fail-fast
+        run: outry run api --env ci --no-keyring --fail-fast
         env:
-          ROUTY_TOKEN: ${{ secrets.API_TOKEN }}
+          OUTRY_TOKEN: ${{ secrets.API_TOKEN }}
 ```
 
-- Для воспроизводимых сборок зафиксируйте версию: `ROUTY_VERSION=v0.2.0` перед `sh`.
-- Секреты приходят из переменных `ROUTY_<ИМЯ>` — см. [Секреты](/routy/ru/guides/secrets/#в-ci-переменные-окружения).
+- Для воспроизводимых сборок зафиксируйте версию: `OUTRY_VERSION=v0.2.0` перед `sh`.
+- Секреты приходят из переменных `OUTRY_<ИМЯ>` — см. [Секреты](/outry/ru/guides/secrets/#в-ci-переменные-окружения).
 - `--no-keyring` отключает обращение к хранилищу паролей — на раннерах его всё равно нет.
 - Напоминание о новой версии отключается само, когда задана переменная `CI`.
 
@@ -45,35 +45,35 @@ jobs:
 `--json` печатает по JSON-объекту на запрос (JSON Lines) вместо отчёта для человека:
 
 ```sh
-routy run api --json > results.jsonl
+outry run api --json > results.jsonl
 ```
 
 ```json
-{"file":"api/users/get.routy","name":"GetUser","passed":true,"outcome":{"kind":"request","request":{…},"response":{"status":200,…},"asserts":[…],"calls":[…],"saved":{}}}
-{"file":"api/users/bad.routy","name":"GetUser","passed":false,"error":"undefined variable(s): id"}
+{"file":"api/users/get.outry","name":"GetUser","passed":true,"outcome":{"kind":"request","request":{…},"response":{"status":200,…},"asserts":[…],"calls":[…],"saved":{}}}
+{"file":"api/users/bad.outry","name":"GetUser","passed":false,"error":"undefined variable(s): id"}
 ```
 
 У сценария в `outcome` — `"kind":"flow"` с полями `checks`, `calls`, `saved` и `error`.
 
 ## Проверка без отправки
 
-`routy check` проверяет весь проект без отправки запросов — один быстрый шаг линтинга: синтаксис, имена
+`outry check` проверяет весь проект без отправки запросов — один быстрый шаг линтинга: синтаксис, имена
 вызываемых запросов, их аргументы, формы и циклы вызовов, каждое окружение (запросы, которым `only` его
 запрещает, переменные, которых в нём нет), формат и — если выше проекта есть `go.mod` — роуты в Go-коде
-(как `routy import go --check`):
+(как `outry import go --check`):
 
 ```sh
-routy check                    # проект, найденный от текущего каталога
-routy check api --env ci       # одно окружение, секреты из хранилища паролей / ROUTY_*
-routy check --format github    # аннотации прямо в диффе PR
+outry check                    # проект, найденный от текущего каталога
+outry check api --env ci       # одно окружение, секреты из хранилища паролей / OUTRY_*
+outry check --format github    # аннотации прямо в диффе PR
 ```
 
 ```txt
-api/orders/create.routy:1:1: error: not formatted (`routy fmt`)
-api/orders/create.routy:7:22: error: variable `api_key` is not defined in staging, prod
-api/orders/create.routy:9:13: error: `Seed` is limited to dev and cannot be called in prod
-main.go:42:1: error: route DELETE /orders/{id} has no request (`routy import go` creates api/orders/delete.routy)
+api/orders/create.outry:1:1: error: not formatted (`outry fmt`)
+api/orders/create.outry:7:22: error: variable `api_key` is not defined in staging, prod
+api/orders/create.outry:9:13: error: `Seed` is limited to dev and cannot be called in prod
+main.go:42:1: error: route DELETE /orders/{id} has no request (`outry import go` creates api/orders/delete.outry)
 12 files, 3 environments, 18 Go routes: 4 errors, 0 warnings
 ```
 
-Подробности и флаги: [`routy check`](/routy/ru/reference/cli/#routy-check).
+Подробности и флаги: [`outry check`](/outry/ru/reference/cli/#outry-check).

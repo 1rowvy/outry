@@ -1,6 +1,6 @@
 ---
 title: Начало работы
-description: Установите Routy, создайте проект и отправьте первый запрос за минуту.
+description: Установите Outry, создайте проект и отправьте первый запрос за минуту.
 ---
 
 import { Steps, Aside } from '@astrojs/starlight/components';
@@ -10,19 +10,19 @@ import { Steps, Aside } from '@astrojs/starlight/components';
 1. Установите CLI (Linux):
 
    ```sh
-   curl -fsSL https://raw.githubusercontent.com/1rowvy/routy/master/install.sh | sh
+   curl -fsSL https://raw.githubusercontent.com/1rowvy/outry/master/install.sh | sh
    ```
 
-   Приложение и другие платформы — в разделе [Установка](/routy/ru/install/).
+   Приложение и другие платформы — в разделе [Установка](/outry/ru/install/).
 
 2. Создайте проект в своём репозитории:
 
    ```sh
    cd my-service
-   routy init
+   outry init
    ```
 
-   Появятся `api/env.toml` с окружениями `dev` и `prod` и пример запроса `api/health.routy`.
+   Появятся `api/env.toml` с окружениями `dev` и `prod` и пример запроса `api/health.outry`.
 
 3. Укажите адрес API в `api/env.toml`:
 
@@ -38,7 +38,7 @@ import { Steps, Aside } from '@astrojs/starlight/components';
 
 4. Напишите запрос. Имя пишется перед методом, путь дописывается к `base`:
 
-   ```routy title="api/users/list.routy"
+   ```outry title="api/users/list.outry"
    ListUsers: GET /users {
      query { page: 1 }
 
@@ -54,14 +54,14 @@ import { Steps, Aside } from '@astrojs/starlight/components';
 5. Запустите:
 
    ```sh
-   routy run api/users/list.routy
-   routy run ListUsers        # по имени
-   routy run api              # все *.routy и *.http внутри api/ по алфавиту
-   routy run api --env prod   # другое окружение
+   outry run api/users/list.outry
+   outry run ListUsers        # по имени
+   outry run api              # все *.outry и *.http внутри api/ по алфавиту
+   outry run api --env prod   # другое окружение
    ```
 
    ```txt
-   ✓ api/users/list.routy  ListUsers  GET http://localhost:8080/users?page=1  200 OK  12ms 532B
+   ✓ api/users/list.outry  ListUsers  GET http://localhost:8080/users?page=1  200 OK  12ms 532B
        ✓ status == 200
        ✓ body.items.length > 0
    ```
@@ -69,21 +69,21 @@ import { Steps, Aside } from '@astrojs/starlight/components';
 </Steps>
 
 <Aside type="tip">
-Удобнее мышкой? Откройте ту же папку в [приложении](/routy/ru/guides/desktop-app/) — оно читает те же
+Удобнее мышкой? Откройте ту же папку в [приложении](/outry/ru/guides/desktop-app/) — оно читает те же
 файлы, а правки из редактора появляются сразу.
 </Aside>
 
-Есть сервис на Go? `routy import go .` создаст запрос для каждого роута chi, gin или `net/http`, а
-`routy check` потом подскажет, когда код и запросы разойдутся, — см.
-[Импорт роутов из Go](/routy/ru/guides/import-go/).
+Есть сервис на Go? `outry import go .` создаст запрос для каждого роута chi, gin или `net/http`, а
+`outry check` потом подскажет, когда код и запросы разойдутся, — см.
+[Импорт роутов из Go](/outry/ru/guides/import-go/).
 
-Уже есть `.http`-файлы? `routy convert api/` перепишет их в `.routy` — см.
-[Файлы .http](/routy/ru/guides/request-format/).
+Уже есть `.http`-файлы? `outry convert api/` перепишет их в `.outry` — см.
+[Файлы .http](/outry/ru/guides/request-format/).
 
 ## Дальше
 
-- [Пример проекта](/routy/ru/example/) — сервис на Gin, где используется всё
-- [Формат .routy](/routy/ru/reference/routy-format/) — полный справочник
-- [Вызовы запросов и проверки](/routy/ru/guides/chains-and-assertions/)
-- [Переменные и окружения](/routy/ru/guides/variables/)
-- [Routy в CI](/routy/ru/guides/ci/)
+- [Пример проекта](/outry/ru/example/) — сервис на Gin, где используется всё
+- [Формат .outry](/outry/ru/reference/outry-format/) — полный справочник
+- [Вызовы запросов и проверки](/outry/ru/guides/chains-and-assertions/)
+- [Переменные и окружения](/outry/ru/guides/variables/)
+- [Outry в CI](/outry/ru/guides/ci/)

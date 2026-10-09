@@ -29,8 +29,8 @@ jobs:
       - name: fmt
         if: runner.os == 'Linux'
         run: cargo fmt --all --check
-      - run: cargo clippy -p routy-core -p routy-cli --all-targets -- -D warnings
-      - run: cargo test -p routy-core -p routy-cli
+      - run: cargo clippy -p outry-core -p outry-cli --all-targets -- -D warnings
+      - run: cargo test -p outry-core -p outry-cli
 
   app:
     name: desktop app (typecheck + clippy)
@@ -55,14 +55,14 @@ jobs:
       # Сборка фронта нужна и сама по себе (tsc), и для generate_context! в Rust.
       - run: npm run build
         working-directory: app
-      - run: cargo clippy -p routy-app --all-targets -- -D warnings
+      - run: cargo clippy -p outry-app --all-targets -- -D warnings
 
   grammar:
     name: tree-sitter grammar
     runs-on: ubuntu-22.04
     defaults:
       run:
-        working-directory: editors/tree-sitter-routy
+        working-directory: editors/tree-sitter-outry
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
@@ -92,8 +92,8 @@ jobs:
       # Webview собирается из app/src (ResponseView и др.) — проверка типов и сборка ловят расхождения.
       - run: npm run typecheck
       - run: npm run build
-      - run: npx vsce package --no-dependencies -o routy.vsix
-      - run: cargo build -p routy-cli
+      - run: npx vsce package --no-dependencies -o outry.vsix
+      - run: cargo build -p outry-cli
         working-directory: .
-      # Настоящий VS Code (скачивается) с расширением и `routy lsp` из target/debug.
+      # Настоящий VS Code (скачивается) с расширением и `outry lsp` из target/debug.
       - run: xvfb-run -a npm test

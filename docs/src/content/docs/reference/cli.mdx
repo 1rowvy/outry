@@ -1,25 +1,25 @@
 ---
 title: CLI
-description: Every routy command and flag.
+description: Every outry command and flag.
 ---
 
 ```txt
-routy <COMMAND>
+outry <COMMAND>
 ```
 
-## `routy run`
+## `outry run`
 
 Send requests and run their checks.
 
 ```sh
-routy run <PATHS|NAMES>...
+outry run <PATHS|NAMES>...
 ```
 
-Folders expand to every `*.routy` and `*.http` file inside them, in alphabetical order; a `.routy` file
+Folders expand to every `*.outry` and `*.http` file inside them, in alphabetical order; a `.outry` file
 runs every request and flow in it, top to bottom. Files given explicitly run in the given order. A
 request or flow can also be given by name (`CreateOrder`, `users.Create`) or by line
-(`api/orders.routy:12`). Values captured by `save` are passed to the following requests; requests called
-from `.routy` share one [run cache](/routy/reference/routy-format/#caching) and cookie jar.
+(`api/orders.outry:12`). Values captured by `save` are passed to the following requests; requests called
+from `.outry` share one [run cache](/outry/reference/outry-format/#caching) and cookie jar.
 
 | Flag | Description |
 |------|-------------|
@@ -34,133 +34,133 @@ from `.routy` share one [run cache](/routy/reference/routy-format/#caching) and 
 | `--no-keyring` | Do not look up secrets in the system keychain |
 | `--yes` | Send requests marked `confirm: true` without asking |
 
-Exit code: `0` — everything passed, `1` — at least one request failed, `2` — Routy could not start.
+Exit code: `0` — everything passed, `1` — at least one request failed, `2` — Outry could not start.
 
-## `routy check`
+## `outry check`
 
 Check the project without sending anything. Exit code `1` if there is an error.
 
 ```sh
-routy check [PATHS]... [--env <ENV>] [--var <NAME=VALUE>]... [--no-keyring]
+outry check [PATHS]... [--env <ENV>] [--var <NAME=VALUE>]... [--no-keyring]
             [--no-fmt] [--go <DIR> | --no-go] [--format text|github]
 ```
 
-Without paths (or with the path of the project itself, `routy check api`) it checks everything:
+Without paths (or with the path of the project itself, `outry check api`) it checks everything:
 
-- syntax, and in `.routy` names of called requests, their arguments, shapes, `schema()` files and call cycles;
+- syntax, and in `.outry` names of called requests, their arguments, shapes, `schema()` files and call cycles;
 - every environment: calls of requests whose `only` excludes it, `only` lists with unknown environments, and
   variables that are defined nowhere in it (names captured by `save` somewhere in the project count as
   defined). The keychain is not read — a secret counts as defined when it is listed in `secrets`. The same
   error in several environments is printed once;
-- formatting, as `routy fmt --check` (`--no-fmt` turns it off);
-- the Go code, as [`routy import go --check`](/routy/guides/import-go/), when a `go.mod` is found in the
+- formatting, as `outry fmt --check` (`--no-fmt` turns it off);
+- the Go code, as [`outry import go --check`](/outry/guides/import-go/), when a `go.mod` is found in the
   project directory or above it, up to the repository root. `--go <DIR>` points to the service, `--no-go`
   skips it.
 
 With paths only those files are checked, without Go. `--env` checks a single environment with its real
-variables — `--var`, `ROUTY_*`, `env.toml` and the keychain (`--no-keyring` turns it off).
+variables — `--var`, `OUTRY_*`, `env.toml` and the keychain (`--no-keyring` turns it off).
 `--format github` prints GitHub Actions annotations.
 
 ```txt
-api/orders/create.routy:1:1: error: not formatted (`routy fmt`)
-api/orders/create.routy:7:22: error: variable `api_key` is not defined in staging, prod
-api/orders/create.routy:9:13: error: `Seed` is limited to dev and cannot be called in prod
-main.go:42:1: error: route DELETE /orders/{id} has no request (`routy import go` creates api/orders/delete.routy)
+api/orders/create.outry:1:1: error: not formatted (`outry fmt`)
+api/orders/create.outry:7:22: error: variable `api_key` is not defined in staging, prod
+api/orders/create.outry:9:13: error: `Seed` is limited to dev and cannot be called in prod
+main.go:42:1: error: route DELETE /orders/{id} has no request (`outry import go` creates api/orders/delete.outry)
 12 files, 3 environments, 18 Go routes: 4 errors, 0 warnings
 ```
 
-## `routy fmt`
+## `outry fmt`
 
-Rewrite `.routy` files in the canonical style, like `gofmt`; comments are kept. Prints the changed files.
+Rewrite `.outry` files in the canonical style, like `gofmt`; comments are kept. Prints the changed files.
 
 ```sh
-routy fmt [PATHS]... [--check]
+outry fmt [PATHS]... [--check]
 ```
 
 `PATHS` default to the current folder. `--check` changes nothing and exits with `1` if a file is not
 formatted — for CI.
 
-## `routy convert`
+## `outry convert`
 
-Rewrite `.http` files into `.routy` next to them. An existing `.routy` is never overwritten. See
-[.http files](/routy/guides/request-format/#converting-to-routy).
+Rewrite `.http` files into `.outry` next to them. An existing `.outry` is never overwritten. See
+[.http files](/outry/guides/request-format/#converting-to-outry).
 
 ```sh
-routy convert [PATHS]... [--dry-run] [--rm]
+outry convert [PATHS]... [--dry-run] [--rm]
 ```
 
 | Flag | Description |
 |------|-------------|
 | `--dry-run` | Print the result instead of writing files |
-| `--rm` | Delete each `.http` after its `.routy` is written |
+| `--rm` | Delete each `.http` after its `.outry` is written |
 
-## `routy vars`
+## `outry vars`
 
 Show the final value of every variable in an environment and where it comes from. Secret values (from
 the keychain or listed in `secrets`) are masked.
 
 ```sh
-routy vars [-e <ENV>] [--project <DIR>] [--var <NAME=VALUE>]...
+outry vars [-e <ENV>] [--project <DIR>] [--var <NAME=VALUE>]...
 ```
 
 ```txt
 project billing-api · env dev
 base     env.toml   http://localhost:8080
 token    keychain   eyJ…(212 chars)
-api_key  missing    not set: routy secret set api_key --env dev
+api_key  missing    not set: outry secret set api_key --env dev
 user_id  saved      42
 ```
 
 | Flag | Description |
 |------|-------------|
-| `--var <NAME=VALUE>` | Override a variable, as in `routy run` |
+| `--var <NAME=VALUE>` | Override a variable, as in `outry run` |
 | `--fresh` | Ignore values saved by `save` |
 | `--no-keyring` | Do not look up secrets in the system keychain |
 | `--reveal` | Print secret values in full |
 | `--json` | Print a JSON array |
 
-Variables from `ROUTY_*` and the keychain are only listed for names that appear in `env.toml`
+Variables from `OUTRY_*` and the keychain are only listed for names that appear in `env.toml`
 (including `secrets`) or in saved values.
 
-## `routy envs`
+## `outry envs`
 
 List the project's environments; `*` marks the default.
 
 ```sh
-routy envs [--dir <DIR>]
+outry envs [--dir <DIR>]
 ```
 
-## `routy secret`
+## `outry secret`
 
 Store or remove a secret in the system keychain. `set` reads the value from stdin.
 
 ```sh
-routy secret set <NAME> [-e <ENV>] [--project <DIR>]
-routy secret rm <NAME> [-e <ENV>] [--project <DIR>]
+outry secret set <NAME> [-e <ENV>] [--project <DIR>]
+outry secret rm <NAME> [-e <ENV>] [--project <DIR>]
 ```
 
 ```sh
-echo -n "$TOKEN" | routy secret set token --env prod
+echo -n "$TOKEN" | outry secret set token --env prod
 ```
 
-## `routy init`
+## `outry init`
 
 Create `api/env.toml` and an example request in the given folder (default: current). Fails if
 `env.toml` already exists.
 
 ```sh
-routy init [DIR]
+outry init [DIR]
 ```
 
-## `routy import go`
+## `outry import go`
 
-Create a `.routy` request for every route of a Go service (chi, gin, `net/http`) that doesn't have one
-yet. [Differences from the code](/routy/guides/import-go/#differences-from-the-code) of existing requests
+Create a `.outry` request for every route of a Go service (chi, gin, `net/http`) that doesn't have one
+yet. [Differences from the code](/outry/guides/import-go/#differences-from-the-code) of existing requests
 are listed under the route; files change only with `--fix`. See
-[Import routes from Go](/routy/guides/import-go/).
+[Import routes from Go](/outry/guides/import-go/).
 
 ```sh
-routy import go [DIR]
+outry import go [DIR]
 ```
 
 `DIR` is the folder with Go code, scanned recursively (default: current). Files are created in the
@@ -178,14 +178,14 @@ project found from the current folder; it must have an `env.toml`.
 | `--project <DIR>` | Project folder with `env.toml` |
 | `--json` | Same as `--format json` |
 
-## `routy lsp`
+## `outry lsp`
 
-The language server for `.routy` files over stdin/stdout: `routy check` errors, environment warnings,
+The language server for `.outry` files over stdin/stdout: `outry check` errors, environment warnings,
 differences from the Go code with quick fixes, completion, hover, go to definition, formatting and
-“▶ Send” code lenses. Editors start it themselves — see [Editors](/routy/guides/editors/).
+“▶ Send” code lenses. Editors start it themselves — see [Editors](/outry/guides/editors/).
 
 ```sh
-routy lsp [--env <ENV>] [--no-keyring]
+outry lsp [--env <ENV>] [--no-keyring]
 ```
 
 | Flag | Description |
@@ -193,35 +193,35 @@ routy lsp [--env <ENV>] [--no-keyring]
 | `--env <ENV>` | Environment for variables and sending, default: `default` from `env.toml` |
 | `--no-keyring` | Don't read secrets from the system keychain |
 
-## `routy update`
+## `outry update`
 
 Update the CLI to the latest GitHub release. The archive's SHA-256 checksum is verified before the
 binary is replaced.
 
 ```sh
-routy update [--check]
+outry update [--check]
 ```
 
 `--check` only reports whether a newer version exists.
 
-## `routy completions`
+## `outry completions`
 
 Print a completion script for a shell: `bash`, `zsh`, `fish`, `powershell` or `elvish`. Commands,
 flags and their descriptions are completed.
 
 ```sh
-routy completions fish > ~/.config/fish/completions/routy.fish
-routy completions bash > ~/.local/share/bash-completion/completions/routy
-echo 'source <(routy completions zsh)' >> ~/.zshrc
+outry completions fish > ~/.config/fish/completions/outry.fish
+outry completions bash > ~/.local/share/bash-completion/completions/outry
+echo 'source <(outry completions zsh)' >> ~/.zshrc
 ```
 
-Run it again after `routy update` to pick up new commands.
+Run it again after `outry update` to pick up new commands.
 
 ## Environment variables
 
 | Variable | Effect |
 |----------|--------|
-| `ROUTY_<NAME>` | Value of the variable `name`; see [Variables](/routy/guides/variables/#where-a-value-comes-from) |
-| `ROUTY_NO_UPDATE_NOTIFIER=1` | Disable the new-version notice (`NO_UPDATE_NOTIFIER` works too) |
+| `OUTRY_<NAME>` | Value of the variable `name`; see [Variables](/outry/guides/variables/#where-a-value-comes-from) |
+| `OUTRY_NO_UPDATE_NOTIFIER=1` | Disable the new-version notice (`NO_UPDATE_NOTIFIER` works too) |
 | `CI` | When set, the new-version notice is disabled |
 | `NO_COLOR` | Disable colored output |

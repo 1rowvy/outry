@@ -1,0 +1,37 @@
+[package]
+name = "outry-core"
+description = "Outry core: the .outry language — parser, checker, formatter, runtime — and Go route import"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[features]
+default = ["secrets"]
+# Хранение секретов в системном хранилище паролей (Keychain / Credential Manager / Secret Service).
+secrets = ["dep:keyring"]
+
+[dependencies]
+dirs.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+toml.workspace = true
+fastrand = "2"
+# Формат *.outry: `matches /re/`, base64(), опрос (`poll … every 1s`).
+base64 = "0.22"
+regex = "1"
+tokio = { version = "1", features = ["time"] }
+# Импорт роутов из исходников Go: разбор кода + шаблоны-запросы из queries/*.scm.
+streaming-iterator = "0.1"
+tree-sitter = "0.26"
+tree-sitter-go = "0.25"
+# Secret Service через zbus (чистый Rust): на Linux не нужны libdbus и pkg-config,
+# поэтому CLI собирается статически (musl) и запускается на любом дистрибутиве.
+# async-io, а не tokio: блокирующий API keyring вызывается изнутри tokio-рантайма.
+keyring = { version = "3", optional = true, features = ["apple-native", "windows-native", "async-secret-service", "async-io", "crypto-rust"] }
+
+[dev-dependencies]
+tokio.workspace = true

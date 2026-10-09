@@ -1,16 +1,57 @@
-/* Акцент — зелёный из иконки Routy. */
+/* Монохром, как логотип: чёрное на белом, белое на чёрном. Заголовки — геометрический гротеск. */
 :root {
-	--sl-color-accent-low: #10301f;
-	--sl-color-accent: #2fb874;
-	--sl-color-accent-high: #a8f0c6;
+	--sl-color-accent-low: #262626;
+	--sl-color-accent: #f2f2f2;
+	--sl-color-accent-high: #ffffff;
+	--sl-color-white: #ffffff;
+	--sl-color-gray-1: #ededed;
+	--sl-color-gray-2: #c4c4c4;
+	--sl-color-gray-3: #9a9a9a;
+	--sl-color-gray-4: #5c5c5c;
+	--sl-color-gray-5: #333333;
+	--sl-color-gray-6: #1c1c1c;
+	--sl-color-black: #0e0e0e;
+	--sl-font-heading: 'Space Grotesk', var(--sl-font);
 }
 
 :root[data-theme='light'] {
-	--sl-color-accent-low: #c9f2d9;
-	--sl-color-accent: #1a8a52;
-	--sl-color-accent-high: #0d3d24;
+	--sl-color-accent-low: #ececec;
+	--sl-color-accent: #111111;
+	--sl-color-accent-high: #000000;
+	--sl-color-white: #111111;
+	--sl-color-gray-1: #1c1c1c;
+	--sl-color-gray-2: #333333;
+	--sl-color-gray-3: #5c5c5c;
+	--sl-color-gray-4: #8a8a8a;
+	--sl-color-gray-5: #c4c4c4;
+	--sl-color-gray-6: #ededed;
+	--sl-color-gray-7: #f6f6f6;
+	--sl-color-black: #ffffff;
+}
+
+h1,
+h2,
+h3,
+.site-title,
+.hero h1 {
+	font-family: var(--sl-font-heading);
+	letter-spacing: -0.02em;
+}
+
+.site-title {
+	font-weight: 700;
+}
+
+.hero h1 {
+	font-weight: 700;
 }
 
 .hero .tagline {
 	max-width: 40ch;
+}
+
+/* Кнопки — плотные блоки без скругления-«таблетки», как рубленые углы логотипа. */
+.sl-link-button {
+	border-radius: 0.5rem;
+	font-weight: 600;
 }

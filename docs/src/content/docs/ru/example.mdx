@@ -1,23 +1,23 @@
 ---
 title: Пример проекта
-description: Сервис на Gin, в папке api/ которого есть все возможности Routy, — запустите его, поменяйте код и посмотрите, как запросы это заметят.
+description: Сервис на Gin, в папке api/ которого есть все возможности Outry, — запустите его, поменяйте код и посмотрите, как запросы это заметят.
 ---
 
 import { Steps } from '@astrojs/starlight/components';
 
-[routy-example-gin](https://github.com/1rowvy/routy-example-gin) — небольшой API магазина на
+[outry-example-gin](https://github.com/1rowvy/outry-example-gin) — небольшой API магазина на
 [Gin](https://github.com/gin-gonic/gin): логин, пользователи, заказы и асинхронная оплата. В папке `api/`
-каждый роут описан `.routy`-файлом, и вместе они используют все возможности формата — это ещё и экскурсия.
+каждый роут описан `.outry`-файлом, и вместе они используют все возможности формата — это ещё и экскурсия.
 
 ## Запуск
 
 <Steps>
 
-1. Установите CLI ([другие платформы](/routy/ru/install/)) и склонируйте проект:
+1. Установите CLI ([другие платформы](/outry/ru/install/)) и склонируйте проект:
 
    ```sh
-   curl -fsSL https://raw.githubusercontent.com/1rowvy/routy/master/install.sh | sh
-   git clone https://github.com/1rowvy/routy-example-gin && cd routy-example-gin
+   curl -fsSL https://raw.githubusercontent.com/1rowvy/outry/master/install.sh | sh
+   git clone https://github.com/1rowvy/outry-example-gin && cd outry-example-gin
    ```
 
 2. Запустите сервис — он всё хранит в памяти, пароль администратора `admin`:
@@ -26,21 +26,21 @@ import { Steps } from '@astrojs/starlight/components';
    go run . &
    ```
 
-3. Передайте Routy пароль. `admin_password` объявлен [секретом](/routy/ru/guides/secrets/) в
-   `api/env.toml`, поэтому берётся из хранилища паролей или переменной `ROUTY_*`, но не из файла:
+3. Передайте Outry пароль. `admin_password` объявлен [секретом](/outry/ru/guides/secrets/) в
+   `api/env.toml`, поэтому берётся из хранилища паролей или переменной `OUTRY_*`, но не из файла:
 
    ```sh
-   export ROUTY_ADMIN_PASSWORD=admin   # или: routy secret set admin_password
+   export OUTRY_ADMIN_PASSWORD=admin   # или: outry secret set admin_password
    ```
 
 4. Запустите все запросы и сценарии:
 
    ```sh
-   routy run api
+   outry run api
    ```
 
    ```txt
-   ✓ api/flows/checkout.routy  Checkout  flow
+   ✓ api/flows/checkout.outry  Checkout  flow
        ↳ CreateUser  201  0ms
          ↳ Login  cached
        ↳ CreateOrder  201  0ms
@@ -53,7 +53,7 @@ import { Steps } from '@astrojs/starlight/components';
    22 passed, 0 failed
    ```
 
-   У `DeleteUser` стоит `confirm: true`, поэтому Routy спросит перед отправкой; `--yes` отвечает за вас.
+   У `DeleteUser` стоит `confirm: true`, поэтому Outry спросит перед отправкой; `--yes` отвечает за вас.
 
 </Steps>
 
@@ -68,16 +68,16 @@ import { Steps } from '@astrojs/starlight/components';
 +	FullName string `json:"full_name" binding:"required"` // full name
 ```
 
-`routy check` читает исходники Go — компилировать и запускать ничего не нужно:
+`outry check` читает исходники Go — компилировать и запускать ничего не нужно:
 
 ```txt
-api/v1/users/post.routy:17:8: error: required field `full_name` (string) is missing from body  ← internal/api/users.go:13
-api/v1/users/post.routy:17:10: error: body field `name` is not in model.CreateUser  ← internal/api/users.go:13
-14 files, 2 environments, 12 Go routes: 2 errors, 0 warnings; 2 fixable with `routy import go --fix`
+api/v1/users/post.outry:17:8: error: required field `full_name` (string) is missing from body  ← internal/api/users.go:13
+api/v1/users/post.outry:17:10: error: body field `name` is not in model.CreateUser  ← internal/api/users.go:13
+14 files, 2 environments, 12 Go routes: 2 errors, 0 warnings; 2 fixable with `outry import go --fix`
 ```
 
-`routy import go . --fix` перепишет тело. В пулл-реквесте workflow проекта (`routy check --format github`)
-покажет те же ошибки на изменённых строках. Добавьте роут — `routy import go .` создаст для него запрос
+`outry import go . --fix` перепишет тело. В пулл-реквесте workflow проекта (`outry check --format github`)
+покажет те же ошибки на изменённых строках. Добавьте роут — `outry import go .` создаст для него запрос
 с уже заполненными телом, query, заголовками и проверкой ответа.
 
 ## Что где
@@ -85,18 +85,18 @@ api/v1/users/post.routy:17:10: error: body field `name` is not in model.CreateUs
 | Возможность | Файл |
 |-------------|------|
 | Окружения, общие переменные, секрет, middleware → заголовки | `api/env.toml` |
-| Проверки статуса, полей, заголовков, времени; JSON Schema | `api/health.routy` |
-| Параметры со значениями по умолчанию, `cache: 50m` между прогонами, негативный тест | `api/auth/login/post.routy` |
-| Тело `form`, cookie jar, `cookies.session` | `api/auth/session.routy` |
-| Вызовы: `Login().body.token`, `CreateUser().body.id`, один раз за прогон | `api/v1/users/get-by-id.routy` |
-| Вызовы с аргументами, `only: [dev]`, `confirm: true` | `api/v1/users/delete-by-id.routy` |
-| Загрузка файла через `multipart` | `api/v1/users/avatar/post.routy` |
-| `let` на уровне файла, `uuid()`, арифметика, `all` / `map`, `save` | `api/v1/orders/post.routy` |
-| query-параметры со значением `null` не отправляются | `api/v1/orders/get.routy` |
-| `poll` до подтверждения оплаты | `api/v1/orders/pay/post.routy` |
-| Сценарии; идемпотентный повтор с `fresh` | `api/flows/checkout.routy` |
-| Shape из структур Go, ужесточённые вручную | `api/shapes.routy` |
-| `routy check` и `routy run` в GitHub Actions | `.github/workflows/api.yml` |
+| Проверки статуса, полей, заголовков, времени; JSON Schema | `api/health.outry` |
+| Параметры со значениями по умолчанию, `cache: 50m` между прогонами, негативный тест | `api/auth/login/post.outry` |
+| Тело `form`, cookie jar, `cookies.session` | `api/auth/session.outry` |
+| Вызовы: `Login().body.token`, `CreateUser().body.id`, один раз за прогон | `api/v1/users/get-by-id.outry` |
+| Вызовы с аргументами, `only: [dev]`, `confirm: true` | `api/v1/users/delete-by-id.outry` |
+| Загрузка файла через `multipart` | `api/v1/users/avatar/post.outry` |
+| `let` на уровне файла, `uuid()`, арифметика, `all` / `map`, `save` | `api/v1/orders/post.outry` |
+| query-параметры со значением `null` не отправляются | `api/v1/orders/get.outry` |
+| `poll` до подтверждения оплаты | `api/v1/orders/pay/post.outry` |
+| Сценарии; идемпотентный повтор с `fresh` | `api/flows/checkout.outry` |
+| Shape из структур Go, ужесточённые вручную | `api/shapes.outry` |
+| `outry check` и `outry run` в GitHub Actions | `.github/workflows/api.yml` |
 
-Коллекция началась с `routy init` и `routy import go .`; потом запросы получили проверки, параметры и
-вызовы, часть файлов переехала — `routy import` всё равно узнаёт их по `handler:`.
+Коллекция началась с `outry init` и `outry import go .`; потом запросы получили проверки, параметры и
+вызовы, часть файлов переехала — `outry import` всё равно узнаёт их по `handler:`.

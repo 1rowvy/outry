@@ -2,5 +2,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-    routy_app_lib::run()
+    outry_app_lib::run()
 }

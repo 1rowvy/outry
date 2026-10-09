@@ -1,4 +1,4 @@
-// Итог сценария *.routy: проверки, где остановился, что сохранено, вызванные запросы.
+// Итог сценария *.outry: проверки, где остановился, что сохранено, вызванные запросы.
 import type { FlowOutcome } from "./types";
 import { Checks } from "./ResponseView";
 import { Trace } from "./Trace";

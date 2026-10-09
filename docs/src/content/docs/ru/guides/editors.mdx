@@ -1,24 +1,24 @@
 ---
 title: Редакторы
-description: Правка .routy в VS Code, Neovim, Helix и любом редакторе с LSP-клиентом — ошибки, автодополнение, переход к определению и отправка запросов из `routy lsp`.
+description: Правка .outry в VS Code, Neovim, Helix и любом редакторе с LSP-клиентом — ошибки, автодополнение, переход к определению и отправка запросов из `outry lsp`.
 ---
 
 import { Aside } from '@astrojs/starlight/components';
 
-`routy lsp` — языковой сервер, встроенный в CLI: те же проверки, имена и переменные, что в
-`routy check` и приложении, но в вашем редакторе. Для VS Code (и Cursor, Windsurf, VSCodium) есть расширение
+`outry lsp` — языковой сервер, встроенный в CLI: те же проверки, имена и переменные, что в
+`outry check` и приложении, но в вашем редакторе. Для VS Code (и Cursor, Windsurf, VSCodium) есть расширение
 с просмотром ответов; любой другой редактор с LSP-клиентом подключает сервер напрямую, а подсветку даёт
 грамматика tree-sitter из
-[`editors/tree-sitter-routy`](https://github.com/1rowvy/routy/tree/master/editors/tree-sitter-routy).
+[`editors/tree-sitter-outry`](https://github.com/1rowvy/outry/tree/master/editors/tree-sitter-outry).
 
 ## Что умеет
 
-- **Ошибки по мере набора** — всё, что показывает [`routy check`](/routy/ru/reference/cli/#routy-check):
+- **Ошибки по мере набора** — всё, что показывает [`outry check`](/outry/ru/reference/cli/#outry-check):
   синтаксис, неизвестные запросы и формы (с исправлением «did you mean»), аргументы вызовов, циклы.
-- **Предупреждения окружения** — то, что показывает `routy check --env` для текущего окружения:
+- **Предупреждения окружения** — то, что показывает `outry check --env` для текущего окружения:
   неопределённые переменные и вызовы запросов, закрытых `only`.
 - **Расхождения с Go-кодом** — в Go-проекте то, что показывает
-  [`routy import go --check`](/routy/ru/guides/import-go/#расхождения-с-кодом), на строках запроса и со
+  [`outry import go --check`](/outry/ru/guides/import-go/#расхождения-с-кодом), на строках запроса и со
   ссылкой на обработчик. У расхождений, которые исправляет `--fix`, есть Quick Fix, а «Fix all differences
   with the code» правит весь файл. Несохранённые правки учитываются.
 - **Автодополнение** — поля запроса в начале строки, запросы и сценарии с параметрами, аргументы вызова,
@@ -26,24 +26,24 @@ import { Aside } from '@astrojs/starlight/components';
   встроенные функции, методы значений после `.`, формы после `matches`, окружения в `only: [...]`,
   частые заголовки.
 - **Подсказка при наведении** — значение переменной и откуда оно (`env.toml`, хранилище паролей,
-  `ROUTY_*`, `save`; секреты замаскированы), метод, путь, описание и параметры вызываемого запроса, поля
+  `OUTRY_*`, `save`; секреты замаскированы), метод, путь, описание и параметры вызываемого запроса, поля
   формы.
 - **Переход к определению** — вызов → запрос или сценарий; переменная → её строка в `env.toml` и `save`,
   которые её задают; форма → её объявление, а из объявления → Go-структура; `handler:` → роут в Go.
 - **Отправка** — code lens «▶ Send · dev» над каждым запросом («▶ Run flow» над сценариями) и то же в
-  меню действий. Ответ пишется в `~/.cache/routy/responses/<Name>.http` и открывается рядом с запросом,
+  меню действий. Ответ пишется в `~/.cache/outry/responses/<Name>.http` и открывается рядом с запросом,
   итог — сообщением. Вызовы, кеш прогона, cookies и сохранённые значения работают как в приложении;
   `confirm: true` сначала спрашивает.
-- **Форматирование** — `routy fmt` как форматирование документа.
+- **Форматирование** — `outry fmt` как форматирование документа.
 - **Outline** — запросы, сценарии, формы и `let` файла.
 
 ## VS Code
 
-Установите **Routy API Client** из [Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=routy.routy-vscode),
-а в Cursor, Windsurf и VSCodium — из [Open VSX](https://open-vsx.org/extension/routy/routy-vscode). В пакетах для
-Linux, macOS и Windows `routy` уже внутри, больше ничего не нужно. На других платформах
-[установите CLI](/routy/ru/install/): расширение найдёт его в `PATH` или в `~/.local/bin`, либо укажите
-`routy.path`. В каждом [релизе](https://github.com/1rowvy/routy/releases) есть и файлы `.vsix` — для
+Установите **Outry API Client** из [Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=outry.outry-vscode),
+а в Cursor, Windsurf и VSCodium — из [Open VSX](https://open-vsx.org/extension/outry/outry-vscode). В пакетах для
+Linux, macOS и Windows `outry` уже внутри, больше ничего не нужно. На других платформах
+[установите CLI](/outry/ru/install/): расширение найдёт его в `PATH` или в `~/.local/bin`, либо укажите
+`outry.path`. В каждом [релизе](https://github.com/1rowvy/outry/releases) есть и файлы `.vsix` — для
 **Extensions → ⋯ → Install from VSIX…**.
 
 Сверх всего, что выше, расширение добавляет:
@@ -61,23 +61,23 @@ Linux, macOS и Windows `routy` уже внутри, больше ничего �
 
 | Настройка | По умолчанию | |
 |-----------|--------------|---|
-| `routy.path` | бинарь из пакета, затем `PATH` | Путь к `routy` |
-| `routy.env` | `default` из `env.toml` | С какого окружения начинать |
-| `routy.keyring`, `routy.import`, `routy.goDir` | | Как `keyring`, `import`, `goDir` в [Настройках](#настройки) |
+| `outry.path` | бинарь из пакета, затем `PATH` | Путь к `outry` |
+| `outry.env` | `default` из `env.toml` | С какого окружения начинать |
+| `outry.keyring`, `outry.import`, `outry.goDir` | | Как `keyring`, `import`, `goDir` в [Настройках](#настройки) |
 
-Вывод языкового сервера — в **Output → Routy**; **Routy: Restart Language Server** перезапускает его
-(например, после `routy update`).
+Вывод языкового сервера — в **Output → Outry**; **Outry: Restart Language Server** перезапускает его
+(например, после `outry update`).
 
 ## Neovim
 
 Neovim 0.11 или новее:
 
 ```lua
-vim.filetype.add({ extension = { routy = "routy" } })
+vim.filetype.add({ extension = { outry = "outry" } })
 
-vim.lsp.config("routy", {
-  cmd = { "routy", "lsp" },
-  filetypes = { "routy" },
+vim.lsp.config("outry", {
+  cmd = { "outry", "lsp" },
+  filetypes = { "outry" },
   root_markers = { "env.toml", ".git" },
   -- init_options = { env = "dev" },
   handlers = {
@@ -89,29 +89,29 @@ vim.lsp.config("routy", {
     end,
   },
 })
-vim.lsp.enable("routy")
+vim.lsp.enable("outry")
 
 -- Code lens: обновлять и отправлять запрос под курсором.
 vim.api.nvim_create_autocmd({ "LspAttach", "BufEnter", "InsertLeave" }, {
-  pattern = "*.routy",
+  pattern = "*.outry",
   callback = function(ev) vim.lsp.codelens.refresh({ bufnr = ev.buf }) end,
 })
-vim.keymap.set("n", "<leader>rs", vim.lsp.codelens.run, { desc = "Routy: send" })
+vim.keymap.set("n", "<leader>rs", vim.lsp.codelens.run, { desc = "Outry: send" })
 ```
 
 Подсветка: соберите парсер и скопируйте запросы (Neovim берёт `parser/` и `queries/` из runtimepath):
 
 ```sh
-git clone --depth 1 https://github.com/1rowvy/routy /tmp/routy
-cd /tmp/routy/editors/tree-sitter-routy
-mkdir -p ~/.local/share/nvim/site/parser ~/.config/nvim/queries/routy
-cc -shared -fPIC -O2 -I src -o ~/.local/share/nvim/site/parser/routy.so src/parser.c
-cp queries/highlights.scm ~/.config/nvim/queries/routy/
+git clone --depth 1 https://github.com/1rowvy/outry /tmp/outry
+cd /tmp/outry/editors/tree-sitter-outry
+mkdir -p ~/.local/share/nvim/site/parser ~/.config/nvim/queries/outry
+cc -shared -fPIC -O2 -I src -o ~/.local/share/nvim/site/parser/outry.so src/parser.c
+cp queries/highlights.scm ~/.config/nvim/queries/outry/
 ```
 
 ```lua
 vim.api.nvim_create_autocmd("FileType", {
-  pattern = "routy",
+  pattern = "outry",
   callback = function() vim.treesitter.start() end,
 })
 ```
@@ -121,31 +121,31 @@ vim.api.nvim_create_autocmd("FileType", {
 В `~/.config/helix/languages.toml`:
 
 ```toml
-[language-server.routy]
-command = "routy"
+[language-server.outry]
+command = "outry"
 args = ["lsp"]
 
 [[language]]
-name = "routy"
-scope = "source.routy"
-file-types = ["routy"]
+name = "outry"
+scope = "source.outry"
+file-types = ["outry"]
 roots = ["env.toml"]
 comment-token = "//"
 block-comment-tokens = { start = "/*", end = "*/" }
 indent = { tab-width = 2, unit = "  " }
-language-servers = ["routy"]
+language-servers = ["outry"]
 
 [[grammar]]
-name = "routy"
-# rev: ветка, тег или коммит репозитория routy
-source = { git = "https://github.com/1rowvy/routy", rev = "master", subpath = "editors/tree-sitter-routy" }
+name = "outry"
+# rev: ветка, тег или коммит репозитория outry
+source = { git = "https://github.com/1rowvy/outry", rev = "master", subpath = "editors/tree-sitter-outry" }
 ```
 
 ```sh
 hx --grammar fetch && hx --grammar build
-mkdir -p ~/.config/helix/runtime/queries/routy
-curl -fsSL https://raw.githubusercontent.com/1rowvy/routy/master/editors/tree-sitter-routy/queries/helix/highlights.scm \
-  -o ~/.config/helix/runtime/queries/routy/highlights.scm
+mkdir -p ~/.config/helix/runtime/queries/outry
+curl -fsSL https://raw.githubusercontent.com/1rowvy/outry/master/editors/tree-sitter-outry/queries/helix/highlights.scm \
+  -o ~/.config/helix/runtime/queries/outry/highlights.scm
 ```
 
 В Helix нет code lens: **Send** — в меню действий (<kbd>Space</kbd> <kbd>a</kbd>) на любой строке
@@ -153,16 +153,16 @@ curl -fsSL https://raw.githubusercontent.com/1rowvy/routy/master/editors/tree-si
 
 ## Другие редакторы
 
-Подойдёт любой LSP-клиент: команда `routy lsp`, транспорт stdio (`--stdio` принимается и ничего не
-меняет), язык `routy`, файлы `*.routy`.
+Подойдёт любой LSP-клиент: команда `outry lsp`, транспорт stdio (`--stdio` принимается и ничего не
+меняет), язык `outry`, файлы `*.outry`.
 
-Грамматику из `editors/tree-sitter-routy` (`queries/highlights.scm` — в именах захватов nvim-treesitter и
+Грамматику из `editors/tree-sitter-outry` (`queries/highlights.scm` — в именах захватов nvim-treesitter и
 Zed) можно подключить в любом редакторе, который загружает грамматики tree-sitter.
 
 ## Настройки
 
 Передаются в `initializationOptions` (`init_options` в Neovim) или позже через
-`workspace/didChangeConfiguration` как `{ "routy": { … } }`:
+`workspace/didChangeConfiguration` как `{ "outry": { … } }`:
 
 | Настройка | По умолчанию | Что делает |
 |-----------|--------------|------------|
@@ -171,19 +171,19 @@ Zed) можно подключить в любом редакторе, кото�
 | `import` | `true` | Сравнивать запросы с Go-кодом |
 | `goDir` | родитель `api/`, иначе папка проекта | Папка с Go-кодом относительно корня рабочей папки |
 
-`routy lsp --env <ENV>` и `--no-keyring` делают то же из командной строки.
+`outry lsp --env <ENV>` и `--no-keyring` делают то же из командной строки.
 
 Команды (`workspace/executeCommand`) — для сочетаний клавиш и расширений редакторов:
 
 | Команда | Аргументы | |
 |---------|-----------|---|
-| `routy.run` | `[uri, line, env?]` | Отправить запрос или запустить сценарий на строке `line` (с 1), в окружении `env`, если оно передано, иначе в текущем. Возвращает итог в JSON |
-| `routy.curl` | `[uri, line, env?]` | Запрос на строке `line` командой `curl` (строкой). Вызовы в нём отправляются, сам запрос — нет |
-| `routy.selectEnv` | `[env]` или ничего | Сменить окружение; без аргумента редактор предложит выбор |
+| `outry.run` | `[uri, line, env?]` | Отправить запрос или запустить сценарий на строке `line` (с 1), в окружении `env`, если оно передано, иначе в текущем. Возвращает итог в JSON |
+| `outry.curl` | `[uri, line, env?]` | Запрос на строке `line` командой `curl` (строкой). Вызовы в нём отправляются, сам запрос — нет |
+| `outry.selectEnv` | `[env]` или ничего | Сменить окружение; без аргумента редактор предложит выбор |
 
-Если окружений несколько, code lens «env: dev» над первым запросом вызывает `routy.selectEnv`.
+Если окружений несколько, code lens «env: dev» над первым запросом вызывает `outry.selectEnv`.
 
 <Aside>
 Проект ищется так же, как в CLI: от рабочей папки вверх до `env.toml` или `api/env.toml`. Значения,
-сохранённые через **Send**, попадают в тот же файл состояния, что у `routy run` и приложения, — они общие.
+сохранённые через **Send**, попадают в тот же файл состояния, что у `outry run` и приложения, — они общие.
 </Aside>

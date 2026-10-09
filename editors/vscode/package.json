@@ -1,18 +1,18 @@
 {
-  "name": "routy-vscode",
-  "displayName": "Routy API Client",
-  "description": "Executable API specs in your repo: send .routy requests, check responses, keep them in sync with your Go routes.",
+  "name": "outry-vscode",
+  "displayName": "Outry API Client",
+  "description": "Executable API specs in your repo: send .outry requests, check responses, keep them in sync with your Go routes.",
   "version": "0.9.0",
-  "publisher": "routy",
+  "publisher": "outry",
   "license": "MIT",
   "icon": "media/icon.png",
-  "homepage": "https://1rowvy.github.io/routy/guides/editors/#vs-code",
+  "homepage": "https://1rowvy.github.io/outry/guides/editors/#vs-code",
   "repository": {
     "type": "git",
-    "url": "https://github.com/1rowvy/routy",
+    "url": "https://github.com/1rowvy/outry",
     "directory": "editors/vscode"
   },
-  "bugs": "https://github.com/1rowvy/routy/issues",
+  "bugs": "https://github.com/1rowvy/outry/issues",
   "engines": {
     "vscode": "^1.91.0"
   },
@@ -31,19 +31,19 @@
   ],
   "main": "./dist/extension.js",
   "activationEvents": [
-    "workspaceContains:**/*.routy",
+    "workspaceContains:**/*.outry",
     "workspaceContains:**/api/env.toml"
   ],
   "contributes": {
     "languages": [
       {
-        "id": "routy",
+        "id": "outry",
         "aliases": [
-          "Routy",
-          "routy"
+          "Outry",
+          "outry"
         ],
         "extensions": [
-          ".routy"
+          ".outry"
         ],
         "configuration": "./language-configuration.json",
         "icon": {
@@ -54,128 +54,128 @@
     ],
     "grammars": [
       {
-        "language": "routy",
-        "scopeName": "source.routy",
-        "path": "./syntaxes/routy.tmLanguage.json"
+        "language": "outry",
+        "scopeName": "source.outry",
+        "path": "./syntaxes/outry.tmLanguage.json"
       }
     ],
     "commands": [
       {
-        "command": "routy.send",
+        "command": "outry.send",
         "title": "Send Request",
-        "category": "Routy",
+        "category": "Outry",
         "icon": "$(play)"
       },
       {
-        "command": "routy.sendIn",
+        "command": "outry.sendIn",
         "title": "Send Request in Environment…",
-        "category": "Routy"
+        "category": "Outry"
       },
       {
-        "command": "routy.copyCurl",
+        "command": "outry.copyCurl",
         "title": "Copy Request as curl",
-        "category": "Routy"
+        "category": "Outry"
       },
       {
-        "command": "routy.selectEnvironment",
+        "command": "outry.selectEnvironment",
         "title": "Select Environment",
-        "category": "Routy",
+        "category": "Outry",
         "icon": "$(server-environment)"
       },
       {
-        "command": "routy.refresh",
+        "command": "outry.refresh",
         "title": "Refresh",
-        "category": "Routy",
+        "category": "Outry",
         "icon": "$(refresh)"
       },
       {
-        "command": "routy.restart",
+        "command": "outry.restart",
         "title": "Restart Language Server",
-        "category": "Routy"
+        "category": "Outry"
       },
       {
-        "command": "routy.showOutput",
+        "command": "outry.showOutput",
         "title": "Show Output",
-        "category": "Routy"
+        "category": "Outry"
       }
     ],
     "keybindings": [
       {
-        "command": "routy.send",
+        "command": "outry.send",
         "key": "ctrl+enter",
         "mac": "cmd+enter",
-        "when": "editorTextFocus && editorLangId == routy"
+        "when": "editorTextFocus && editorLangId == outry"
       }
     ],
     "menus": {
       "commandPalette": [
         {
-          "command": "routy.send",
-          "when": "editorLangId == routy"
+          "command": "outry.send",
+          "when": "editorLangId == outry"
         },
         {
-          "command": "routy.sendIn",
-          "when": "editorLangId == routy"
+          "command": "outry.sendIn",
+          "when": "editorLangId == outry"
         },
         {
-          "command": "routy.copyCurl",
-          "when": "editorLangId == routy"
+          "command": "outry.copyCurl",
+          "when": "editorLangId == outry"
         }
       ],
       "editor/title/run": [
         {
-          "command": "routy.send",
-          "when": "resourceLangId == routy"
+          "command": "outry.send",
+          "when": "resourceLangId == outry"
         }
       ],
       "editor/context": [
         {
-          "command": "routy.send",
-          "when": "editorLangId == routy",
-          "group": "routy@1"
+          "command": "outry.send",
+          "when": "editorLangId == outry",
+          "group": "outry@1"
         },
         {
-          "command": "routy.sendIn",
-          "when": "editorLangId == routy",
-          "group": "routy@2"
+          "command": "outry.sendIn",
+          "when": "editorLangId == outry",
+          "group": "outry@2"
         },
         {
-          "command": "routy.copyCurl",
-          "when": "editorLangId == routy",
-          "group": "routy@3"
+          "command": "outry.copyCurl",
+          "when": "editorLangId == outry",
+          "group": "outry@3"
         }
       ],
       "view/title": [
         {
-          "command": "routy.selectEnvironment",
-          "when": "view == routy.requests",
+          "command": "outry.selectEnvironment",
+          "when": "view == outry.requests",
           "group": "navigation@1"
         },
         {
-          "command": "routy.refresh",
-          "when": "view == routy.requests || view == routy.variables",
+          "command": "outry.refresh",
+          "when": "view == outry.requests || view == outry.variables",
           "group": "navigation@2"
         }
       ],
       "view/item/context": [
         {
-          "command": "routy.send",
-          "when": "view == routy.requests && viewItem =~ /^(request|flow)$/",
+          "command": "outry.send",
+          "when": "view == outry.requests && viewItem =~ /^(request|flow)$/",
           "group": "inline"
         },
         {
-          "command": "routy.send",
-          "when": "view == routy.requests && viewItem =~ /^(request|flow)$/",
+          "command": "outry.send",
+          "when": "view == outry.requests && viewItem =~ /^(request|flow)$/",
           "group": "1_run@1"
         },
         {
-          "command": "routy.sendIn",
-          "when": "view == routy.requests && viewItem =~ /^(request|flow)$/",
+          "command": "outry.sendIn",
+          "when": "view == outry.requests && viewItem =~ /^(request|flow)$/",
           "group": "1_run@2"
         },
         {
-          "command": "routy.copyCurl",
-          "when": "view == routy.requests && viewItem == request",
+          "command": "outry.copyCurl",
+          "when": "view == outry.requests && viewItem == request",
           "group": "2_copy@1"
         }
       ]
@@ -183,55 +183,55 @@
     "viewsContainers": {
       "activitybar": [
         {
-          "id": "routy",
-          "title": "Routy",
+          "id": "outry",
+          "title": "Outry",
           "icon": "media/activity.svg"
         }
       ]
     },
     "views": {
-      "routy": [
+      "outry": [
         {
-          "id": "routy.requests",
+          "id": "outry.requests",
           "name": "Requests"
         },
         {
-          "id": "routy.variables",
+          "id": "outry.variables",
           "name": "Variables"
         }
       ]
     },
     "viewsWelcome": [
       {
-        "view": "routy.requests",
-        "contents": "No .routy requests in this workspace.\n[Read the format guide](https://1rowvy.github.io/routy/guides/request-format/)"
+        "view": "outry.requests",
+        "contents": "No .outry requests in this workspace.\n[Read the format guide](https://1rowvy.github.io/outry/guides/request-format/)"
       }
     ],
     "configuration": {
-      "title": "Routy",
+      "title": "Outry",
       "properties": {
-        "routy.path": {
+        "outry.path": {
           "type": "string",
           "default": "",
           "scope": "machine-overridable",
-          "markdownDescription": "Path to the `routy` binary. Empty: the one bundled with the extension, then `routy` on `PATH`."
+          "markdownDescription": "Path to the `outry` binary. Empty: the one bundled with the extension, then `outry` on `PATH`."
         },
-        "routy.env": {
+        "outry.env": {
           "type": "string",
           "default": "",
           "markdownDescription": "Environment to start with. Empty: `default` from `env.toml`. Switching it in the status bar is remembered per workspace."
         },
-        "routy.keyring": {
+        "outry.keyring": {
           "type": "boolean",
           "default": true,
           "description": "Read secrets from the system keychain."
         },
-        "routy.import": {
+        "outry.import": {
           "type": "boolean",
           "default": true,
           "description": "Compare requests with the Go code and offer quick fixes."
         },
-        "routy.goDir": {
+        "outry.goDir": {
           "type": "string",
           "default": "",
           "markdownDescription": "Folder with the Go code, relative to the workspace folder. Empty: the parent of `api/`, else the project folder."

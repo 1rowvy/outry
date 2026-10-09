@@ -15,12 +15,12 @@ export interface ProjectInfo {
   files: string[];
   /** путь → метод из строки запроса */
   methods: Record<string, string>;
-  /** путь `*.routy` → имена запросов и сценариев */
+  /** путь `*.outry` → имена запросов и сценариев */
   names: Record<string, string[]>;
 }
 
-/** Результат запуска *.routy: ответ запроса или итог сценария. */
-export interface RoutyResult {
+/** Результат запуска *.outry: ответ запроса или итог сценария. */
+export interface OutryResult {
   name: string;
   entry: Entry | null;
   flow: FlowOutcome | null;
@@ -41,7 +41,7 @@ export interface Symbols {
 
 export interface ParseError {
   line: number | null;
-  /** с 1; есть у ошибок *.routy */
+  /** с 1; есть у ошибок *.outry */
   col: number | null;
   message: string;
 }
@@ -153,13 +153,13 @@ export const api = {
   writeRequest: (path: string, content: string) => invoke<void>("write_request", { path, content }),
   checkRequest: (content: string) => invoke<ParseError | null>("check_request", { content }),
   checkConfig: (content: string) => invoke<ParseError | null>("check_config", { content }),
-  /** routy check для открытого *.routy (с текстом из редактора) */
-  checkRouty: (path: string, content: string) => invoke<ParseError[]>("check_routy", { path, content }),
-  routySymbols: () => invoke<Symbols>("routy_symbols"),
+  /** outry check для открытого *.outry (с текстом из редактора) */
+  checkOutry: (path: string, content: string) => invoke<ParseError[]>("check_outry", { path, content }),
+  outrySymbols: () => invoke<Symbols>("outry_symbols"),
   /** Запрос или сценарий на строке line (с 1) */
-  runRouty: (id: number, env: string | null, path: string, content: string, line: number) =>
-    invoke<RoutyResult>("run_routy", { id, env, path, content, line }),
-  /** Забыть кеш вызовов и cookies *.routy */
+  runOutry: (id: number, env: string | null, path: string, content: string, line: number) =>
+    invoke<OutryResult>("run_outry", { id, env, path, content, line }),
+  /** Забыть кеш вызовов и cookies *.outry */
   resetRun: () => invoke<void>("reset_run"),
   renamePath: (from: string, to: string) => invoke<void>("rename_path", { from, to }),
   deletePath: (path: string) => invoke<void>("delete_path", { path }),
@@ -178,7 +178,7 @@ export const api = {
   setSecret: (env: string | null, name: string, value: string) => invoke<void>("set_secret", { env, name, value }),
   /** dir: null — каталог над api/; apply — создать недостающие файлы */
   importGo: (dir: string | null, apply: boolean) => invoke<ImportReport>("import_go", { dir, apply }),
-  /** routy import go --fix [--prune]; ids — выбранные расхождения, null — все исправимые */
+  /** outry import go --fix [--prune]; ids — выбранные расхождения, null — все исправимые */
   importFix: (dir: string | null, ids: string[] | null, prune: boolean) =>
     invoke<ImportReport>("import_fix", { dir, ids, prune }),
 };

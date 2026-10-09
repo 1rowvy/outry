@@ -1,17 +1,17 @@
 [workspace]
 resolver = "3"
-members = ["crates/routy-core", "crates/routy-cli", "app/src-tauri"]
+members = ["crates/outry-core", "crates/outry-cli", "app/src-tauri"]
 
 [workspace.package]
 # Единый источник версии: CLI, core и desktop-приложение (tauri.conf.json берёт её из Cargo.toml).
 version = "0.9.0"
 edition = "2024"
 license = "MIT"
-repository = "https://github.com/1rowvy/routy"
+repository = "https://github.com/1rowvy/outry"
 rust-version = "1.85"
 
 [workspace.dependencies]
-routy-core = { path = "crates/routy-core" }
+outry-core = { path = "crates/outry-core" }
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
 dirs = "6"

@@ -1,5 +1,5 @@
 // Подсветка .http для CodeMirror. Разбор здесь приблизительный, только для цвета:
-// правила формата (и ошибки) — в routy-core/src/parser.rs.
+// правила формата (и ошибки) — в outry-core/src/parser.rs.
 import { StreamLanguage, type StringStream } from "@codemirror/language";
 import { tags } from "@lezer/highlight";
 

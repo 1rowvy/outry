@@ -5,11 +5,11 @@ description: env.toml environments, shared variables, overrides and where each v
 
 import { Aside } from '@astrojs/starlight/components';
 
-In `.routy` a variable is a bare name — `customer: user_id` — or `${name}` inside a string and `{name}`
+In `.outry` a variable is a bare name — `customer: user_id` — or `${name}` inside a string and `{name}`
 in a path; in `.http` it is `{{name}}`. Values come from `api/env.toml`, from previous responses, from the
 command line, from environment variables and from the system keychain.
 
-```routy
+```outry
 GET /users/{id} {
   query { version }
   headers { Authorization: "Bearer ${token}" }
@@ -33,43 +33,43 @@ version = "v2"            # overrides [vars]
 ```
 
 ```sh
-routy run api              # dev
-routy run api --env prod   # prod
-routy envs                 # list environments, * marks the default
+outry run api              # dev
+outry run api --env prod   # prod
+outry envs                 # list environments, * marks the default
 ```
 
-Full list of keys: [env.toml reference](/routy/reference/env-toml/).
+Full list of keys: [env.toml reference](/outry/reference/env-toml/).
 
 ## Where a value comes from
 
-When Routy resolves a variable, it takes the first match, top to bottom:
+When Outry resolves a variable, it takes the first match, top to bottom:
 
 | # | Source | Example |
 |---|--------|---------|
-| 1 | Command line overrides | `routy run api --var id=42` |
+| 1 | Command line overrides | `outry run api --var id=42` |
 | 2 | Values saved by `save` | `save token = body.access_token` |
-| 3 | Process environment variables `ROUTY_<NAME>` | `ROUTY_TOKEN=… routy run api` |
+| 3 | Process environment variables `OUTRY_<NAME>` | `OUTRY_TOKEN=… outry run api` |
 | 4 | The active environment `[env.<name>]`, then `[vars]` | `base = "http://localhost:8080"` |
-| 5 | The system keychain | `routy secret set token` |
+| 5 | The system keychain | `outry secret set token` |
 
-The name of the environment variable is `ROUTY_` plus the variable name in upper case, with any
-character other than letters and digits replaced by `_`: `access-token` → `ROUTY_ACCESS_TOKEN`.
+The name of the environment variable is `OUTRY_` plus the variable name in upper case, with any
+character other than letters and digits replaced by `_`: `access-token` → `OUTRY_ACCESS_TOKEN`.
 
 If any variables are missing, the request is not sent and all missing names are listed at once:
 
 ```txt
-✗ api/users/get.routy  GetUser
+✗ api/users/get.outry  GetUser
     undefined variable(s): base, id
 ```
 
-In `.routy`, names declared in the request come first: call arguments, [`params`](/routy/reference/routy-format/#parameters)
-and their defaults, then the file's `let`s, then the table above. `routy check --env prod` lists
+In `.outry`, names declared in the request come first: call arguments, [`params`](/outry/reference/outry-format/#parameters)
+and their defaults, then the file's `let`s, then the table above. `outry check --env prod` lists
 variables that are not defined in an environment without sending anything.
 
 ## Generated values
 
-In `.routy` these are functions — `uuid()`, `now()`, `nowIso()`, `randomInt(1, 100)`, `randomString(8)`;
-see [built-in functions](/routy/reference/routy-format/#built-in-functions).
+In `.outry` these are functions — `uuid()`, `now()`, `nowIso()`, `randomInt(1, 100)`, `randomString(8)`;
+see [built-in functions](/outry/reference/outry-format/#built-in-functions).
 
 ### Dynamic variables in .http
 
@@ -92,39 +92,39 @@ Idempotency-Key: {{$uuid}}
 
 ## Inspecting variables
 
-`routy vars` prints the final value of every variable and its source; secrets are masked:
+`outry vars` prints the final value of every variable and its source; secrets are masked:
 
 ```sh
-routy vars --env prod
+outry vars --env prod
 ```
 
 In the desktop app the **Variables** tab of the right panel shows the same list for the selected
-environment. See [`routy vars`](/routy/reference/cli/#routy-vars).
+environment. See [`outry vars`](/outry/reference/cli/#outry-vars).
 
 ## Saved values
 
 Values captured with `save` (`> save` in `.http`) are available to the following requests in the same run **and** are
 remembered between runs, per project and environment. They are stored outside the repository, in
-`~/.local/share/routy/state/` (Linux), because they are often tokens.
+`~/.local/share/outry/state/` (Linux), because they are often tokens.
 
 Run with `--fresh` to ignore and not update saved values:
 
 ```sh
-routy run api --fresh
+outry run api --fresh
 ```
 
 To forget saved values for good, use **Clear saved** on the **Variables** tab in the app.
 
-Responses of requests with [`cache: 30m`](/routy/reference/routy-format/#caching) are kept in the same
+Responses of requests with [`cache: 30m`](/outry/reference/outry-format/#caching) are kept in the same
 file until they expire; `--fresh` and **Clear saved** skip and forget them too.
 
 ## How the project is found
 
-Routy looks for `env.toml`, or `api/env.toml`, starting from the file you run and going up through
+Outry looks for `env.toml`, or `api/env.toml`, starting from the file you run and going up through
 parent folders, stopping at the repository root (the folder with `.git`). The folder containing
 `env.toml` is the project root. Use `--project <dir>` to point at it explicitly.
 
 <Aside>
-Without `env.toml` Routy still works, but there are no environments — every variable must come from
-`--var`, `ROUTY_*`, `save` or the keychain.
+Without `env.toml` Outry still works, but there are no environments — every variable must come from
+`--var`, `OUTRY_*`, `save` or the keychain.
 </Aside>

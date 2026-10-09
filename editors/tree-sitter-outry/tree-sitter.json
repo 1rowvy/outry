@@ -1,0 +1,19 @@
+{
+  "$schema": "https://tree-sitter.github.io/tree-sitter/assets/schemas/config.schema.json",
+  "grammars": [
+    {
+      "name": "outry",
+      "camelcase": "Outry",
+      "scope": "source.outry",
+      "path": ".",
+      "file-types": ["outry"],
+      "highlights": "queries/highlights.scm"
+    }
+  ],
+  "metadata": {
+    "version": "0.4.0",
+    "license": "MIT",
+    "description": "Outry *.outry request files",
+    "links": { "repository": "https://github.com/1rowvy/outry" }
+  }
+}
