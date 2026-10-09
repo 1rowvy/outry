@@ -123,7 +123,9 @@ curl -fsSL https://raw.githubusercontent.com/1rowvy/routy/master/install.sh | su
 ```sh
 routy update            # install the latest version (SHA-256 verified)
 routy update --check    # only check whether a newer one exists
-rm ~/.local/bin/routy   # uninstall
+# uninstall: the binary, tab completion, saved values and caches
+rm ~/.local/bin/routy ~/.config/fish/completions/routy.fish ~/.local/share/bash-completion/completions/routy
+rm -rf ~/.local/share/routy ~/.cache/routy
 ```
 
 Like npm, routy checks for a new version in the background once a day and shows a short notice after a

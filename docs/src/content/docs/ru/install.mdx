@@ -60,8 +60,18 @@ routy update --check   # только проверить, есть ли нова
 ### Удаление
 
 ```sh
-rm ~/.local/bin/routy
+rm ~/.local/bin/routy                                    # бинарь
+rm ~/.config/fish/completions/routy.fish                 # автодополнение
+rm ~/.local/share/bash-completion/completions/routy
+rm -rf ~/.local/share/routy ~/.cache/routy               # сохранённые значения, история, кэш ответов
 ```
+
+На macOS данные лежат в `~/Library/Application Support/routy` и `~/Library/Caches/routy`.
+Секреты остаются в системном хранилище паролей: удалите их через `routy secret rm <ИМЯ> --env <ОКРУЖЕНИЕ>`
+до удаления бинаря или в приложении хранилища (записи с именем `routy`). Ваши `.routy`-файлы и `env.toml`
+лежат в репозиториях и не затрагиваются.
+
+Чтобы переустановить начисто, выполните команды выше и снова запустите скрипт установки.
 
 ## Приложение
 

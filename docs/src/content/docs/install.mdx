@@ -60,8 +60,18 @@ touch it — update it with that package manager instead.
 ### Uninstalling
 
 ```sh
-rm ~/.local/bin/routy
+rm ~/.local/bin/routy                                    # the binary
+rm ~/.config/fish/completions/routy.fish                 # tab completion
+rm ~/.local/share/bash-completion/completions/routy
+rm -rf ~/.local/share/routy ~/.cache/routy               # saved values, history, cached responses
 ```
+
+On macOS the data lives in `~/Library/Application Support/routy` and `~/Library/Caches/routy`.
+Secrets stay in the system keychain: remove them with `routy secret rm <NAME> --env <ENV>` before deleting
+the binary, or in the keychain app (entries named `routy`). Your `.routy` files and `env.toml` are part of
+your repositories and are not touched.
+
+To reinstall from scratch, run the commands above and then the install script again.
 
 ## Desktop app
 
