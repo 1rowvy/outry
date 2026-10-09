@@ -76,6 +76,7 @@ main() {
     mv -f "$dir/.routy.new" "$dir/routy"
 
     say "установлен в $dir/routy"
+    completions
     case ":$PATH:" in
         *":$dir:"*) "$dir/routy" --version ;;
         *)
@@ -85,6 +86,27 @@ main() {
             say "  fish:     fish_add_path $dir"
             ;;
     esac
+}
+
+# Автодополнение для fish и bash. Файлы не содержат сам скрипт, а вызывают `routy completions`
+# при загрузке — после `routy update` подсказки сразу новые. Для root (sudo) не ставим.
+completions() {
+    [ "$(id -u)" != 0 ] || return 0
+    if command -v fish >/dev/null 2>&1; then
+        f="${XDG_CONFIG_HOME:-$HOME/.config}/fish/completions/routy.fish"
+        mkdir -p "$(dirname "$f")" &&
+            echo 'command -q routy; and routy completions fish | source' >"$f" &&
+            say "автодополнение fish: $f"
+    fi
+    if command -v bash >/dev/null 2>&1; then
+        f="${XDG_DATA_HOME:-$HOME/.local/share}/bash-completion/completions/routy"
+        mkdir -p "$(dirname "$f")" &&
+            echo 'command -v routy >/dev/null && source <(routy completions bash)' >"$f" &&
+            say "автодополнение bash: $f (нужен пакет bash-completion)"
+    fi
+    if command -v zsh >/dev/null 2>&1; then
+        say "автодополнение zsh: добавьте в ~/.zshrc  source <(routy completions zsh)"
+    fi
 }
 
 main "$@"

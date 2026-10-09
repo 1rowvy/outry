@@ -106,7 +106,8 @@ Linux (x86_64 or aarch64, static binary, any distro):
 curl -fsSL https://raw.githubusercontent.com/1rowvy/routy/master/install.sh | sh
 ```
 
-The script downloads the latest release, verifies its SHA-256 and installs it to `~/.local/bin/routy`.
+The script downloads the latest release, verifies its SHA-256 and installs it to `~/.local/bin/routy`,
+along with tab completion for fish and bash (zsh: `source <(routy completions zsh)` in `~/.zshrc`).
 
 <details>
 <summary>Options, updating, uninstalling</summary>
