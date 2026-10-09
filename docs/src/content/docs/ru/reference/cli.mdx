@@ -189,6 +189,19 @@ routy update [--check]
 
 `--check` только сообщает, есть ли новая версия.
 
+## `routy completions`
+
+Напечатать скрипт автодополнения для шелла: `bash`, `zsh`, `fish`, `powershell` или `elvish`.
+Дополняются команды, флаги и их описания.
+
+```sh
+routy completions fish > ~/.config/fish/completions/routy.fish
+routy completions bash > ~/.local/share/bash-completion/completions/routy
+echo 'source <(routy completions zsh)' >> ~/.zshrc
+```
+
+После `routy update` запустите снова, чтобы подхватить новые команды.
+
 ## Переменные окружения
 
 | Переменная | Что делает |

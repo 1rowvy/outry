@@ -15,6 +15,7 @@ path = "src/main.rs"
 routy-core.workspace = true
 anyhow.workspace = true
 clap.workspace = true
+clap_complete = "4"
 dirs.workspace = true
 reqwest.workspace = true
 serde.workspace = true

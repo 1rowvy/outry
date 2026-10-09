@@ -8,7 +8,7 @@ use std::process::ExitCode;
 use std::time::Duration;
 
 use anyhow::{Context, bail};
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, Parser, Subcommand};
 use routy_core::expr::AssertOutcome;
 use routy_core::lang::ast::Item;
 use routy_core::lang::exec::{CallTrace, FlowOutcome, Outcome, Run};
@@ -133,6 +133,14 @@ enum Cmd {
         #[arg(long)]
         check: bool,
     },
+    /// Скрипт автодополнения для шелла. fish:
+    /// `routy completions fish > ~/.config/fish/completions/routy.fish`, bash:
+    /// `routy completions bash > ~/.local/share/bash-completion/completions/routy`, zsh: в `.zshrc`
+    /// `source <(routy completions zsh)`
+    Completions {
+        #[arg(value_enum)]
+        shell: clap_complete::Shell,
+    },
     /// Фоновая проверка новой версии (запускается самим routy)
     #[command(name = notifier::REFRESH_COMMAND, hide = true)]
     RefreshUpdateCache,
@@ -245,7 +253,7 @@ fn main() -> ExitCode {
     let cmd = Cli::parse().cmd;
     let notify = !matches!(
         cmd,
-        Cmd::Update { .. } | Cmd::RefreshUpdateCache | Cmd::Lsp { .. }
+        Cmd::Update { .. } | Cmd::RefreshUpdateCache | Cmd::Lsp { .. } | Cmd::Completions { .. }
     );
     let code = match real_main(cmd) {
         Ok(code) => code,
@@ -258,6 +266,18 @@ fn main() -> ExitCode {
         notifier::after_command();
     }
     code
+}
+
+/// Скрипт автодополнения. Скрытые команды (`__refresh-update-cache`) `clap_complete` всё равно
+/// выдаёт — дополняем по копии без них. Закрытый stdout (`| head`) — не ошибка.
+fn completions(shell: clap_complete::Shell) {
+    let full = Cli::command();
+    let mut cmd = clap::Command::new("routy")
+        .version(env!("CARGO_PKG_VERSION"))
+        .subcommands(full.get_subcommands().filter(|c| !c.is_hide_set()).cloned());
+    let mut out = Vec::new();
+    clap_complete::generate(shell, &mut cmd, "routy", &mut out);
+    let _ = std::io::Write::write_all(&mut std::io::stdout(), &out);
 }
 
 fn real_main(cmd: Cmd) -> anyhow::Result<ExitCode> {
@@ -418,6 +438,10 @@ fn real_main(cmd: Cmd) -> anyhow::Result<ExitCode> {
         Cmd::Convert { paths, dry_run, rm } => convert(&paths, dry_run, rm),
         Cmd::Update { check } => {
             tokio::runtime::Runtime::new()?.block_on(update::run(check))?;
+            Ok(ExitCode::SUCCESS)
+        }
+        Cmd::Completions { shell } => {
+            completions(shell);
             Ok(ExitCode::SUCCESS)
         }
         Cmd::RefreshUpdateCache => {
