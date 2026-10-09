@@ -3567,7 +3567,7 @@ dependencies = [
 
 [[package]]
 name = "routy-app"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "base64 0.22.1",
  "notify",
@@ -3584,7 +3584,7 @@ dependencies = [
 
 [[package]]
 name = "routy-cli"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -3605,7 +3605,7 @@ dependencies = [
 
 [[package]]
 name = "routy-core"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "base64 0.22.1",
  "dirs",
