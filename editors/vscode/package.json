@@ -2,7 +2,7 @@
   "name": "routy",
   "displayName": "Routy",
   "description": "API requests as plain .routy files in your repo: send them, check responses, keep them in sync with Go routes.",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "publisher": "1rowvy",
   "license": "MIT",
   "icon": "media/icon.png",
