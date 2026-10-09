@@ -1,6 +1,6 @@
 [package]
 name = "routy-core"
-description = "Routy core: .http file format, variables, environments, request execution"
+description = "Routy core: the .routy language — parser, checker, formatter, runtime — and Go route import"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

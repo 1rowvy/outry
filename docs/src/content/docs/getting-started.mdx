@@ -75,11 +75,16 @@ Prefer a GUI? Open the same folder in the [desktop app](/routy/guides/desktop-ap
 files, and edits made in your editor show up immediately.
 </Aside>
 
+Have a Go service? `routy import go .` writes a request for every chi, gin or `net/http` route, and
+`routy check` then tells you when the code and the requests drift apart — see
+[Import routes from Go](/routy/guides/import-go/).
+
 Already have `.http` files? `routy convert api/` rewrites them into `.routy` — see
 [.http files](/routy/guides/request-format/).
 
 ## Next steps
 
+- [Example project](/routy/example/) — a Gin service that uses every feature
 - [.routy format](/routy/reference/routy-format/) — the full reference
 - [Calling requests and checks](/routy/guides/chains-and-assertions/)
 - [Variables and environments](/routy/guides/variables/)

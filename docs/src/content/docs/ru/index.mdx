@@ -1,15 +1,19 @@
 ---
 title: Routy
-description: API-клиент, где запросы — текстовые .routy-файлы в репозитории. Приложение и CLI для CI работают на одном ядре.
+description: Исполняемые спецификации API, которые живут в репозитории, — запускаются где угодно и сверяются с кодом на Go.
 template: splash
 hero:
-  tagline: API-клиент, где запросы — обычные текстовые файлы в репозитории. Одно ядро у приложения и CLI — они не могут разъехаться.
+  tagline: Исполняемые спецификации API, которые живут в репозитории. Опишите каждый эндпоинт в текстовых .routy-файлах рядом с кодом, запускайте их из терминала, редактора, приложения или CI — а когда код изменится, Routy покажет, какие запросы ему больше не соответствуют.
   image:
     file: ../../../assets/logo.svg
   actions:
     - text: Начать
       link: /routy/ru/getting-started/
       icon: right-arrow
+    - text: Пример проекта
+      link: /routy/ru/example/
+      icon: open-book
+      variant: secondary
     - text: GitHub
       link: https://github.com/1rowvy/routy
       icon: external
@@ -22,36 +26,52 @@ import { Card, CardGrid } from '@astrojs/starlight/components';
 curl -fsSL https://raw.githubusercontent.com/1rowvy/routy/master/install.sh | sh
 ```
 
-```routy title="api/users/create.routy"
-// Create user
-POST /users {
+```routy title="api/orders/create.routy"
+// Create order
+POST /v1/orders {
   headers { Authorization: "Bearer ${Login().body.token}" }
-  body { name: "Viktor", role: "admin" }
+  body { user_id: CreateUser().body.id, items: [{ sku: "BOOK-1", qty: 2 }] }
 
   expect {
     status == 201
-    body matches { id: string, name: string }
+    body matches Order
+    body.total == 25
   }
 
-  save user_id = body.id
+  save order_id = body.id
 }
 ```
 
+```console
+$ routy check
+api/v1/users/post.routy:17:8: error: required field `full_name` (string) is missing from body  ← internal/api/users.go:13
+api/v1/users/post.routy:17:10: error: body field `name` is not in model.CreateUser  ← internal/api/users.go:13
+14 files, 2 environments, 12 Go routes: 2 errors, 0 warnings; 2 fixable with `routy import go --fix`
+```
+
 <CardGrid>
-	<Card title="Запросы живут в git" icon="document">
-		Запросы — `.routy`-файлы: JSON-тело и проверки, которые читаются как код. Их можно ревьюить в
-		пулл-реквестах, искать grep'ом и править в любом редакторе — приложение сразу подхватывает изменения.
+	<Card title="Спецификация и есть тест" icon="approve-check">
+		`.routy`-файл описывает эндпоинт, отправляет запрос, проверяет ответ и служит шагом больших
+		сценариев. Один артефакт вместо вики-страницы, коллекции и тестов, которые противоречат друг другу.
+	</Card>
+	<Card title="Замечает, когда меняется код" icon="random">
+		Routy читает ваш сервис на Go (chi, gin, `net/http`) и сверяет каждый запрос с его обработчиком:
+		путь, поля тела, query, заголовки, middleware, тип ответа. Расхождение роняет CI на нужной строке.
+	</Card>
+	<Card title="Запросы складываются как функции" icon="puzzle">
+		`Login().body.token` логинится один раз за прогон; `flow Checkout { … }` — сценарий; `poll` ждёт
+		асинхронную работу; shape описывает ответ один раз и проверяется везде.
+	</Card>
+	<Card title="Живёт вместе с кодом" icon="document">
+		Обычный текст в репозитории — ревьюится в пулл-реквестах, версионируется вместе с сервисом,
+		читается без Routy. Секреты остаются в системном хранилище паролей или в переменных `ROUTY_*`.
 	</Card>
 	<Card title="Один движок везде" icon="laptop">
-		Приложение и CLI `routy` вызывают одно и то же ядро на Rust: запрос, который работает в GUI,
-		работает и в CI.
+		CLI, приложение, VS Code и любой редактор через `routy lsp` работают на одном ядре на Rust: что
+		работает у вас, работает и в CI.
 	</Card>
-	<Card title="Секреты не попадают в репозиторий" icon="padlock">
-		Токены лежат в системном хранилище паролей, а в CI приходят из переменных `ROUTY_*`. Случайно
-		закоммитить нечего.
-	</Card>
-	<Card title="Запросы вызывают запросы" icon="approve-check">
-		`Login().body.token` логинится один раз за прогон и переиспользует ответ; `flow` описывает сценарий.
-		`expect` проверяет статус, заголовки и форму тела. Если что-то упало — ненулевой код выхода.
+	<Card title="Посмотрите на живом сервисе" icon="rocket">
+		[routy-example-gin](/routy/ru/example/) — API на Gin, в папке `api/` которого есть все возможности.
+		Склонируйте и запустите за две минуты.
 	</Card>
 </CardGrid>

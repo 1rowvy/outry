@@ -172,10 +172,16 @@ fn extract_binary(archive: &[u8]) -> anyhow::Result<Vec<u8>> {
 /// Бинарь из системного пакета или чужого менеджера не трогаем — они разъедутся.
 pub(crate) fn package_manager(exe: &Path) -> Option<&'static str> {
     let s = exe.to_string_lossy();
+    // Пути Windows: регистр и разделители не важны.
+    let windows = s.to_ascii_lowercase().replace('\\', "/");
     if s.starts_with("/nix/store/") {
         Some("nix")
     } else if s.contains("/Cellar/") || s.contains("/homebrew/") || s.contains("/linuxbrew/") {
         Some("Homebrew")
+    } else if windows.contains("/scoop/apps/") {
+        Some("Scoop")
+    } else if windows.contains("/winget/") {
+        Some("winget")
     } else if s.starts_with("/snap/") {
         Some("snap")
     } else if s.starts_with("/usr/bin/") || s.starts_with("/bin/") {
@@ -259,6 +265,16 @@ mod tests {
         assert_eq!(
             package_manager(Path::new("/nix/store/abc-routy/bin/routy")),
             Some("nix")
+        );
+        assert_eq!(
+            package_manager(Path::new(r"C:\Users\u\scoop\apps\routy\current\routy.exe")),
+            Some("Scoop")
+        );
+        assert_eq!(
+            package_manager(Path::new(
+                r"C:\Users\u\AppData\Local\Microsoft\WinGet\Packages\1rowvy.routy\routy.exe"
+            )),
+            Some("winget")
         );
         assert_eq!(package_manager(Path::new("/home/u/.local/bin/routy")), None);
         assert_eq!(package_manager(Path::new("/usr/local/bin/routy")), None);

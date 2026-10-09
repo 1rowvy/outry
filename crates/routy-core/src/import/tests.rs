@@ -674,6 +674,18 @@ func main() {
 	r := gin.Default()
 	r.POST("/login", login)
 	r.GET("/items", listItems)
+	r.POST("/session", session)
+	r.POST("/avatar", avatar)
+}
+
+func session(c *gin.Context) {
+	_ = c.PostForm("email")
+	_ = c.DefaultPostForm("remember", "no")
+}
+
+func avatar(c *gin.Context) {
+	_ = c.PostForm("caption")
+	_, _ = c.FormFile("file")
 }
 
 func login(c *gin.Context) {
@@ -709,6 +721,16 @@ func listItems(c *gin.Context) {
     assert_eq!(q, [("page", false), ("sort", true), ("lang", false)]);
     assert_eq!(items.headers, ["Accept-Language"]);
     assert!(items.body.is_none());
+
+    let form = |path: &str| {
+        let info = &s.routes.iter().find(|r| r.path == path).unwrap().info;
+        info.form
+            .iter()
+            .map(|f| format!("{} {}", f.name, f.ty))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(form("/session"), ["email string", "remember string"]);
+    assert_eq!(form("/avatar"), ["caption string", "file file"]);
 }
 
 #[test]
@@ -790,6 +812,63 @@ func Register(r *gin.Engine, h *OrderHandler) {
     assert_eq!(s.shapes.len(), 1);
     assert_eq!(s.shapes[0].go_type, "model.Order");
     assert_eq!(s.shapes[0].shape, "{ id: integer, note?: string }");
+}
+
+#[test]
+fn nested_named_structs_get_their_own_shapes() {
+    // Page → Order → Item → Price: глубина не сбрасывалась, и Item становился `any`.
+    let dir = TempDir::new("nested-shapes");
+    dir.write(
+        "main.go",
+        r#"package main
+
+import (
+	"net/http"
+	"github.com/gin-gonic/gin"
+)
+
+type Price struct {
+	Amount float64 `json:"amount"`
+}
+
+type Item struct {
+	SKU   string `json:"sku"`
+	Price Price  `json:"price"`
+}
+
+type Order struct {
+	Items []Item `json:"items"`
+}
+
+type Page struct {
+	Items []Order `json:"items"`
+}
+
+func list(c *gin.Context) {
+	c.JSON(http.StatusOK, Page{})
+}
+
+func main() {
+	r := gin.New()
+	r.GET("/orders", list)
+}
+"#,
+    );
+    let s = scan(&dir);
+    let shapes: Vec<(&str, &str)> = s
+        .shapes
+        .iter()
+        .map(|d| (d.name.as_str(), d.shape.as_str()))
+        .collect();
+    assert_eq!(
+        shapes,
+        [
+            ("Page", "{ items: [Order] }"),
+            ("Order", "{ items: [Item] }"),
+            ("Item", "{ sku: string, price: Price }"),
+            ("Price", "{ amount: number }"),
+        ]
+    );
 }
 
 #[test]
@@ -1320,4 +1399,39 @@ fn middleware_headers_from_env_toml() {
         fixed[0].after,
         "// List\nGET /orders {\n  handler: h.List\n  headers { Authorization: \"Bearer ${Login().body.token}\" }\n}\n\n// One\nGET /orders/{id} {\n  handler: h.One\n\n  headers {\n    Accept: \"application/json\"\n    Authorization: \"Bearer ${Login().body.token}\"\n  }\n}\n\n// No token\nGET /orders { expect { status == 401 } }\n"
     );
+}
+
+#[test]
+fn concrete_paths_match_parametrized_routes() {
+    assert!(fills_params("/users/{}", "/users/42"));
+    assert!(fills_params("/users/{}/posts", "/users/{}/posts"));
+    assert!(!fills_params("/users/{}", "/users/42/posts"));
+    assert!(!fills_params("/users/me", "/users/42"));
+
+    let dir = TempDir::new("concrete-paths");
+    dir.write(
+        "svc/main.go",
+        r#"package main
+
+import "github.com/gin-gonic/gin"
+
+func main() {
+	r := gin.New()
+	r.GET("/users/:id", getUser)
+	r.GET("/users/me", me)
+}
+
+func getUser(c *gin.Context) {}
+func me(c *gin.Context)      {}
+"#,
+    );
+    dir.write("api/env.toml", "[env.dev]\nbase = \"http://x\"\n");
+    dir.write(
+        "api/users.routy",
+        "// Get user\nGET /users/42\n\n// Me\nGET /users/me\n",
+    );
+    let plan = plan_go(&dir.0.join("svc"), &dir.0.join("api"), &[], DEFAULT_BASE).unwrap();
+    assert!(plan.stale.is_empty(), "{:?}", plan.stale);
+    assert!(plan.new.is_empty());
+    assert!(plan.existing.iter().all(|e| e.changes.is_empty()));
 }

@@ -1,7 +1,7 @@
 {
   "name": "routy-vscode",
   "displayName": "Routy API Client",
-  "description": "API requests as plain .routy files in your repo: send them, check responses, keep them in sync with Go routes.",
+  "description": "Executable API specs in your repo: send .routy requests, check responses, keep them in sync with your Go routes.",
   "version": "0.7.0",
   "publisher": "routy",
   "license": "MIT",
@@ -26,7 +26,8 @@
     "http",
     "rest",
     "client",
-    "postman"
+    "testing",
+    "go"
   ],
   "main": "./dist/extension.js",
   "activationEvents": [

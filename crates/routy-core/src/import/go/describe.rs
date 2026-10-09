@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use tree_sitter::Node;
 
 use super::{Func, GoFile, children, text};
-use crate::import::{Body, Field, JsonType, Response, RouteInfo, ShapeDef};
+use crate::import::{Body, FORM_FILE, Field, JsonType, Response, RouteInfo, ShapeDef};
 
 /// Глубина вложенных структур в примере тела.
 const MAX_DEPTH: usize = 6;
@@ -26,6 +26,17 @@ const BODY_CALLS: &[&str] = &[
     "bodyparser",
     "parsebody",
 ];
+/// Поля формы (application/x-www-form-urlencoded или multipart).
+const FORM_CALLS: &[&str] = &[
+    "PostForm",
+    "DefaultPostForm",
+    "GetPostForm",
+    "PostFormArray",
+    "GetPostFormArray",
+    "PostFormValue",
+];
+/// Файлы multipart: `c.FormFile("file")`, `r.FormFile("file")`.
+const FILE_CALLS: &[&str] = &["FormFile"];
 const QUERY_CALLS: &[&str] = &[
     "Query",
     "DefaultQuery",
@@ -282,6 +293,19 @@ impl<'a> Describer<'a> {
                     push_unique(&mut info.headers, param);
                     return;
                 }
+                let file = FILE_CALLS.contains(&name);
+                if file || FORM_CALLS.contains(&name) {
+                    if !info.form.iter().any(|f| f.name == param) {
+                        info.form.push(Field {
+                            name: param,
+                            ty: if file { FORM_FILE } else { "string" }.into(),
+                            required: false,
+                            comment: None,
+                            json: None,
+                        });
+                    }
+                    return;
+                }
                 if name == "Get"
                     && (operand.ends_with("Query()") || query_vars.iter().any(|v| v == operand))
                     || QUERY_CALLS.contains(&name)
@@ -482,7 +506,9 @@ impl<'a> Describer<'a> {
             });
             shape_name
         };
-        let shape = self.struct_shape(f, resolved, resolved, depth + 1);
+        // Глубина считается заново: от циклов защищает реестр `self.shapes`, а вложенные
+        // именованные структуры (`Page → Order → Item`) не должны превращаться в `any`.
+        let shape = self.struct_shape(f, resolved, resolved, 0);
         if let Some(d) = self
             .shapes
             .borrow_mut()

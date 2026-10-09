@@ -4,61 +4,97 @@
 
 # Routy
 
-**An API client where every request is a plain text file in your repo.**<br>
-A desktop app for clicking through requests and a CLI for running them as tests in CI — on one shared core.
+**Executable API specs that live in your repository.**<br>
+Describe every endpoint of your service in plain `.routy` files next to the code. Run them from the terminal,
+your editor, the desktop app or CI — and when the code changes, Routy shows which requests no longer match it.
 
 [![CI](https://github.com/1rowvy/routy/actions/workflows/ci.yml/badge.svg)](https://github.com/1rowvy/routy/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/1rowvy/routy)](https://github.com/1rowvy/routy/releases/latest)
 [![Docs](https://img.shields.io/badge/docs-1rowvy.github.io%2Frouty-blue)](https://1rowvy.github.io/routy/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
-[Documentation](https://1rowvy.github.io/routy/) · [Getting started](https://1rowvy.github.io/routy/getting-started/) · [Releases](https://github.com/1rowvy/routy/releases/latest) · [На русском](https://1rowvy.github.io/routy/ru/)
+[Documentation](https://1rowvy.github.io/routy/) · [Getting started](https://1rowvy.github.io/routy/getting-started/) · [Example project](https://github.com/1rowvy/routy-example-gin) · [Releases](https://github.com/1rowvy/routy/releases/latest) · [На русском](https://1rowvy.github.io/routy/ru/)
 
 </div>
 
 ---
 
-```routy
-// api/users/create.routy
+### 1. Describe
 
-// Create user
-POST /users {
+A request is a small, readable block: where it goes, what it sends, what the answer must look like. Requests
+call each other like functions, so a scenario is just code.
+
+```routy
+// api/orders/create.routy
+
+// Create order
+POST /v1/orders {
   headers { Authorization: "Bearer ${Login().body.token}" }
-  body { name: "Viktor", role: "admin" }
+  body { user_id: CreateUser().body.id, items: [{ sku: "BOOK-1", qty: 2 }] }
 
   expect {
     status == 201
-    body.name == "Viktor"
-    body matches { id: string, name: string }
+    body matches Order
+    body.total == 25
   }
 
-  save user_id = body.id
+  save order_id = body.id
 }
 ```
 
+### 2. Run anywhere
+
+The same files run from the CLI, the desktop app, VS Code or any LSP editor — one Rust core behind all of them.
+
 ```console
 $ routy run api
-✓ api/auth/login.routy  Login  POST http://localhost:8080/login  200 OK  12ms 184B
+✓ api/auth/login.routy  Login  POST http://localhost:8080/auth/login  200 OK  1ms 62B
     ✓ status == 200
-✓ api/users/create.routy  CreateUser  POST http://localhost:8080/users  201 Created  9ms 61B
-    ↳ Login  cached
-    ✓ status == 201
-    ✓ body.name == "Viktor"
-    ✓ body matches { id: string, name: string }
-    → saved user_id
-✗ api/users/get.routy  GetUser  GET http://localhost:8080/users/7  200 OK  4ms 211B
-    ✗ body.role == "admin"  — body.role is "user"
+    ✓ body matches Token
+✓ api/flows/checkout.routy  Checkout  flow
+    ↳ CreateUser  201  0ms
+      ↳ Login  cached
+    ↳ CreateOrder  201  0ms
+    ↳ PayOrder  202  0ms
+    ↳ WaitUntilPaid  200  1ms
+    ✓ paid.body.total == 45.5
+✗ api/orders/get.routy  GetOrder  GET http://localhost:8080/v1/orders/7  200 OK  0ms 211B
+    ✗ body.status == "paid"  — body.status is "pending"
 
-2 passed, 1 failed
+21 passed, 1 failed
 ```
+
+### 3. Stay in sync with the code
+
+Routy reads your Go service — chi, gin or `net/http` — and knows which handler each request belongs to: the
+struct the body is bound into, query parameters, headers, middleware and the type it responds with. Rename a
+field in Go, and the pull request says which requests are now wrong:
+
+```console
+$ routy check
+api/v1/users/post.routy:17:8: error: required field `full_name` (string) is missing from body  ← internal/api/users.go:13
+api/v1/users/post.routy:17:10: error: body field `name` is not in model.CreateUser  ← internal/api/users.go:13
+14 files, 2 environments, 12 Go routes: 2 errors, 0 warnings; 2 fixable with `routy import go --fix`
+```
+
+`routy import go .` writes a request for every new route; `--fix` updates the existing ones.
+
+**See it on a real service:** [routy-example-gin](https://github.com/1rowvy/routy-example-gin) — a Gin shop API
+whose `api/` folder uses every feature of Routy. Clone it, `go run .`, `routy run api`, then change the code.
 
 ## Why Routy
 
-- **Requests live in git.** `.routy` files: a JSON body, checks that read like code, no Go or JS needed. Review them in pull requests, grep them, edit them in any editor. The app picks up outside changes instantly.
-- **The same engine everywhere.** The desktop app and the `routy` CLI call the same Rust core, so a request that works in the GUI works in CI. They can't drift apart.
-- **Secrets stay out of the repo.** Tokens go to the system keychain locally and come from `ROUTY_*` environment variables in CI, so there's nothing to commit by accident.
-- **Requests call requests.** `Login().body.token` logs in once per run and reuses the response; no run order to maintain. `flow` describes a scenario; `expect` checks status, timing, headers and the body's shape. A failure gives a non-zero exit code.
-- **No account, no cloud, no lock-in.** It's plain text: if you stop using Routy, your requests are still readable files.
+- **The spec is the test.** A `.routy` file documents an endpoint, sends it, checks the answer and serves as a
+  step of bigger scenarios. One artifact instead of a wiki page, a collection and a test suite that disagree.
+- **It lives with the code.** Plain text in your repository: reviewed in pull requests, versioned with the
+  service, readable without Routy installed. No account, no cloud, no export.
+- **It notices when the code moves.** `routy check` compares every request with its Go handler and fails CI
+  on drift, with annotations on the exact line.
+- **Requests compose like functions.** `Login().body.token` logs in once per run and reuses the answer;
+  `flow Checkout { … }` is a scenario; `poll` waits for async work; shapes describe responses once.
+- **Secrets stay out of the repo.** The system keychain locally, `ROUTY_*` variables in CI.
+- **One engine everywhere.** The CLI, the desktop app, the VS Code extension and `routy lsp` share the same
+  core — what works on your machine works in CI.
 
 ## Installation
 
@@ -97,6 +133,11 @@ command. Commands never wait for the network. The notice is hidden in pipes and 
 
 macOS and Windows: download a `routy-cli-*` archive from [releases](https://github.com/1rowvy/routy/releases/latest).
 
+### VS Code
+
+[Routy for VS Code](https://marketplace.visualstudio.com/items?itemName=routy.routy-vscode) (also on
+[Open VSX](https://open-vsx.org/extension/routy/routy-vscode) for Cursor, Windsurf, VSCodium) bundles the CLI.
+
 ### Desktop app
 
 Installers for **macOS**, **Windows** and **Linux** (AppImage, `.deb`, `.rpm`) are on the
@@ -107,22 +148,15 @@ and installs them in one click (on Linux, only the AppImage self-updates).
 
 ```sh
 cd my-service
-routy init                 # creates api/env.toml and api/health.routy
-routy run api              # sends every request in api/, alphabetically
+routy init                 # api/env.toml with environments and api/health.routy
+routy import go .          # Go service? a request for every route and a shape for every response
+routy run api              # send every request in api/
 routy run CreateUser       # or one, by name
+routy check                # nothing is sent: syntax, environments, formatting, drift from the code
 ```
 
-Or open the folder in the desktop app. It offers to create `api/env.toml` if there isn't one.
-
-Have a Go service? Generate a request for every route (chi, gin, `net/http`) and keep them in sync with the code:
-
-```sh
-routy import go .          # + api/users/get-by-id.routy  GET /users/{id}
-routy import go . --check  # in CI: fails when requests drift from the handlers
-routy import go . --fix    # update the requests (method, path, body fields, response shapes)
-```
-
-See [Import routes from Go](https://1rowvy.github.io/routy/guides/import-go/).
+Or open the folder in the desktop app or VS Code. More: [Getting started](https://1rowvy.github.io/routy/getting-started/),
+[Import routes from Go](https://1rowvy.github.io/routy/guides/import-go/).
 
 ## Request files
 

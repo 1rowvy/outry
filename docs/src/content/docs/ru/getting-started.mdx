@@ -74,11 +74,16 @@ import { Steps, Aside } from '@astrojs/starlight/components';
 файлы, а правки из редактора появляются сразу.
 </Aside>
 
+Есть сервис на Go? `routy import go .` создаст запрос для каждого роута chi, gin или `net/http`, а
+`routy check` потом подскажет, когда код и запросы разойдутся, — см.
+[Импорт роутов из Go](/routy/ru/guides/import-go/).
+
 Уже есть `.http`-файлы? `routy convert api/` перепишет их в `.routy` — см.
 [Файлы .http](/routy/ru/guides/request-format/).
 
 ## Дальше
 
+- [Пример проекта](/routy/ru/example/) — сервис на Gin, где используется всё
 - [Формат .routy](/routy/ru/reference/routy-format/) — полный справочник
 - [Вызовы запросов и проверки](/routy/ru/guides/chains-and-assertions/)
 - [Переменные и окружения](/routy/ru/guides/variables/)

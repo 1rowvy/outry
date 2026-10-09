@@ -92,6 +92,8 @@ export interface RouteInfo {
   query: Field[];
   headers: string[];
   body: { type_name: string; fields: Field[]; example: string } | null;
+  /** поля формы; у файлов `ty` — `"file"` */
+  form: Field[];
   /** что обработчик отвечает: тип Go и shape для `body matches` */
   response: { type_name: string; shape: string } | null;
 }

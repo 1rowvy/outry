@@ -16,7 +16,7 @@ use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 
-use super::{ANY, AuthHeader, Field, JsonType, Route, header_entry, key};
+use super::{ANY, AuthHeader, Field, JsonType, Route, fills_params, header_entry, key};
 use crate::lang::ast::{BinOp, Body, Expr, ExprKind, Request, Span, StrPart, TargetPart};
 use crate::lang::parse::line_col;
 
@@ -277,7 +277,10 @@ pub fn compare(
     let (path, params) = request_path(req, src);
     let now = route.path.replace("{{", "{").replace("}}", "}");
     let code_params = route_params(&route.path);
-    if key(&path.replace('{', "{{")) != key(&route.path) {
+    let (was_key, now_key) = (key(&path.replace('{', "{{")), key(&route.path));
+    if was_key != now_key && fills_params(&now_key, &was_key) {
+        // `/users/42` для `/users/{id}`: путь тот же, значение параметра вписано.
+    } else if was_key != now_key {
         // Новый путь с именами параметров запроса (по порядку): на них ссылаются вызовы.
         let fix = params.iter().all(Option::is_some).then(|| {
             let mut text = route.path.clone();

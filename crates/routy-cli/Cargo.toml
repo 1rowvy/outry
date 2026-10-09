@@ -1,6 +1,6 @@
 [package]
 name = "routy-cli"
-description = "Routy CLI: run .http request files from the terminal and CI"
+description = "Routy CLI: run and check executable API specs, keep them in sync with Go code"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

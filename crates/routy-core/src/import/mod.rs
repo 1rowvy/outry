@@ -31,6 +31,9 @@ pub const ANY: &str = "ANY";
 /// Переменная с адресом сервиса в генерируемых файлах (как в `routy init`).
 pub const DEFAULT_BASE: &str = "base";
 
+/// Тип поля формы с файлом (`c.FormFile`) в `RouteInfo::form`.
+pub const FORM_FILE: &str = "file";
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Route {
     /// `GET`, `POST`, … или [`ANY`]
@@ -61,6 +64,8 @@ pub struct RouteInfo {
     pub headers: Vec<String>,
     /// JSON-тело, в которое декодируется запрос
     pub body: Option<Body>,
+    /// Поля формы (`c.PostForm`, `r.PostFormValue`); файлы (`c.FormFile`) — с типом `file`
+    pub form: Vec<Field>,
     /// Что обработчик отвечает (`json.Encode`, `c.JSON`)
     pub response: Option<Response>,
 }
@@ -398,6 +403,9 @@ pub fn plan_with(
         ..Plan::default()
     };
     let mut matched = HashSet::new();
+    // Пути роутов: запрос с конкретным значением (`/users/1`) сопоставляется с `/users/{id}`,
+    // только если в коде нет такого же статического пути.
+    let route_keys: HashSet<String> = scan.routes.iter().map(|r| key(&r.path)).collect();
     for route in scan.routes {
         let k = key(&route.path);
         let auth = auth_headers(&route, &rules);
@@ -407,7 +415,10 @@ pub fn plan_with(
             .enumerate()
             .filter(|(_, r)| match &r.handler {
                 Some(_) => r.handler == route.handler,
-                None => r.key == k && (route.method == ANY || r.method == route.method),
+                None => {
+                    (r.key == k || !route_keys.contains(&r.key) && fills_params(&k, &r.key))
+                        && (route.method == ANY || r.method == route.method)
+                }
             })
             .map(|(i, _)| i)
             .collect();
@@ -849,6 +860,13 @@ fn key(path: &str) -> String {
     format!("/{}", segs.join("/"))
 }
 
+/// Путь запроса — это путь роута с конкретными значениями параметров:
+/// `/users/{}` ~ `/users/42`.
+pub(crate) fn fills_params(route: &str, request: &str) -> bool {
+    let (r, q): (Vec<&str>, Vec<&str>) = (route.split('/').collect(), request.split('/').collect());
+    r.len() == q.len() && r.iter().zip(&q).all(|(r, q)| r == q || *r == "{}")
+}
+
 /// `GET /users` → `users/get.routy`, `GET /users/{{id}}` → `users/get-by-id.routy`,
 /// `GET /users/{{id}}/posts` → `users/posts/get.routy`, `GET /` → `root/get.routy`.
 fn file_name(route: &Route) -> PathBuf {
@@ -951,6 +969,10 @@ fn content(route: &Route, _base: &str, common: &[String], auth: &[AuthHeader]) -
         params.push(format!("Body: {}", b.type_name));
         params.extend(field_lines(&b.fields));
     }
+    if !info.form.is_empty() && info.body.is_none() {
+        params.push("Form:".into());
+        params.extend(field_lines(&info.form));
+    }
     if let Some(r) = &info.response {
         params.push(format!("Response: {}", r.type_name));
     }
@@ -1002,6 +1024,28 @@ fn content(route: &Route, _base: &str, common: &[String], auth: &[AuthHeader]) -
     }
     match &info.body {
         Some(b) => fields.push(format!("body {}", b.example)),
+        // Форма: с файлом — multipart, иначе urlencoded.
+        None if !info.form.is_empty() => {
+            let multipart = info.form.iter().any(|f| f.ty == FORM_FILE);
+            let lines: Vec<String> = info
+                .form
+                .iter()
+                .map(|f| {
+                    let value = if f.ty == FORM_FILE {
+                        "file(\"\")"
+                    } else {
+                        "\"\""
+                    };
+                    if is_param(&f.name) {
+                        format!("{}: {value}", f.name)
+                    } else {
+                        format!("\"{}\": {value}", f.name)
+                    }
+                })
+                .collect();
+            let kind = if multipart { "multipart" } else { "form" };
+            fields.push(format!("{kind} {{\n{}\n}}", lines.join("\n")));
+        }
         None if matches!(method, "POST" | "PUT" | "PATCH") => fields.push("body {}".into()),
         None => {}
     }

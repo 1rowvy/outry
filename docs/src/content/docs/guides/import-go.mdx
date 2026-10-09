@@ -69,6 +69,8 @@ Routy also reads the handler to show what the request expects:
   required ones, nested structs are listed with dots (`user.email`), and a comment after a field is kept;
 - **query** — `r.URL.Query().Get("page")`, `c.Query`, `c.DefaultQuery`, `c.QueryParam`, `r.FormValue`
   and `c.ShouldBindQuery(&q)` (fields from `form` tags);
+- **form** — `c.PostForm`, `c.DefaultPostForm`, `r.PostFormValue` give a `form { … }` body; with a file
+  (`c.FormFile("file")`, `r.FormFile`) it becomes `multipart { file: file("") }`;
 - **headers** — `r.Header.Get("X-Tenant-ID")`, `c.GetHeader`;
 - **response** — the value of the first successful `json.NewEncoder(w).Encode(v)`, `c.JSON(200, v)`,
   `render.JSON(w, r, v)` or your own `writeJSON(w, http.StatusOK, v)`; responses with an error status
@@ -174,7 +176,8 @@ cached. An existing request without the header gets a [warning with a fix](#diff
 A request counts as the request for a route when its `handler:` names the route's handler. Requests
 without `handler` match by method and path, ignoring the query string: in `.routy` paths starting with
 `/` (appended to `base`), in `.http` URLs starting with `{{base}}`. Parameters match any name, so
-`/users/{user_id}` covers `GET /users/{id}`. Rename and reorganize the generated files freely — the next
+`/users/{user_id}` covers `GET /users/{id}`, and so does a concrete value — `/users/42` — unless the code
+has a static `/users/42` route of its own. Rename and reorganize the generated files freely — the next
 import still recognizes them.
 
 Use `--base <NAME>` if the `.http` files call the service address something other than `base`.

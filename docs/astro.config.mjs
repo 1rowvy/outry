@@ -16,7 +16,7 @@ export default defineConfig({
 	integrations: [
 		starlight({
 			title: 'Routy',
-			description: 'API client where requests are plain .http files in your repo.',
+			description: 'Executable API specs that live in your repository.',
 			logo: { src: './src/assets/logo.svg' },
 			favicon: '/favicon.svg',
 			defaultLocale: 'root',
@@ -37,6 +37,7 @@ export default defineConfig({
 					translations: { ru: 'Начало' },
 					items: [
 						{ slug: 'getting-started' },
+						{ slug: 'example' },
 						{ slug: 'install' },
 					],
 				},
