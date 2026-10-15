@@ -132,7 +132,9 @@ outry envs [--dir <DIR>]
 
 ## `outry secret`
 
-Store or remove a secret in the system keychain. `set` reads the value from stdin.
+Store or remove a secret in the system keychain. `set` reads the value from stdin (in a terminal: one
+line, not echoed). Without a keychain (WSL, headless Linux) the secret goes to
+`~/.config/outry/secrets.toml` — see [Secrets](/outry/guides/secrets/#without-a-keychain-wsl-and-headless-linux).
 
 ```sh
 outry secret set <NAME> [-e <ENV>] [--project <DIR>]

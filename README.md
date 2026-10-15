@@ -258,6 +258,8 @@ List secret names in `env.toml` (`secrets = ["token"]`) and `outry vars` and the
 ones that are missing.
 
 In the app, use **Add secret** at the bottom of the sidebar. In CI, set `OUTRY_TOKEN=...` instead.
+Where there is no keychain (WSL, headless Linux), `outry secret set` saves to
+`~/.config/outry/secrets.toml` (mode `600`, plain text, outside the repo).
 
 ## Running in CI
 

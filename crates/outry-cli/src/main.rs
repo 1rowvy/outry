@@ -1086,13 +1086,18 @@ async fn run_all(
     failed == 0
 }
 
-/// Хранилище паролей недоступно — секреты из приложения и `outry secret set` здесь не видны.
-/// Без пояснения это выглядит как необъяснимое «undefined variable», поэтому печатаем
-/// готовую команду под текущий shell.
+/// Системного хранилища паролей нет, и секретов нет в запасном файле: без пояснения это
+/// выглядит как необъяснимое «undefined variable», поэтому печатаем готовые команды.
 fn keyring_hint() {
-    let Some(err) = outry_core::secrets::unavailable() else {
+    let (Some(err), missed) = (
+        outry_core::secrets::unavailable(),
+        outry_core::secrets::missed(),
+    ) else {
         return;
     };
+    if missed.is_empty() {
+        return;
+    }
     let st = Style::stderr();
     eprintln!(
         "\n{} system keyring is unavailable ({err})",
@@ -1103,14 +1108,9 @@ fn keyring_hint() {
             "      WSL can't see secrets saved by the Windows app (Windows Credential Manager)"
         );
     }
-    let names = outry_core::secrets::missed();
-    if names.is_empty() {
-        eprintln!("      pass secrets as OUTRY_<NAME> environment variables instead");
-        return;
-    }
-    eprintln!("      pass them as environment variables instead:");
-    for name in names {
-        eprintln!("        {}", env_command(&name));
+    eprintln!("      save them for this machine (or set OUTRY_<NAME> instead):");
+    for (env, name) in missed {
+        eprintln!("        outry secret set {name} --env {env}");
     }
 }
 
@@ -1300,17 +1300,23 @@ fn secret(cmd: SecretCmd) -> anyhow::Result<ExitCode> {
             bail!("empty value");
         }
         store.set(&name, value).with_context(|| {
-            let wsl = if is_wsl() {
-                " (WSL usually has no Secret Service)"
-            } else {
-                ""
-            };
             format!(
-                "cannot save to the system keyring{wsl}; set an environment variable instead: {}",
+                "cannot save the secret; set an environment variable instead: {}",
                 env_command(&name)
             )
         })?;
-        eprintln!("saved {name} for {}/{env_name}", project.id());
+        match (
+            outry_core::secrets::unavailable(),
+            outry_core::secrets::FileStore::default_path(),
+        ) {
+            // Системного хранилища нет — записано в запасной файл (открытым текстом).
+            (Some(_), Some(path)) => eprintln!(
+                "saved {name} for {}/{env_name} to {} (no system keyring here)",
+                project.id(),
+                path.display()
+            ),
+            _ => eprintln!("saved {name} for {}/{env_name}", project.id()),
+        }
     } else if store.delete(&name)? {
         eprintln!("removed {name} for {}/{env_name}", project.id());
     } else {
