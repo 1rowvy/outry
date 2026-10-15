@@ -83,6 +83,17 @@ export async function run(): Promise<void> {
   const rendered = await until("rendered response", () => api.panel.rendered);
   assert.match(rendered.text, /201\s*Created/);
 
+  // ▷ в заголовке редактора: весь файл, по элементу на строку списка.
+  await vscode.commands.executeCommand("outry.sendFile", uri);
+  const file = await until("file run", () => {
+    const c = api.panel.current;
+    return c?.type === "file" && c.items.every((i) => i.result || i.error) ? c : null;
+  });
+  assert.deepEqual(
+    file.items.map((i) => [i.name, i.method, i.result?.passed]),
+    [["CreateOrder", "POST", true]],
+  );
+
   // Окружение из строки состояния.
   await api.server.selectEnv("staging");
   await until("env switch", () => api.server.state?.env === "staging");

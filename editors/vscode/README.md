@@ -19,6 +19,8 @@ CreateOrder: POST /orders {
 - **▶ Send** above every request (**▶ Run flow** above flows), or <kbd>Ctrl</kbd>+<kbd>Enter</kbd> on any of its lines.
   The response opens beside the file: body with highlighting and search, preview of images and HTML,
   headers, checks from `expect`, the trace of called requests (`Login()`), the request as it was sent.
+- **▷ in the editor title** sends every request and flow in the file in order and lists them in the response
+  tab with status and checks; click one to see its response.
 - **in…** — send in another environment once, without switching. `confirm: true` asks first.
 - **Copy as curl** — the request with variables, calls and cookies resolved.
 - **Environment** in the status bar; the choice is remembered per workspace.

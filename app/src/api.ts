@@ -20,6 +20,13 @@ export interface ProjectInfo {
 }
 
 /** Результат запуска *.outry: ответ запроса или итог сценария. */
+/** Запрос или сценарий *.outry: строка (с 1), имя, метод (`FLOW` у сценария) */
+export interface OutryItem {
+  line: number;
+  name: string | null;
+  method: string;
+}
+
 export interface OutryResult {
   name: string;
   entry: Entry | null;
@@ -156,6 +163,8 @@ export const api = {
   /** outry check для открытого *.outry (с текстом из редактора) */
   checkOutry: (path: string, content: string) => invoke<ParseError[]>("check_outry", { path, content }),
   outrySymbols: () => invoke<Symbols>("outry_symbols"),
+  /** Запросы и сценарии файла по порядку (текст — из редактора) */
+  outryItems: (path: string, content: string) => invoke<OutryItem[]>("outry_items", { path, content }),
   /** Запрос или сценарий на строке line (с 1) */
   runOutry: (id: number, env: string | null, path: string, content: string, line: number) =>
     invoke<OutryResult>("run_outry", { id, env, path, content, line }),

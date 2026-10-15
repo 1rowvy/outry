@@ -67,6 +67,12 @@
         "icon": "$(play)"
       },
       {
+        "command": "outry.sendFile",
+        "title": "Send All Requests in File",
+        "category": "Outry",
+        "icon": "$(run-all)"
+      },
+      {
         "command": "outry.sendIn",
         "title": "Send Request in Environment…",
         "category": "Outry"
@@ -114,6 +120,10 @@
           "when": "editorLangId == outry"
         },
         {
+          "command": "outry.sendFile",
+          "when": "editorLangId == outry"
+        },
+        {
           "command": "outry.sendIn",
           "when": "editorLangId == outry"
         },
@@ -124,8 +134,14 @@
       ],
       "editor/title/run": [
         {
+          "command": "outry.sendFile",
+          "when": "resourceLangId == outry",
+          "group": "navigation@1"
+        },
+        {
           "command": "outry.send",
-          "when": "resourceLangId == outry"
+          "when": "resourceLangId == outry",
+          "group": "navigation@2"
         }
       ],
       "editor/context": [
@@ -133,6 +149,11 @@
           "command": "outry.send",
           "when": "editorLangId == outry",
           "group": "outry@1"
+        },
+        {
+          "command": "outry.sendFile",
+          "when": "editorLangId == outry",
+          "group": "outry@2"
         },
         {
           "command": "outry.sendIn",
@@ -158,6 +179,16 @@
         }
       ],
       "view/item/context": [
+        {
+          "command": "outry.sendFile",
+          "when": "view == outry.requests && viewItem == file",
+          "group": "inline"
+        },
+        {
+          "command": "outry.sendFile",
+          "when": "view == outry.requests && viewItem == file",
+          "group": "1_run@1"
+        },
         {
           "command": "outry.send",
           "when": "view == outry.requests && viewItem =~ /^(request|flow)$/",

@@ -39,6 +39,7 @@ The app remembers the last project and reopens it on start.
 | Shortcut | Action |
 |----------|--------|
 | <kbd>Ctrl</kbd>/<kbd>⌘</kbd> + <kbd>Enter</kbd> | Send the request; in `.outry` — run the request or flow at the cursor |
+| <kbd>Ctrl</kbd>/<kbd>⌘</kbd> + <kbd>Shift</kbd> + <kbd>Enter</kbd> | In `.outry` — run every request and flow in the file |
 | <kbd>Ctrl</kbd>/<kbd>⌘</kbd> + <kbd>S</kbd> | Save the file |
 | <kbd>Ctrl</kbd> + <kbd>Space</kbd> | Show suggestions |
 | <kbd>Ctrl</kbd>/<kbd>⌘</kbd> + <kbd>F</kbd> | Search in the file |
@@ -47,8 +48,10 @@ The editor's current text is sent, even if it is not saved yet — handy for qui
 
 ## Running .outry
 
-A `.outry` file may hold several requests and flows. **Run** (or <kbd>Ctrl</kbd> + <kbd>Enter</kbd>) runs
-the one at the cursor; the ▶ next to each request and `flow` line runs that one.
+A `.outry` file may hold several requests and flows. **Run** (or <kbd>Ctrl</kbd> + <kbd>Shift</kbd> +
+<kbd>Enter</kbd>) runs all of them in order, as `outry run file.outry` does: the response panel lists each
+one with its status and checks, and a click on a row shows that response. <kbd>Ctrl</kbd> + <kbd>Enter</kbd>
+runs the one at the cursor; the ▶ next to each request and `flow` line runs that one.
 
 Requests called from the one you run (`Login()` in a header) are sent once and then reused, as in
 [`outry run`](/outry/reference/outry-format/#caching); cookies are kept the same way. This *run* lasts

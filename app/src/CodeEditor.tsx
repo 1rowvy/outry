@@ -226,8 +226,8 @@ export function CodeEditor({ docKey, value, onChange, language, errors, vars, sy
       // Панель (overflow: hidden) обрезает подсказки — выносим их в body.
       tooltips({ parent: document.body }),
       lintGutter(),
-      // Ctrl+Enter и Ctrl+S ловит App на window; здесь только гасим штатные действия CodeMirror.
-      Prec.highest(keymap.of([{ key: "Mod-Enter", run: () => true }, { key: "Mod-s", run: () => true }])),
+      // Ctrl+(Shift+)Enter и Ctrl+S ловит App на window; здесь только гасим штатные действия CodeMirror.
+      Prec.highest(keymap.of([{ key: "Mod-Enter", run: () => true }, { key: "Shift-Mod-Enter", run: () => true }, { key: "Mod-s", run: () => true }])),
       keymap.of([...closeBracketsKeymap, ...defaultKeymap, ...searchKeymap, ...historyKeymap, ...completionKeymap, indentWithTab]),
       syntaxHighlighting(highlight),
       theme,

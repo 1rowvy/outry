@@ -465,3 +465,19 @@ label.check small { display: block; color: var(--faint); font-size: 11.5px; }
 .t-cached { color: var(--muted); background: var(--hover); }
 .flow-error { margin-bottom: 10px; font-family: var(--mono); color: var(--bad); white-space: pre-wrap; }
 .flow-h { margin: 16px 0 6px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--faint); }
+
+/* Прогон всего файла: список сверху, выбранный ответ под ним */
+.file-run .run-list {
+  list-style: none; margin: 0; padding: 4px 6px; flex: none; max-height: 38%; overflow: auto;
+  border-bottom: 1px solid var(--line);
+}
+.run-list button {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  border: 0; background: none; padding: 4px 8px; border-radius: 6px; text-align: left; font-weight: 400;
+}
+.run-list button.active { background: var(--hover); }
+.run-list button:disabled { opacity: 0.6; cursor: default; }
+.r-icon { flex: none; display: inline-flex; justify-content: center; width: 14px; font: 700 12px var(--mono); }
+.r-name { flex: 1; font: 12px var(--mono); }
+.metric.r-failed { color: var(--bad); }
+.run-detail { display: flex; flex-direction: column; flex: 1; min-height: 0; }

@@ -52,6 +52,9 @@ Besides everything above, the extension adds:
   the same view as the desktop app: the body with highlighting and search, image and HTML preview, headers,
   checks from `expect`, the trace of called requests, the request as it was sent, and saving the body to a file.
   A flow shows its checks and trace.
+- **Run the whole file** — ▷ in the editor title (or **Send All Requests in File** in the tree's file menu)
+  sends every request and flow in order; the response tab lists them with status and checks, a click shows
+  that response, a double click jumps to the request.
 - **in…** — send once in another environment without switching to it; `confirm: true` asks first.
 - **Copy as curl** — the request with variables, calls (`Login().body.token`) and the run's cookies resolved.
   The calls are sent, the request itself is not.

@@ -3,7 +3,7 @@
 // Правил формата здесь нет: всё считает `outry` (crates/outry-cli/src/lsp.rs).
 import * as path from "node:path";
 import * as vscode from "vscode";
-import { ResponsePanel } from "./panel";
+import { type FileItem, ResponsePanel } from "./panel";
 import { Server, message } from "./server";
 import { RequestsView, VariablesView, type Node } from "./views";
 
@@ -97,6 +97,69 @@ export async function activate(ctx: vscode.ExtensionContext): Promise<Api> {
     );
   };
 
+  /** Аргумент кнопки в заголовке редактора — `Uri`, дерева — узел файла, палитры — активный редактор. */
+  const fileTarget = (arg?: unknown): string | null => {
+    if (arg instanceof vscode.Uri) {
+      return arg.toString();
+    }
+    const node = arg as Node | undefined;
+    if (node?.kind === "file") {
+      return node.uri;
+    }
+    const editor = vscode.window.activeTextEditor;
+    if (editor?.document.languageId === "outry") {
+      return editor.document.uri.toString();
+    }
+    void vscode.window.showInformationMessage("Outry: open a .outry file.");
+    return null;
+  };
+
+  /** Все запросы и сценарии файла по порядку (как `outry run file.outry`), в одной вкладке списком. */
+  const sendFile = async (uri: string) => {
+    const where = srv.state?.env ?? "";
+    const fsPath = vscode.Uri.parse(uri).fsPath;
+    const title = `${path.basename(fsPath, ".outry")} · ${where}`;
+    let items: FileItem[] = (srv.state?.items ?? [])
+      .filter((i) => sameFile(i.uri, uri))
+      .sort((a, b) => a.line - b.line)
+      .map((i) => ({ name: i.name ?? `${i.method} ${i.target}`, method: i.flow ? "FLOW" : i.method, line: i.line }));
+    if (items.length === 0) {
+      void vscode.window.showInformationMessage("Outry: no requests or flows in this file.");
+      return;
+    }
+    const seq = panel.nextSeq();
+    const patch = (n: number, p: Partial<FileItem>) => {
+      items = items.map((it, k) => (k === n ? { ...it, ...p } : it));
+      panel.file(seq, fsPath, title, items);
+    };
+    await vscode.window.withProgress(
+      { location: vscode.ProgressLocation.Notification, title: `Outry: ${title}`, cancellable: true },
+      async (progress, token) => {
+        for (let n = 0; n < items.length; n++) {
+          if (token.isCancellationRequested) {
+            for (let k = n; k < items.length; k++) {
+              patch(k, { skipped: true });
+            }
+            break;
+          }
+          progress.report({ message: `${items[n].name} (${n + 1}/${items.length})`, increment: 100 / items.length });
+          patch(n, { running: true });
+          try {
+            const result = await srv.run(uri, items[n].line);
+            patch(n, { running: false, name: result.name, result });
+          } catch (e) {
+            patch(n, { running: false, error: message(e) });
+          }
+        }
+      },
+    );
+  };
+
+  panel.onReveal = (file, line) => {
+    const pos = new vscode.Position(line - 1, 0);
+    void vscode.window.showTextDocument(vscode.Uri.file(file), { selection: new vscode.Range(pos, pos) });
+  };
+
   const requests = new RequestsView(srv);
   const variables = new VariablesView(srv);
   ctx.subscriptions.push(
@@ -111,6 +174,12 @@ export async function activate(ctx: vscode.ExtensionContext): Promise<Api> {
       const t = target(arg, line);
       if (t) {
         await send(t);
+      }
+    }),
+    vscode.commands.registerCommand("outry.sendFile", async (arg?: unknown) => {
+      const uri = fileTarget(arg);
+      if (uri) {
+        await sendFile(uri);
       }
     }),
     vscode.commands.registerCommand("outry.sendIn", async (arg?: unknown, line?: unknown) => {

@@ -38,6 +38,7 @@ import { Aside } from '@astrojs/starlight/components';
 | Клавиши | Действие |
 |---------|----------|
 | <kbd>Ctrl</kbd>/<kbd>⌘</kbd> + <kbd>Enter</kbd> | Отправить запрос; в `.outry` — запустить запрос или сценарий под курсором |
+| <kbd>Ctrl</kbd>/<kbd>⌘</kbd> + <kbd>Shift</kbd> + <kbd>Enter</kbd> | В `.outry` — запустить все запросы и сценарии файла |
 | <kbd>Ctrl</kbd>/<kbd>⌘</kbd> + <kbd>S</kbd> | Сохранить файл |
 | <kbd>Ctrl</kbd> + <kbd>Space</kbd> | Показать подсказки |
 | <kbd>Ctrl</kbd>/<kbd>⌘</kbd> + <kbd>F</kbd> | Поиск по файлу |
@@ -46,8 +47,10 @@ import { Aside } from '@astrojs/starlight/components';
 
 ## Запуск .outry
 
-В файле `.outry` может быть несколько запросов и сценариев. **Run** (или <kbd>Ctrl</kbd> + <kbd>Enter</kbd>)
-запускает тот, на котором стоит курсор; ▶ рядом со строкой запроса или `flow` запускает именно его.
+В файле `.outry` может быть несколько запросов и сценариев. **Run** (или <kbd>Ctrl</kbd> + <kbd>Shift</kbd> +
+<kbd>Enter</kbd>) запускает их все по порядку, как `outry run file.outry`: в панели ответа — список со статусом
+и проверками каждого, клик по строке показывает его ответ. <kbd>Ctrl</kbd> + <kbd>Enter</kbd> запускает тот,
+на котором стоит курсор; ▶ рядом со строкой запроса или `flow` запускает именно его.
 
 Запросы, которые вызывает запущенный (`Login()` в заголовке), отправляются один раз и дальше
 переиспользуются, как в [`outry run`](/outry/ru/reference/outry-format/#кеширование); cookies хранятся так же.

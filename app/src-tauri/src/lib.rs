@@ -9,7 +9,7 @@ use base64::Engine;
 use notify::{RecursiveMode, Watcher};
 use outry_core::history::{Entry, History, history_path};
 use outry_core::lang::exec::{FlowOutcome, Outcome, Run};
-use outry_core::lang::{Workspace, ast::Item};
+use outry_core::lang::{Workspace, ast::Item, ide};
 use outry_core::runner::Options;
 use outry_core::vars::{VarInfo, mask};
 use outry_core::{Project, Runner, discover, dynamic};
@@ -483,6 +483,49 @@ async fn outry_symbols(state: State<'_, AppState>) -> CmdResult<Symbols> {
 }
 
 #[derive(Serialize)]
+struct OutryItem {
+    /// Строка (с 1), где начинается элемент, — для `run_outry`
+    line: usize,
+    name: Option<String>,
+    /// Метод запроса, у сценария — `FLOW`
+    method: String,
+}
+
+/// Запросы и сценарии открытого `*.outry` по порядку — для запуска всего файла.
+#[tauri::command]
+async fn outry_items(
+    state: State<'_, AppState>,
+    path: String,
+    content: String,
+) -> CmdResult<Vec<OutryItem>> {
+    let root = {
+        let guard = state.session.lock().await;
+        let s = guard.as_ref().ok_or("no project open")?;
+        inside(&s.project.root, &path)?;
+        s.project.root.clone()
+    };
+    let ws = workspace(&root, &path, content)?;
+    let full = root.join(&path);
+    if let Some(d) = ws.errors.iter().find(|d| d.path == full) {
+        return Err(format!("{}:{}: {}", d.line, d.col, d.msg));
+    }
+    let file = ws
+        .file_index(Path::new(&path))
+        .ok_or("file is not in the project")?;
+    Ok(ide::runnables(&ws, file)
+        .into_iter()
+        .map(|(r, name, line, _)| OutryItem {
+            line,
+            name: name.map(str::to_string),
+            method: match ws.item(r) {
+                Item::Request(req) => req.method.clone(),
+                _ => "FLOW".into(),
+            },
+        })
+        .collect())
+}
+
+#[derive(Serialize)]
 struct OutryResult {
     /// Имя запущенного запроса или сценария
     name: String,
@@ -936,6 +979,7 @@ pub fn run() {
             check_outry,
             outry_symbols,
             run_outry,
+            outry_items,
             reset_run,
             check_config,
             rename_path,

@@ -15,6 +15,7 @@ import {
 } from "./api";
 import { CodeEditor } from "./CodeEditor";
 import { ContextMenu, type MenuItem } from "./ContextMenu";
+import { FileRunView, type FileRunItem } from "./FileRunView";
 import { FileTree, type TreeTarget } from "./FileTree";
 import { FlowView } from "./FlowView";
 import { HistoryList } from "./HistoryList";
@@ -78,6 +79,8 @@ interface Run {
   flow?: FlowOutcome;
   /** *.outry: что запускали */
   name?: string;
+  /** *.outry: прогон всего файла (кнопка Run) */
+  file?: FileRunItem[];
   error?: string;
   /** id для отмены */
   pending?: number;
@@ -324,7 +327,7 @@ export default function App() {
     if (!selected || selected === CONFIG || runs[selected]?.pending) return;
     const path = selected;
     const id = ++nextId.current;
-    setRuns((r) => ({ ...r, [path]: { ...r[path], pending: id, error: undefined } }));
+    setRuns((r) => ({ ...r, [path]: { ...r[path], pending: id, error: undefined, file: undefined } }));
     setOpened(null);
     setView("response");
     try {
@@ -343,6 +346,44 @@ export default function App() {
     }
   }, [selected, runs, env, content, cursor]);
 
+  /** Run в *.outry: все запросы и сценарии файла по порядку, как `outry run file.outry`. */
+  const runFile = useCallback(async () => {
+    if (!selected || !isOutry(selected) || runs[selected]?.pending) return;
+    const path = selected;
+    const text = content;
+    setOpened(null);
+    setView("response");
+    let items: FileRunItem[];
+    try {
+      items = (await api.outryItems(path, text)).map((i) => ({ name: i.name ?? i.method, method: i.method, line: i.line }));
+    } catch (e) {
+      setRuns((r) => ({ ...r, [path]: { error: String(e) } }));
+      return;
+    }
+    const show = (pending?: number) => setRuns((r) => ({ ...r, [path]: { file: items, pending } }));
+    const patch = (n: number, p: Partial<FileRunItem>) => {
+      items = items.map((it, k) => (k === n ? { ...it, ...p } : it));
+    };
+    for (let n = 0; n < items.length; n++) {
+      const id = ++nextId.current;
+      patch(n, { running: true });
+      show(id);
+      try {
+        const res = await api.runOutry(id, env, path, text, items[n].line);
+        patch(n, { running: false, name: res.name, entry: res.entry ?? undefined, flow: res.flow ?? undefined });
+      } catch (e) {
+        const msg = String(e);
+        if (msg === "cancelled") {
+          for (let k = n; k < items.length; k++) patch(k, { running: false, skipped: true });
+          break;
+        }
+        patch(n, { running: false, error: msg });
+      }
+    }
+    show();
+    bump();
+  }, [selected, runs, env, content]);
+
   const cancel = () => {
     if (run?.pending) api.cancelRequest(run.pending);
   };
@@ -350,7 +391,10 @@ export default function App() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const mod = e.ctrlKey || e.metaKey;
-      if (mod && e.key === "Enter") {
+      if (mod && e.shiftKey && e.key === "Enter") {
+        e.preventDefault();
+        runFile();
+      } else if (mod && e.key === "Enter") {
         e.preventDefault();
         send();
       } else if (mod && e.key.toLowerCase() === "s") {
@@ -360,7 +404,7 @@ export default function App() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [send, save]);
+  }, [send, runFile, save]);
 
   const pickFolder = async () => {
     const dir = await open({ directory: true, title: "Project folder (with api/env.toml)" });
@@ -700,9 +744,9 @@ export default function App() {
                           ) : (
                             <button
                               className="primary"
-                              onClick={() => send()}
+                              onClick={() => (outry ? runFile() : send())}
                               disabled={!!parseError}
-                              title={outry ? "Run the request or flow at the cursor (Ctrl+Enter)" : "Ctrl+Enter"}
+                              title={outry ? "Run every request and flow in the file (Ctrl+Shift+Enter); the one at the cursor — Ctrl+Enter" : "Ctrl+Enter"}
                             >
                               {outry ? "Run" : "Send"}
                             </button>
@@ -812,7 +856,9 @@ export default function App() {
                 ) : (
                   <>
                     {run?.error && !opened && <div className="send-error">{run.error}</div>}
-                    {run?.flow && !opened && !run.error ? (
+                    {run?.file && !opened && !run.error ? (
+                      <FileRunView title={name} items={run.file} host={responseHost} />
+                    ) : run?.flow && !opened && !run.error ? (
                       <FlowView name={run.name ?? "flow"} flow={run.flow} />
                     ) : shown && (opened || !run?.error) ? (
                       <ResponseView key={shown.id} entry={shown} host={responseHost} />

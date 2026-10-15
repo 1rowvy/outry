@@ -3,13 +3,34 @@ import { randomBytes } from "node:crypto";
 import * as vscode from "vscode";
 import type { RunResult } from "./protocol";
 
+/** Элемент прогона всего файла: пока идёт — `running`, потом результат или ошибка. */
+export interface FileItem {
+  name: string;
+  /** метод запроса или `FLOW` */
+  method: string;
+  line: number;
+  running?: boolean;
+  skipped?: boolean;
+  result?: RunResult;
+  error?: string;
+}
+
 /** Сообщения в webview — см. webview/main.tsx. */
 export type ToWebview =
   | { type: "loading"; title: string }
   | { type: "error"; title: string; message: string }
-  | { type: "result"; seq: number; file: string; result: RunResult };
+  | { type: "result"; seq: number; file: string; result: RunResult }
+  /** `seq` одинаковый у всех обновлений одного прогона */
+  | { type: "file"; seq: number; file: string; title: string; items: FileItem[] };
 
-type FromWebview = { type: "ready" } | { type: "save"; name: string } | { type: "shown"; seq: number; text: string };
+/** Номер ответа в прогоне файла (для картинок и сохранения тела): `seq * FILE_IDS + индекс`. */
+export const FILE_IDS = 10000;
+
+type FromWebview =
+  | { type: "ready" }
+  | { type: "save"; name: string; id: number }
+  | { type: "shown"; seq: number; text: string }
+  | { type: "reveal"; line: number };
 
 export class ResponsePanel implements vscode.Disposable {
   private panel: vscode.WebviewPanel | null = null;
@@ -19,6 +40,9 @@ export class ResponsePanel implements vscode.Disposable {
   private seq = 0;
 
   constructor(private readonly ctx: vscode.ExtensionContext) {}
+
+  /** Двойной клик по элементу прогона файла: перейти к нему в редакторе. */
+  onReveal: ((file: string, line: number) => void) | null = null;
 
   /** Строка статуса отрисованного ответа — из webview (для тестов). */
   rendered: { seq: number; text: string } | null = null;
@@ -38,6 +62,15 @@ export class ResponsePanel implements vscode.Disposable {
 
   result(result: RunResult, file: string): void {
     this.post({ type: "result", seq: ++this.seq, file, result }, `${result.name} · ${result.env}`);
+  }
+
+  /** Начать прогон файла — номер, который передавать в `file` при обновлениях. */
+  nextSeq(): number {
+    return ++this.seq;
+  }
+
+  file(seq: number, file: string, title: string, items: FileItem[]): void {
+    this.post({ type: "file", seq, file, title, items }, title);
   }
 
   private post(msg: ToWebview, title: string): void {
@@ -86,8 +119,18 @@ export class ResponsePanel implements vscode.Disposable {
       this.rendered = { seq: m.seq, text: m.text };
       return;
     }
-    if (m.type === "save" && this.last?.type === "result") {
-      const { result } = this.last;
+    if (m.type === "reveal" && this.last?.type === "file") {
+      this.onReveal?.(this.last.file, m.line);
+      return;
+    }
+    const last = this.last;
+    const result =
+      last?.type === "result"
+        ? last.result
+        : last?.type === "file" && m.type === "save"
+          ? last.items[m.id % FILE_IDS]?.result
+          : undefined;
+    if (m.type === "save" && result) {
       const body = (result.outcome as { response?: { body: string } }).response?.body ?? "";
       const folder = vscode.workspace.workspaceFolders?.[0]?.uri;
       const dest = await vscode.window.showSaveDialog({
