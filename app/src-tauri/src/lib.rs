@@ -262,8 +262,7 @@ async fn refresh_project(state: State<'_, AppState>) -> CmdResult<ProjectInfo> {
     let mut guard = state.session.lock().await;
     let s = guard.as_mut().ok_or("no project open")?;
     let project = Project::load(&s.project.root).map_err(err)?;
-    let c = (&project.config, &s.project.config);
-    if c.0.env != c.1.env || c.0.vars != c.1.vars || c.0.secrets != c.1.secrets {
+    if project.config != s.project.config {
         s.runners.clear();
         s.lang = None;
     }

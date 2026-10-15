@@ -693,3 +693,29 @@ fn project_created_after_start() {
     assert_eq!(state["envs"], json!(["dev"]));
     assert_eq!(state["items"][0]["path"], "v1/health.outry");
 }
+
+/// Правка `env.toml` после первого запуска: следующий запуск видит новые значения.
+#[test]
+fn env_toml_change_reaches_runs() {
+    let dir = TempDir::new("envchange");
+    let env = dir.write("api/env.toml", "[env.dev]\nbase = \"http://one\"\n");
+    let req = dir.write("api/health.outry", "GET /health {}\n");
+    let mut c = Client::start_with(&dir.0, json!({ "outryUi": true }));
+    let uri = c.open(&req, "GET /health {}\n");
+    let curl = |c: &mut Client| {
+        let r = c.request(
+            "workspace/executeCommand",
+            json!({ "command": CURL_COMMAND, "arguments": [uri, 1] }),
+        );
+        r.as_str().unwrap().to_string()
+    };
+    assert!(curl(&mut c).contains("http://one/health"));
+
+    std::fs::write(&env, "[env.dev]\nbase = \"http://two\"\n").unwrap();
+    c.notify(
+        "workspace/didChangeWatchedFiles",
+        json!({ "changes": [{ "uri": Url::from_file_path(&env).unwrap(), "type": 2 }] }),
+    );
+    let after = curl(&mut c);
+    assert!(after.contains("http://two/health"), "{after}");
+}

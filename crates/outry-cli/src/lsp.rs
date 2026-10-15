@@ -1705,7 +1705,15 @@ fn session<'s>(
     waiting: &Waiting,
     ids: &Arc<AtomicU64>,
 ) -> anyhow::Result<&'s mut (Runner, Run)> {
-    let s = match sessions.entry((job.project.root.clone(), job.env.clone())) {
+    let key = (job.project.root.clone(), job.env.clone());
+    // `env.toml` изменился — старый раннер держит прежние переменные, а кеш вызовов посчитан с ними.
+    if sessions
+        .get(&key)
+        .is_some_and(|(r, _)| r.project.config != job.project.config)
+    {
+        sessions.remove(&key);
+    }
+    let s = match sessions.entry(key) {
         std::collections::hash_map::Entry::Occupied(e) => e.into_mut(),
         std::collections::hash_map::Entry::Vacant(e) => {
             let opts = Options {

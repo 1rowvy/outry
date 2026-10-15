@@ -309,6 +309,12 @@ export default function App() {
     try {
       await api.writeRequest(selected, content);
       setSavedContent(content);
+      // Не ждём watcher (на Windows событие может прийти поздно): переменные нужны сразу.
+      if (selected === CONFIG) {
+        const info = await api.refreshProject();
+        setProject(info);
+        setEnv((cur) => (cur && info.envs.includes(cur) ? cur : info.default_env));
+      }
     } catch (e) {
       setError(String(e));
     }

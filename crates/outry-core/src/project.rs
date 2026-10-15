@@ -26,7 +26,7 @@ use crate::error::{Error, Result};
 
 pub const CONFIG_FILE: &str = "env.toml";
 
-#[derive(Debug, Default, Clone, Deserialize)]
+#[derive(Debug, Default, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
     pub project: Option<String>,
@@ -43,7 +43,7 @@ pub struct Config {
     pub import: ImportConfig,
 }
 
-#[derive(Debug, Default, Clone, Deserialize)]
+#[derive(Debug, Default, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ImportConfig {
     /// Middleware → что нужно запросу к роуту за ним. Ключ — имя как в коде (`AuthRequired`
@@ -52,7 +52,7 @@ pub struct ImportConfig {
     pub middleware: BTreeMap<String, MiddlewareRule>,
 }
 
-#[derive(Debug, Default, Clone, Deserialize)]
+#[derive(Debug, Default, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct MiddlewareRule {
     /// Заголовок → значение: строка `.outry`, `${…}` в ней — выражение (`${Login().body.token}`)
