@@ -331,6 +331,55 @@ func main() {
 }
 
 #[test]
+fn gin_mount_args_by_position() {
+    let dir = TempDir::new("gin-mount-args");
+    dir.write(
+        "router/router.go",
+        r#"package router
+
+import "github.com/gin-gonic/gin"
+
+func NewRouter(h *Handlers) *gin.Engine {
+	r := gin.New()
+	api := r.Group("/api")
+	{
+		v1 := api.Group("/v1")
+		public := v1.Group("")
+		protected := v1.Group("", middleware.RequireAuth(h.AuthHandler))
+
+		RegisterUserRoutes(public, protected, h.UserHandler)
+	}
+	return r
+}
+"#,
+    );
+    dir.write(
+        "router/users.go",
+        r#"package router
+
+import "github.com/gin-gonic/gin"
+
+func RegisterUserRoutes(public, protected *gin.RouterGroup, h *UserHandler) {
+	usersPublic := public.Group("/users")
+	{
+		usersPublic.GET("/:username", h.GetUser)
+	}
+	usersProtected := protected.Group("/users")
+	{
+		usersProtected.GET("/me", h.GetMe)
+	}
+}
+"#,
+    );
+    let s = scan(&dir);
+    assert!(middleware(&s, "GET", "/api/v1/users/{{username}}").is_empty());
+    assert_eq!(
+        middleware(&s, "GET", "/api/v1/users/me"),
+        ["middleware.RequireAuth(h.AuthHandler)"]
+    );
+}
+
+#[test]
 fn chi_middleware() {
     let dir = TempDir::new("chi-mw");
     dir.write(

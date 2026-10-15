@@ -235,6 +235,8 @@ struct Func {
     end: usize,
     name: String,
     package: String,
+    /// Имена параметров по порядку (`_` — безымянный).
+    params: Vec<String>,
 }
 
 struct Group {
@@ -260,6 +262,8 @@ struct Mount {
     path: String,
     func: String,
     pkg: Option<String>,
+    /// Позиция `@receiver` среди аргументов — какому параметру функции он передан.
+    arg: Option<usize>,
 }
 
 struct RawRoute {
@@ -304,6 +308,7 @@ impl Index {
                         end: node.end_byte(),
                         name: text(name, &f.src).to_string(),
                         package: f.package.clone(),
+                        params: params(node, &f.src),
                     });
                 }
             }
@@ -487,12 +492,20 @@ impl Index {
             .get("mount.pkg")
             .filter(|n| n.kind() == "identifier")
             .map(|&n| text(n, &ctx.file.src).to_string());
+        let recv = cap.get("receiver").copied();
+        let arg = recv.and_then(|n| {
+            let list = n.parent().filter(|p| p.kind() == "argument_list")?;
+            children(list)
+                .filter(|c| c.kind() != "comment")
+                .position(|c| c.id() == n.id())
+        });
         self.mounts.push(Mount {
             site,
-            recv: receiver(cap.get("receiver").copied(), &ctx.file.src),
+            recv: receiver(recv, &ctx.file.src),
             path,
             func: func.to_string(),
             pkg,
+            arg,
         });
     }
 
@@ -544,7 +557,7 @@ type Base = (String, Vec<String>);
 struct Resolver<'a> {
     ix: &'a Index,
     /// Основания функции; `None` — ещё считаются (рекурсия).
-    memo: HashMap<usize, Option<Vec<Base>>>,
+    memo: HashMap<(usize, Option<usize>), Option<Vec<Base>>>,
 }
 
 const MAX_DEPTH: usize = 32;
@@ -585,7 +598,15 @@ impl Resolver<'_> {
             self.full(g, depth + 1)
         } else {
             match site.func {
-                Some(f) => self.func_bases(f, depth + 1),
+                Some(f) => {
+                    // Получатель — параметр функции: основания только от аргумента на его месте
+                    // (`Register(public, protected)`), а не от всех аргументов вызова.
+                    let param = recv
+                        .var
+                        .as_ref()
+                        .and_then(|v| self.ix.funcs[f].params.iter().position(|p| p == v));
+                    self.func_bases(f, param, depth + 1)
+                }
                 None => vec![Base::default()],
             }
         };
@@ -646,17 +667,22 @@ impl Resolver<'_> {
             .map(|(i, _)| i)
     }
 
-    fn func_bases(&mut self, f: usize, depth: usize) -> Vec<Base> {
-        match self.memo.get(&f) {
+    /// Основания функции `f` по её монтированиям; `param` — роуты на этом параметре.
+    fn func_bases(&mut self, f: usize, param: Option<usize>, depth: usize) -> Vec<Base> {
+        match self.memo.get(&(f, param)) {
             Some(Some(v)) => return v.clone(),
             Some(None) => return vec![Base::default()],
             None => {}
         }
-        self.memo.insert(f, None);
+        self.memo.insert((f, param), None);
         let func = &self.ix.funcs[f];
         let mut out = Vec::new();
         for (mi, m) in self.ix.mounts.iter().enumerate() {
-            if m.func != func.name || m.site.func == Some(f) || !self.targets(mi).contains(&f) {
+            if m.func != func.name
+                || m.site.func == Some(f)
+                || (param.is_some() && m.arg.is_some() && m.arg != param)
+                || !self.targets(mi).contains(&f)
+            {
                 continue;
             }
             let bases: Vec<Base> = self
@@ -674,7 +700,7 @@ impl Resolver<'_> {
         if out.is_empty() {
             out.push(Base::default());
         }
-        self.memo.insert(f, Some(out.clone()));
+        self.memo.insert((f, param), Some(out.clone()));
         out
     }
 
@@ -696,6 +722,26 @@ impl Resolver<'_> {
         }
         by_name
     }
+}
+
+/// Имена параметров функции или метода по порядку: `func F(a, b *gin.RouterGroup, _ int)`.
+fn params(func: Node, src: &str) -> Vec<String> {
+    let Some(list) = func.child_by_field_name("parameters") else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for decl in children(list).filter(|c| c.kind() != "comment") {
+        let mut cursor = decl.walk();
+        let names: Vec<String> = decl
+            .children_by_field_name("name", &mut cursor)
+            .map(|n| text(n, src).to_string())
+            .collect();
+        if names.is_empty() {
+            out.push("_".to_string());
+        }
+        out.extend(names);
+    }
+    out
 }
 
 fn receiver(node: Option<Node>, src: &str) -> Receiver {
