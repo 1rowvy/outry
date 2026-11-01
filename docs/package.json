@@ -10,12 +10,12 @@
     "astro": "astro"
   },
   "dependencies": {
-    "@astrojs/starlight": "^0.42.5",
-    "astro": "^7.2.10",
+    "@astrojs/starlight": "^0.42.7",
+    "astro": "^7.4.4",
     "sharp": "^0.35.3"
   },
   "devDependencies": {
-    "starlight-links-validator": "^0.26.0"
+    "starlight-links-validator": "^0.27.0"
   },
   "overrides": {
     "postcss-selector-parser": "^7.1.6"
