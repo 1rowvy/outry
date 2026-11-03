@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Question or idea
+    url: https://github.com/1rowvy/outry/discussions
+    about: Ask how to do something or share an idea in Discussions.
+  - name: Documentation
+    url: https://1rowvy.github.io/outry/
+    about: Installation, the .outry format, CLI reference and guides.
+  - name: Security vulnerability
+    url: https://github.com/1rowvy/outry/security/advisories/new
+    about: Report it privately, not in a public issue.

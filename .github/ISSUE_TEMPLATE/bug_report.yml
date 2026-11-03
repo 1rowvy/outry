@@ -1,0 +1,44 @@
+name: Bug report
+description: Something doesn't work as documented.
+labels: [bug]
+body:
+  - type: dropdown
+    id: component
+    attributes:
+      label: Where
+      options: [CLI, Desktop app, VS Code extension, LSP / other editor, Go import, Docs]
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: "`outry --version`, or the version in the app's About / the extension page."
+      placeholder: "0.11.1"
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: OS
+      placeholder: "Ubuntu 24.04, macOS 15, Windows 11…"
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected and what you got instead.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Request file / steps to reproduce
+      description: A minimal `.outry` file or command. Remove tokens and other secrets.
+      render: text
+  - type: textarea
+    id: logs
+    attributes:
+      label: Output or error
+      render: text
