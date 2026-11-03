@@ -18,8 +18,24 @@
 //!   middleware переходят в смонтированные функции. На каждый аргумент `(_)* @middleware`
 //!   tree-sitter даёт отдельное совпадение — они сливаются по месту вызова.
 //!
+//! - Совпадения с одним `@route` (по началу узла) сливаются в один роут. Поэтому части роута
+//!   можно искать отдельными шаблонами: звенья цепочки `ws.GET("/x").Doc("…").To(h)` начинаются
+//!   там же, где `ws.GET`, а поля литерала `{Method: …, Path: …}` — в любом порядке.
+//!   Роут получается, только если хоть одно совпадение дало `@path` (или `@include`).
+//! - Типы из цепочки роута (go-restful): `@body` и `@response` — значение типа (`User{}`),
+//!   `@query` и `@header` (сколько угодно) — имя параметра (строка или цепочка вызовов, тогда —
+//!   первый аргумент самого внутреннего вызова). Перекрывают то, что найдено в обработчике.
+//! - Контроллер вместо обработчика — роутов из одного вызова несколько. `@controller` — значение
+//!   (`&UserController{}`, `new(T)`, переменная): с `@mapping` (`"get,post:Create;put:Update"`,
+//!   `*` — любой метод) — по строке, без него — методы типа `Get`, `Post`, … (beego).
+//!   `@include` (сколько угодно) — методы типа с комментарием `// @router /path [get,post]`.
+//!   `@resource` — REST-ресурс buffalo: `List`, `Show`, `New`, `Create`, `Edit`, `Update`,
+//!   `Destroy`, какие объявлены у типа; параметр — `{user_id}` из последнего сегмента пути.
+//! - `@skip` + `@middleware` + `@skip.handler` (сколько угодно) — middleware не действует на
+//!   роуты с этими обработчиками (`app.Middleware.Skip(auth, Home, ur.List)`).
+//!
 //! Захваты, начинающиеся с `_`, — служебные (для предикатов). Строка `; outry: import <путь>`
-//! ограничивает запрос файлами, импортирующими пакет с таким префиксом.
+//! ограничивает запрос файлами, импортирующими пакет с таким префиксом (строк может быть несколько).
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -29,7 +45,7 @@ use tree_sitter::{Language, Node, Parser, Query, QueryCursor, Tree};
 
 mod describe;
 
-use super::{Route, Scan};
+use super::{Route, RouteInfo, Scan};
 use crate::error::{Error, Result};
 
 /// Встроенные роутеры: имя → запрос.
@@ -37,7 +53,14 @@ pub const BUILTIN: &[(&str, &str)] = &[
     ("chi", include_str!("../../queries/chi.scm")),
     ("gin", include_str!("../../queries/gin.scm")),
     ("net/http", include_str!("../../queries/nethttp.scm")),
+    ("go-zero", include_str!("../../queries/gozero.scm")),
+    ("go-restful", include_str!("../../queries/restful.scm")),
+    ("beego", include_str!("../../queries/beego.scm")),
+    ("buffalo", include_str!("../../queries/buffalo.scm")),
 ];
+
+/// Захваты, которых в одном совпадении (и роуте) может быть несколько.
+const MULTI: &[&str] = &["middleware", "query", "header", "include", "skip.handler"];
 
 const CAPTURES: &[&str] = &[
     "route",
@@ -55,6 +78,27 @@ const CAPTURES: &[&str] = &[
     "mount.path",
     "middleware",
     "use",
+    "body",
+    "response",
+    "query",
+    "header",
+    "controller",
+    "mapping",
+    "include",
+    "resource",
+    "skip",
+    "skip.handler",
+];
+
+/// Действия REST-ресурса buffalo: метод типа → HTTP-метод и путь (`{}` — параметр).
+const RESOURCE_ACTIONS: &[(&str, &str, &str)] = &[
+    ("List", "GET", ""),
+    ("New", "GET", "/new"),
+    ("Create", "POST", ""),
+    ("Show", "GET", "/{}"),
+    ("Edit", "GET", "/{}/edit"),
+    ("Update", "PUT", "/{}"),
+    ("Destroy", "DELETE", "/{}"),
 ];
 
 const SKIP_DIRS: &[&str] = &["vendor", "testdata", "node_modules"];
@@ -237,6 +281,35 @@ struct Func {
     package: String,
     /// Имена параметров по порядку (`_` — безымянный).
     params: Vec<String>,
+    /// Тип получателя метода без `*`: `UserController`
+    recv_type: Option<String>,
+    /// `// @router /:id [get,post]` над методом (beego): путь, методы (пусто — любой), строка
+    annotations: Vec<(String, Vec<String>, usize)>,
+}
+
+/// Что разбирать как обработчик роута.
+#[derive(Clone, Copy)]
+enum Target {
+    /// Выражение в файле роута (байтовый диапазон)
+    Expr(usize, usize),
+    /// Функция или метод из `Index::funcs`
+    Func(usize),
+}
+
+/// Тело, ответ, query и заголовки из цепочки роута (`.Reads(T{}).Writes(T{})`).
+#[derive(Default)]
+struct Declared {
+    /// Байтовые диапазоны значений в файле роута
+    body: Option<(usize, usize)>,
+    response: Option<(usize, usize)>,
+    query: Vec<String>,
+    headers: Vec<String>,
+}
+
+/// `app.Middleware.Skip(auth, Home)`: middleware не действует на эти обработчики.
+struct Skip {
+    middleware: String,
+    handlers: Vec<String>,
 }
 
 struct Group {
@@ -272,11 +345,46 @@ struct RawRoute {
     method: Option<String>,
     path: String,
     handler: Option<String>,
-    /// Байтовый диапазон выражения-обработчика — для разбора, что передавать
-    handler_range: Option<(usize, usize)>,
+    /// Обработчик — для разбора, что передавать
+    target: Option<Target>,
     router: String,
+    /// Где роут показывать: файл и строка (у `@router`-аннотаций — над методом контроллера)
+    file: usize,
     line: usize,
     middleware: Vec<String>,
+    declared: Declared,
+}
+
+/// Совпадения шаблонов с одним `@route` (по началу узла), слитые вместе.
+struct RouteMatch<'q, 't> {
+    router: &'q str,
+    cap: HashMap<&'q str, Node<'t>>,
+    multi: HashMap<&'q str, Vec<Node<'t>>>,
+}
+
+impl<'q, 't> RouteMatch<'q, 't> {
+    fn merge(&mut self, cap: HashMap<&'q str, Node<'t>>, multi: HashMap<&'q str, Vec<Node<'t>>>) {
+        // Узел роута — от совпадения с путём: по нему строка, область и порядок `Use`.
+        let route = cap.get("path").and(cap.get("route")).copied();
+        for (k, v) in cap {
+            self.cap.entry(k).or_insert(v);
+        }
+        if let Some(r) = route {
+            self.cap.insert("route", r);
+        }
+        for (k, nodes) in multi {
+            let list = self.multi.entry(k).or_default();
+            for n in nodes {
+                if !list.iter().any(|m| m.id() == n.id()) {
+                    list.push(n);
+                }
+            }
+        }
+    }
+
+    fn list(&self, name: &str) -> &[Node<'t>] {
+        self.multi.get(name).map_or(&[], Vec::as_slice)
+    }
 }
 
 #[derive(Default)]
@@ -288,6 +396,7 @@ struct Index {
     mounts: Vec<Mount>,
     uses: Vec<Use>,
     routes: Vec<RawRoute>,
+    skips: Vec<Skip>,
     warnings: Vec<String>,
 }
 
@@ -309,43 +418,65 @@ impl Index {
                         name: text(name, &f.src).to_string(),
                         package: f.package.clone(),
                         params: params(node, &f.src),
+                        recv_type: recv_type(node, &f.src),
+                        annotations: annotations(node, &f.src),
                     });
                 }
             }
         }
         let consts = collect_consts(files);
-        let mut seen_routes: HashMap<(usize, usize), usize> = HashMap::new();
         let mut cursor = QueryCursor::new();
         for (i, f) in files.iter().enumerate() {
+            let ctx = Ctx {
+                file: f,
+                consts: &consts,
+            };
+            let mut pending: Vec<RouteMatch> = Vec::new();
+            let mut by_start: HashMap<usize, usize> = HashMap::new();
             for q in queries.iter().filter(|q| q.applies(f)) {
                 let names = q.query.capture_names();
                 let mut matches = cursor.matches(&q.query, f.tree.root_node(), f.src.as_bytes());
                 while let Some(m) = matches.next() {
                     let mut cap: HashMap<&str, Node> = HashMap::new();
-                    let mut mw = Vec::new();
+                    let mut multi: HashMap<&str, Vec<Node>> = HashMap::new();
                     for c in m.captures {
                         let name = names[c.index as usize];
-                        if name == "middleware" {
-                            mw.extend(middleware_name(c.node, &f.src));
+                        if MULTI.contains(&name) {
+                            multi.entry(name).or_default().push(c.node);
                         } else {
                             cap.entry(name).or_insert(c.node);
                         }
                     }
-                    let ctx = Ctx {
-                        file: f,
-                        consts: &consts,
-                    };
+                    let mw: Vec<String> = multi
+                        .get("middleware")
+                        .into_iter()
+                        .flatten()
+                        .filter_map(|&n| middleware_name(n, &f.src))
+                        .collect();
                     if let Some(&node) = cap.get("route") {
-                        let site = ix.site(i, node);
-                        match seen_routes.get(&(i, site.start)) {
-                            Some(&r) => add_all(&mut ix.routes[r].middleware, &mw),
+                        match by_start.get(&node.start_byte()) {
+                            Some(&k) => pending[k].merge(cap, multi),
                             None => {
-                                let n = ix.routes.len();
-                                ix.add_route(&ctx, site, &cap, &q.name, mw);
-                                if ix.routes.len() > n {
-                                    seen_routes.insert((i, site.start), n);
-                                }
+                                by_start.insert(node.start_byte(), pending.len());
+                                pending.push(RouteMatch {
+                                    router: &q.name,
+                                    cap,
+                                    multi,
+                                });
                             }
+                        }
+                    } else if cap.contains_key("skip") {
+                        let handlers = multi
+                            .get("skip.handler")
+                            .into_iter()
+                            .flatten()
+                            .map(|&n| value_name(text(n, &f.src)))
+                            .collect();
+                        for m in mw {
+                            ix.skips.push(Skip {
+                                middleware: m,
+                                handlers: Vec::clone(&handlers),
+                            });
                         }
                     } else if let Some(&node) = cap.get("group") {
                         let site = ix.site(i, node);
@@ -370,6 +501,10 @@ impl Index {
                     }
                 }
             }
+            for m in pending {
+                let site = ix.site(i, m.cap["route"]);
+                ix.add_route(&ctx, site, &m);
+            }
         }
         ix
     }
@@ -388,25 +523,26 @@ impl Index {
         }
     }
 
-    fn add_route(
-        &mut self,
-        ctx: &Ctx,
-        site: Site,
-        cap: &HashMap<&str, Node>,
-        router: &str,
-        middleware: Vec<String>,
-    ) {
-        let Some(&path_node) = cap.get("path") else {
-            return;
-        };
-        let line = path_node.start_position().row + 1;
-        let Some(mut path) = ctx.eval(path_node) else {
-            self.warnings.push(format!(
-                "{}:{line}: can't evaluate route path `{}`",
-                ctx.file.path.display(),
-                text(path_node, &ctx.file.src)
-            ));
-            return;
+    fn add_route(&mut self, ctx: &Ctx, site: Site, m: &RouteMatch) {
+        let cap = &m.cap;
+        let src = &ctx.file.src;
+        let includes = m.list("include");
+        let (mut path, line) = match cap.get("path") {
+            Some(&path_node) => {
+                let line = path_node.start_position().row + 1;
+                let Some(path) = ctx.eval(path_node) else {
+                    self.warnings.push(format!(
+                        "{}:{line}: can't evaluate route path `{}`",
+                        ctx.file.path.display(),
+                        text(path_node, src)
+                    ));
+                    return;
+                };
+                (path, line)
+            }
+            // beego `web.NSInclude(&C{})`: пути — в аннотациях методов
+            None if !includes.is_empty() => (String::new(), cap["route"].start_position().row + 1),
+            None => return,
         };
         let mut method = cap.get("method").and_then(|&n| ctx.method(n));
         // net/http: "GET /users/{id}"
@@ -423,20 +559,177 @@ impl Index {
         let handler = cap
             .get("handler")
             .filter(|n| n.kind() != "func_literal")
-            .map(|&n| text(n, &ctx.file.src))
+            .map(|&n| text(n, src))
             .filter(|t| !t.contains('\n') && t.len() <= 80)
             .map(str::to_string);
-        self.routes.push(RawRoute {
+        let range = |n: &Node| (n.start_byte(), n.end_byte());
+        let param = |n: &Node| ctx.eval(innermost_arg(*n)).filter(|p| !p.is_empty());
+        let base = RawRoute {
             site,
-            recv: receiver(cap.get("receiver").copied(), &ctx.file.src),
+            recv: receiver(cap.get("receiver").copied(), src),
             method,
-            path,
+            path: path.clone(),
             handler,
-            handler_range: cap.get("handler").map(|n| (n.start_byte(), n.end_byte())),
-            router: router.to_string(),
+            target: cap
+                .get("handler")
+                .map(|n| Target::Expr(n.start_byte(), n.end_byte())),
+            router: m.router.to_string(),
+            file: site.file,
             line,
-            middleware,
-        });
+            middleware: m
+                .list("middleware")
+                .iter()
+                .filter_map(|&n| middleware_name(n, src))
+                .collect(),
+            declared: Declared {
+                body: cap.get("body").map(range),
+                response: cap.get("response").map(range),
+                query: m.list("query").iter().filter_map(param).collect(),
+                headers: m.list("header").iter().filter_map(param).collect(),
+            },
+        };
+        let expanded = if let Some(&c) = cap.get("controller") {
+            let mapping = cap.get("mapping").and_then(|&n| ctx.eval(n));
+            self.controller_routes(ctx, c, mapping.as_deref())
+        } else if let Some(&r) = cap.get("resource") {
+            self.resource_routes(ctx, r, &path)
+        } else if !includes.is_empty() {
+            includes
+                .iter()
+                .flat_map(|&c| self.annotated_routes(ctx, c))
+                .collect()
+        } else {
+            self.routes.push(base);
+            return;
+        };
+        for e in expanded {
+            self.routes.push(RawRoute {
+                site,
+                recv: receiver(cap.get("receiver").copied(), src),
+                method: e.method,
+                path: join(&path, &e.path),
+                handler: Some(e.handler),
+                target: e.func.map(Target::Func),
+                router: base.router.clone(),
+                file: e.file.unwrap_or(site.file),
+                line: e.line.unwrap_or(line),
+                middleware: base.middleware.clone(),
+                declared: Declared::default(),
+            });
+        }
+    }
+
+    /// Роуты контроллера beego: по строке `"get,post:Create;put:Update"` или методы `Get`, `Post`, ….
+    fn controller_routes(&self, ctx: &Ctx, value: Node, mapping: Option<&str>) -> Vec<Expanded> {
+        let Some(ty) = TypeRef::of(ctx, value) else {
+            return Vec::new();
+        };
+        let methods = self.methods_of(&ty, &ctx.file.package);
+        let find = |name: &str| {
+            methods
+                .iter()
+                .copied()
+                .find(|&f| self.funcs[f].name == name)
+        };
+        let mut out = Vec::new();
+        match mapping {
+            Some(mapping) => {
+                for pair in mapping.split(';') {
+                    let Some((verbs, name)) = pair.split_once(':') else {
+                        continue;
+                    };
+                    let name = name.trim();
+                    for verb in verbs.split(',').map(str::trim) {
+                        out.push(Expanded::new(
+                            verb_method(verb),
+                            "",
+                            ty.handler(name),
+                            find(name),
+                        ));
+                    }
+                }
+            }
+            None => {
+                for &f in &methods {
+                    let name = &self.funcs[f].name;
+                    let m = name.to_ascii_uppercase();
+                    if METHODS.contains(&m.as_str()) {
+                        out.push(Expanded::new(Some(m), "", ty.handler(name), Some(f)));
+                    }
+                }
+                // Тип не найден в коде — один роут на любой метод.
+                if out.is_empty() {
+                    out.push(Expanded::new(None, "", ty.label.clone(), None));
+                }
+            }
+        }
+        out
+    }
+
+    /// Методы контроллера с `// @router /path [get]` (beego `NSInclude`).
+    fn annotated_routes(&self, ctx: &Ctx, value: Node) -> Vec<Expanded> {
+        let Some(ty) = TypeRef::of(ctx, value) else {
+            return Vec::new();
+        };
+        let mut out = Vec::new();
+        for f in self.methods_of(&ty, &ctx.file.package) {
+            let func = &self.funcs[f];
+            for (path, verbs, line) in &func.annotations {
+                let verbs: Vec<Option<String>> = if verbs.is_empty() {
+                    vec![None]
+                } else {
+                    verbs.iter().map(|v| verb_method(v)).collect()
+                };
+                for method in verbs {
+                    let mut e = Expanded::new(method, path, ty.handler(&func.name), Some(f));
+                    e.file = Some(func.file);
+                    e.line = Some(*line);
+                    out.push(e);
+                }
+            }
+        }
+        out
+    }
+
+    /// REST-ресурс buffalo: действия, объявленные у типа.
+    fn resource_routes(&self, ctx: &Ctx, value: Node, path: &str) -> Vec<Expanded> {
+        let Some(ty) = TypeRef::of(ctx, value) else {
+            return Vec::new();
+        };
+        let param = match singular(path) {
+            s if s.is_empty() => "{id}".to_string(),
+            s => format!("{{{s}_id}}"),
+        };
+        let methods = self.methods_of(&ty, &ctx.file.package);
+        RESOURCE_ACTIONS
+            .iter()
+            .filter_map(|&(action, method, suffix)| {
+                let f = methods
+                    .iter()
+                    .copied()
+                    .find(|&f| self.funcs[f].name == action)?;
+                Some(Expanded::new(
+                    Some(method.to_string()),
+                    &suffix.replace("{}", &param),
+                    ty.handler(action),
+                    Some(f),
+                ))
+            })
+            .collect()
+    }
+
+    /// Методы типа: из пакета `ty.pkg` (или пакета файла), если там есть, иначе из любого.
+    fn methods_of(&self, ty: &TypeRef, own: &str) -> Vec<usize> {
+        let all: Vec<usize> = (0..self.funcs.len())
+            .filter(|&f| self.funcs[f].recv_type.as_deref() == Some(ty.name.as_str()))
+            .collect();
+        let pkg = ty.pkg.as_deref().unwrap_or(own);
+        let in_pkg: Vec<usize> = all
+            .iter()
+            .copied()
+            .filter(|&f| self.funcs[f].package == pkg)
+            .collect();
+        if in_pkg.is_empty() { all } else { in_pkg }
     }
 
     fn add_group(
@@ -460,8 +753,12 @@ impl Index {
         let body = cap
             .get("group.body")
             .map(|n| (n.start_byte(), n.end_byte()));
-        // Один и тот же вызов может попасть под два шаблона (с переменной и без) — сливаем.
+        // Один и тот же вызов может попасть под несколько шаблонов (с переменной и без,
+        // префикс и middleware отдельно) — сливаем.
         if let Some(g) = self.groups.iter_mut().find(|g| g.site == site) {
+            if g.path.is_empty() {
+                g.path = path;
+            }
             g.var = g.var.take().or(var);
             g.body = g.body.or(body);
             add_all(&mut g.middleware, &middleware);
@@ -518,19 +815,51 @@ impl Index {
         let mut seen = HashSet::new();
         let mut routes = Vec::new();
         for raw in &self.routes {
-            let info = raw
-                .handler_range
-                .map(|h| describer.describe(raw.site.file, h))
-                .unwrap_or_default();
+            let mut info = match raw.target {
+                Some(Target::Expr(s, e)) => describer.describe(raw.site.file, (s, e), &raw.router),
+                Some(Target::Func(f)) => describer.describe_func(f, &raw.router),
+                None => RouteInfo::default(),
+            };
+            let d = &raw.declared;
+            if let Some(b) = d.body.and_then(|v| describer.body_of(raw.site.file, v)) {
+                info.body = Some(b);
+            }
+            if let Some(resp) = d
+                .response
+                .and_then(|v| describer.response_of(raw.site.file, v))
+            {
+                info.response = Some(resp);
+            }
+            for q in &d.query {
+                if !info.query.iter().any(|f| &f.name == q) {
+                    info.query.push(super::Field {
+                        name: q.clone(),
+                        ty: "string".into(),
+                        required: false,
+                        comment: None,
+                        json: None,
+                    });
+                }
+            }
+            add_all(&mut info.headers, &d.headers);
             for (prefix, mut middleware) in r.base(raw.site, &raw.recv, 0) {
                 add_all(&mut middleware, &raw.middleware);
+                if let Some(h) = &raw.handler {
+                    let h = value_name(h);
+                    middleware.retain(|m| {
+                        !self
+                            .skips
+                            .iter()
+                            .any(|s| &s.middleware == m && s.handlers.contains(&h))
+                    });
+                }
                 let path = super::normalize_route(&join(&prefix, &raw.path));
                 let method = raw.method.clone().unwrap_or_else(|| super::ANY.to_string());
                 if seen.insert((method.clone(), path.clone())) {
                     routes.push(Route {
                         method,
                         path,
-                        source: self.sources[raw.site.file].clone(),
+                        source: self.sources[raw.file].clone(),
                         line: raw.line,
                         handler: raw.handler.clone(),
                         router: raw.router.clone(),
@@ -744,6 +1073,277 @@ fn params(func: Node, src: &str) -> Vec<String> {
     out
 }
 
+/// Тип получателя метода без `*` и параметров типа: `func (c *UserController) Get()` → `UserController`.
+fn recv_type(decl: Node, src: &str) -> Option<String> {
+    let list = decl.child_by_field_name("receiver")?;
+    let mut ty = children(list)
+        .find(|c| c.kind() == "parameter_declaration")?
+        .child_by_field_name("type")?;
+    loop {
+        ty = match ty.kind() {
+            "pointer_type" | "parenthesized_type" => ty.named_child(0)?,
+            "generic_type" => ty.child_by_field_name("type")?,
+            "type_identifier" => return Some(text(ty, src).to_string()),
+            _ => return None,
+        };
+    }
+}
+
+/// `// @router /:id [get,post]` в комментарии над функцией (beego): путь, методы, строка.
+fn annotations(decl: Node, src: &str) -> Vec<(String, Vec<String>, usize)> {
+    let mut out = Vec::new();
+    let mut row = decl.start_position().row;
+    let mut prev = decl.prev_sibling();
+    while let Some(c) = prev.filter(|c| c.kind() == "comment" && c.end_position().row + 1 >= row) {
+        for (i, l) in text(c, src).lines().enumerate() {
+            let l = l.trim().trim_start_matches(['/', '*']).trim();
+            let Some(rest) = l.strip_prefix("@router") else {
+                continue;
+            };
+            let (path, verbs) = match rest.split_once('[') {
+                Some((p, v)) => (p, v.split(']').next().unwrap_or("")),
+                None => (rest, ""),
+            };
+            let verbs = verbs
+                .split(',')
+                .map(str::trim)
+                .filter(|v| !v.is_empty())
+                .map(str::to_string)
+                .collect();
+            out.push((
+                path.trim().to_string(),
+                verbs,
+                c.start_position().row + i + 1,
+            ));
+        }
+        row = c.start_position().row;
+        prev = c.prev_sibling();
+    }
+    out.reverse();
+    out
+}
+
+/// Роут, развёрнутый из контроллера или ресурса.
+struct Expanded {
+    method: Option<String>,
+    /// Путь относительно пути вызова
+    path: String,
+    handler: String,
+    func: Option<usize>,
+    /// Своё место (аннотация над методом), иначе — вызов
+    file: Option<usize>,
+    line: Option<usize>,
+}
+
+impl Expanded {
+    fn new(method: Option<String>, path: &str, handler: String, func: Option<usize>) -> Self {
+        Expanded {
+            method,
+            path: path.to_string(),
+            handler,
+            func,
+            file: None,
+            line: None,
+        }
+    }
+}
+
+/// Тип контроллера или ресурса из значения: `&controllers.UserController{}` →
+/// пакет `controllers`, имя `UserController`; `label` — как значение записано (для `handler`).
+struct TypeRef {
+    pkg: Option<String>,
+    name: String,
+    label: String,
+}
+
+impl TypeRef {
+    fn of(ctx: &Ctx, value: Node) -> Option<TypeRef> {
+        let src = &ctx.file.src;
+        let (pkg, name) = value_type_ref(value, src, enclosing_func(value), 0)?;
+        Some(TypeRef {
+            pkg,
+            name,
+            label: value_name(text(value, src)),
+        })
+    }
+
+    fn handler(&self, method: &str) -> String {
+        format!("{}.{method}", self.label)
+    }
+}
+
+/// Тело функции (или литерала), в которой узел.
+fn enclosing_func(node: Node) -> Option<Node> {
+    let mut n = node.parent();
+    while let Some(p) = n {
+        if matches!(
+            p.kind(),
+            "function_declaration" | "method_declaration" | "func_literal"
+        ) {
+            return p.child_by_field_name("body");
+        }
+        n = p.parent();
+    }
+    None
+}
+
+/// Пакет и имя типа значения: `T{}`, `&pkg.T{}`, `new(T)`, переменная с таким значением в `scope`.
+fn value_type_ref(
+    v: Node,
+    src: &str,
+    scope: Option<Node>,
+    depth: usize,
+) -> Option<(Option<String>, String)> {
+    if depth > 4 {
+        return None;
+    }
+    match v.kind() {
+        "unary_expression" | "parenthesized_expression" => value_type_ref(
+            v.child_by_field_name("operand").or(v.named_child(0))?,
+            src,
+            scope,
+            depth + 1,
+        ),
+        "composite_literal" => type_ref(v.child_by_field_name("type")?, src),
+        "call_expression" if text(v.child_by_field_name("function")?, src) == "new" => {
+            type_ref(v.child_by_field_name("arguments")?.named_child(0)?, src)
+        }
+        "identifier" => {
+            let name = text(v, src);
+            let mut found = None;
+            find_var(scope?, name, src, &mut found);
+            match found? {
+                VarDef::Type(t) => type_ref(t, src),
+                VarDef::Value(v) => value_type_ref(v, src, scope, depth + 1),
+            }
+        }
+        _ => None,
+    }
+}
+
+enum VarDef<'t> {
+    Type(Node<'t>),
+    Value(Node<'t>),
+}
+
+/// Первое объявление переменной `name`: `x := v`, `x = v`, `var x T`, `var x = v`.
+fn find_var<'t>(node: Node<'t>, name: &str, src: &str, found: &mut Option<VarDef<'t>>) {
+    if found.is_some() {
+        return;
+    }
+    match node.kind() {
+        "short_var_declaration" | "assignment_statement" => {
+            if let (Some(l), Some(r)) = (
+                node.child_by_field_name("left"),
+                node.child_by_field_name("right"),
+            ) && let Some(i) = children(l).position(|id| text(id, src) == name)
+                && let Some(v) = children(r).nth(i)
+            {
+                *found = Some(VarDef::Value(v));
+                return;
+            }
+        }
+        "var_spec" => {
+            let mut c = node.walk();
+            if node
+                .children_by_field_name("name", &mut c)
+                .any(|id| text(id, src) == name)
+            {
+                *found = node
+                    .child_by_field_name("type")
+                    .map(VarDef::Type)
+                    .or_else(|| {
+                        node.child_by_field_name("value")
+                            .and_then(|v| v.named_child(0))
+                            .map(VarDef::Value)
+                    });
+                return;
+            }
+        }
+        _ => {}
+    }
+    for c in children(node) {
+        find_var(c, name, src, found);
+    }
+}
+
+/// `T`, `*T`, `pkg.T` → пакет и имя.
+fn type_ref(ty: Node, src: &str) -> Option<(Option<String>, String)> {
+    match ty.kind() {
+        "type_identifier" => Some((None, text(ty, src).to_string())),
+        "qualified_type" => Some((
+            Some(text(ty.child_by_field_name("package")?, src).to_string()),
+            text(ty.child_by_field_name("name")?, src).to_string(),
+        )),
+        "pointer_type" | "parenthesized_type" => type_ref(ty.named_child(0)?, src),
+        "generic_type" => type_ref(ty.child_by_field_name("type")?, src),
+        _ => None,
+    }
+}
+
+/// Значение как имя: `&pkg.T{}` → `pkg.T`, `T{}.List` → `T.List`; пробелы убраны.
+fn value_name(s: &str) -> String {
+    s.split_whitespace()
+        .collect::<String>()
+        .replace("{}", "")
+        .trim_start_matches('&')
+        .to_string()
+}
+
+/// Метод из mapping beego: `get` → `GET`, `*` и неизвестное → любой.
+fn verb_method(verb: &str) -> Option<String> {
+    let m = verb.trim().to_ascii_uppercase();
+    METHODS.contains(&m.as_str()).then_some(m)
+}
+
+/// Имя параметра ресурса из последнего сегмента пути: `/users` → `user`, `/categories` → `category`.
+fn singular(path: &str) -> String {
+    let seg = path
+        .trim_end_matches('/')
+        .rsplit('/')
+        .next()
+        .unwrap_or("")
+        .replace('-', "_")
+        .to_ascii_lowercase();
+    if let Some(s) = seg.strip_suffix("ies") {
+        format!("{s}y")
+    } else if ["sses", "xes", "zes", "ches", "shes"]
+        .iter()
+        .any(|e| seg.ends_with(e))
+    {
+        seg[..seg.len() - 2].to_string()
+    } else if seg.ends_with('s') && !seg.ends_with("ss") {
+        seg[..seg.len() - 1].to_string()
+    } else {
+        seg
+    }
+}
+
+/// Самый внутренний вызов цепочки — его первый аргумент: `ws.QueryParameter("page", "…").DataType("int")`
+/// → `"page"`. Не вызов — сам узел.
+fn innermost_arg(node: Node) -> Node {
+    let mut n = node;
+    loop {
+        if n.kind() != "call_expression" {
+            return n;
+        }
+        let inner = n
+            .child_by_field_name("function")
+            .filter(|f| f.kind() == "selector_expression")
+            .and_then(|f| f.child_by_field_name("operand"))
+            .filter(|o| o.kind() == "call_expression");
+        match inner {
+            Some(i) => n = i,
+            None => {
+                return n
+                    .child_by_field_name("arguments")
+                    .and_then(|a| a.named_child(0))
+                    .unwrap_or(n);
+            }
+        }
+    }
+}
+
 fn receiver(node: Option<Node>, src: &str) -> Receiver {
     let mut r = Receiver::default();
     let mut node = node;
@@ -874,7 +1474,8 @@ impl Ctx<'_> {
         }
     }
 
-    /// `Get` / `GET` / `"GET"` / `http.MethodGet` → `GET`; `Any` и прочее → `None` (любой).
+    /// `Get` / `GET` / `"GET"` / `http.MethodGet` → `GET`, у beego ещё `NSGet`, `CtrlGet`,
+    /// `NSCtrlGet`; `Any` и прочее → `None` (любой).
     fn method(&self, node: Node) -> Option<String> {
         let src = &self.file.src;
         let raw = match node.kind() {
@@ -882,9 +1483,9 @@ impl Ctx<'_> {
             "selector_expression" => text(node.child_by_field_name("field")?, src).to_string(),
             _ => text(node, src).to_string(),
         };
-        let raw = raw
-            .strip_prefix("Method")
-            .filter(|s| !s.is_empty())
+        let raw = ["Method", "NSCtrl", "Ctrl", "NS"]
+            .iter()
+            .find_map(|p| raw.strip_prefix(p).filter(|s| !s.is_empty()))
             .unwrap_or(&raw);
         let m = raw.to_ascii_uppercase();
         METHODS.contains(&m.as_str()).then_some(m)

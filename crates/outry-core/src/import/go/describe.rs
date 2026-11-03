@@ -25,6 +25,7 @@ const BODY_CALLS: &[&str] = &[
     "parsejson",
     "bodyparser",
     "parsebody",
+    "readentity",
 ];
 /// Поля формы (application/x-www-form-urlencoded или multipart).
 const FORM_CALLS: &[&str] = &[
@@ -45,6 +46,17 @@ const QUERY_CALLS: &[&str] = &[
     "GetQueryArray",
     "QueryParam",
     "FormValue",
+    "QueryParameter",
+];
+/// Query у контроллеров beego: `c.GetString("page")`. В gin те же имена читают контекст.
+const BEEGO_QUERY_CALLS: &[&str] = &[
+    "GetString",
+    "GetStrings",
+    "GetInt",
+    "GetInt64",
+    "GetUint64",
+    "GetBool",
+    "GetFloat",
 ];
 
 pub(super) struct Describer<'a> {
@@ -84,25 +96,87 @@ impl<'a> Describer<'a> {
         self.shapes.into_inner()
     }
 
-    /// Описание роута по выражению-обработчику в файле `file`.
-    pub(super) fn describe(&self, file: usize, handler: (usize, usize)) -> RouteInfo {
-        let f = &self.files[file];
-        let Some(node) = f
-            .tree
-            .root_node()
-            .descendant_for_byte_range(handler.0, handler.1)
-        else {
+    /// Описание роута по выражению-обработчику в файле `file`; `router` — имя шаблона.
+    pub(super) fn describe(&self, file: usize, handler: (usize, usize), router: &str) -> RouteInfo {
+        let Some(node) = self.node(file, handler) else {
             return RouteInfo::default();
         };
         let Some((file, body, decl)) = self.target(file, node, 0) else {
             return RouteInfo::default();
         };
+        self.describe_body(file, body, decl, router)
+    }
+
+    /// Описание роута, обработчик которого — функция или метод `funcs[f]` (контроллер beego,
+    /// ресурс buffalo).
+    pub(super) fn describe_func(&self, f: usize, router: &str) -> RouteInfo {
+        let func = &self.funcs[f];
+        let Some(decl) = self.decl(func) else {
+            return RouteInfo::default();
+        };
+        let Some(body) = decl.child_by_field_name("body") else {
+            return RouteInfo::default();
+        };
+        self.describe_body(func.file, body, Some(decl), router)
+    }
+
+    fn describe_body(
+        &self,
+        file: usize,
+        body: Node<'a>,
+        decl: Option<Node<'a>>,
+        router: &str,
+    ) -> RouteInfo {
         let mut info = RouteInfo::default();
         if let Some(decl) = decl {
             self.doc(file, decl, &mut info);
         }
-        self.scan_body(file, body, &mut info);
+        self.scan_body(file, body, router, &mut info);
         info
+    }
+
+    /// Тело запроса из значения типа (`User{}` в `.Reads(User{})`) в файле `file`.
+    pub(super) fn body_of(&self, file: usize, value: (usize, usize)) -> Option<Body> {
+        let v = self.node(file, value)?;
+        let (f, ty, scope) = self.value_type(file, scope_of(v), v)?;
+        let (fields, example) = self.fields(f, ty, scope, &["json"], false, 0)?;
+        Some(Body {
+            type_name: compact(text(ty, &self.files[f].src))
+                .trim_start_matches(['*', '&'])
+                .to_string(),
+            fields,
+            example: example.pretty(),
+        })
+    }
+
+    /// Ответ из значения типа (`User{}` в `.Writes(User{})`).
+    pub(super) fn response_of(&self, file: usize, value: (usize, usize)) -> Option<Response> {
+        let v = self.node(file, value)?;
+        let (f, ty, scope) = self.value_type(file, scope_of(v), v)?;
+        let shape = self.shape_of(f, ty, scope, 0);
+        (shape != "any").then(|| Response {
+            type_name: compact(text(ty, &self.files[f].src))
+                .trim_start_matches(['*', '&'])
+                .to_string(),
+            shape,
+        })
+    }
+
+    fn node(&self, file: usize, (start, end): (usize, usize)) -> Option<Node<'a>> {
+        self.files[file]
+            .tree
+            .root_node()
+            .descendant_for_byte_range(start, end)
+    }
+
+    /// Объявление функции или метода.
+    fn decl(&self, func: &Func) -> Option<Node<'a>> {
+        let root = self.files[func.file].tree.root_node();
+        let mut decl = root.descendant_for_byte_range(func.start, func.end)?;
+        while !matches!(decl.kind(), "function_declaration" | "method_declaration") {
+            decl = decl.parent()?;
+        }
+        Some(decl)
     }
 
     /// Тело функции-обработчика: литерал, функция/метод по имени, фабрика `h.Create()`,
@@ -124,6 +198,16 @@ impl<'a> Describer<'a> {
             "selector_expression" => {
                 let field = text(node.child_by_field_name("field")?, src);
                 let operand = node.child_by_field_name("operand")?;
+                // (*UserController).Get — метод конкретного типа (beego `CtrlGet`)
+                if operand.kind() == "parenthesized_expression" {
+                    let ty = text(operand, src).trim_matches(['(', ')', '*', ' ']);
+                    let (pkg, ty) = match ty.rsplit_once('.') {
+                        Some((p, t)) => (Some(p), t),
+                        None => (None, ty),
+                    };
+                    let (f, decl) = self.pick(file, field, pkg, Some(ty), false)?;
+                    return Some((f, decl.child_by_field_name("body")?, Some(decl)));
+                }
                 let pkg = (operand.kind() == "identifier").then(|| text(operand, src));
                 self.func(file, field, pkg)
             }
@@ -151,17 +235,19 @@ impl<'a> Describer<'a> {
         name: &str,
         pkg: Option<&str>,
     ) -> Option<(usize, Node<'a>, Option<Node<'a>>)> {
-        let (f, decl) = self.pick(file, name, pkg, false)?;
+        let (f, decl) = self.pick(file, name, pkg, None, false)?;
         Some((f, decl.child_by_field_name("body")?, Some(decl)))
     }
 
-    /// Объявление функции или метода `name` (см. `func`); `returns` — только те, что что-то
-    /// возвращают: `h.svc.Get(…)` в обработчике `Get` — метод сервиса, а не сам обработчик.
+    /// Объявление функции или метода `name` (см. `func`); `recv` — только методы этого типа;
+    /// `returns` — только те, что что-то возвращают: `h.svc.Get(…)` в обработчике `Get` —
+    /// метод сервиса, а не сам обработчик.
     fn pick(
         &self,
         file: usize,
         name: &str,
         pkg: Option<&str>,
+        recv: Option<&str>,
         returns: bool,
     ) -> Option<(usize, Node<'a>)> {
         let own = &self.files[file].package;
@@ -169,12 +255,9 @@ impl<'a> Describer<'a> {
             .funcs
             .iter()
             .filter(|f| f.name == name)
+            .filter(|f| recv.is_none() || f.recv_type.as_deref() == recv)
             .filter_map(|f| {
-                let root = self.files[f.file].tree.root_node();
-                let mut decl = root.descendant_for_byte_range(f.start, f.end)?;
-                while !matches!(decl.kind(), "function_declaration" | "method_declaration") {
-                    decl = decl.parent()?;
-                }
+                let decl = self.decl(f)?;
                 (!returns || decl.child_by_field_name("result").is_some()).then_some((f, decl))
             })
             .collect();
@@ -203,7 +286,7 @@ impl<'a> Describer<'a> {
             }
             _ => return None,
         };
-        let (f, decl) = self.pick(file, name, pkg, true)?;
+        let (f, decl) = self.pick(file, name, pkg, None, true)?;
         let mut result = decl.child_by_field_name("result")?;
         if result.kind() == "parameter_list" {
             // (T, error) — первый тип.
@@ -250,7 +333,7 @@ impl<'a> Describer<'a> {
         info.description = text_lines;
     }
 
-    fn scan_body(&self, file: usize, body: Node, info: &mut RouteInfo) {
+    fn scan_body(&self, file: usize, body: Node, router: &str, info: &mut RouteInfo) {
         let src = &self.files[file].src;
         // q := r.URL.Query()
         let mut query_vars = Vec::new();
@@ -289,7 +372,10 @@ impl<'a> Describer<'a> {
             let first = args.named_child(0).and_then(|a| literal(a, src));
             if let Some(param) = first.filter(|p| is_param_name(p)) {
                 let operand = operand.trim_end();
-                if name == "Get" && operand.ends_with("Header") || name == "GetHeader" {
+                if name == "Get" && operand.ends_with("Header")
+                    || name == "GetHeader"
+                    || name == "HeaderParameter"
+                {
                     push_unique(&mut info.headers, param);
                     return;
                 }
@@ -309,6 +395,7 @@ impl<'a> Describer<'a> {
                 if name == "Get"
                     && (operand.ends_with("Query()") || query_vars.iter().any(|v| v == operand))
                     || QUERY_CALLS.contains(&name)
+                    || router == "beego" && BEEGO_QUERY_CALLS.contains(&name)
                 {
                     if !info.query.iter().any(|q| q.name == param) {
                         info.query.push(Field {
@@ -324,10 +411,12 @@ impl<'a> Describer<'a> {
             }
             let lname = name.to_ascii_lowercase();
             let is_query = lname.contains("query");
+            // go-zero `httpx.Parse(r, &req)`: поля по тегам — `form` в query, `header`, `json` в тело
+            let tagged = name == "Parse" && operand.trim_end().ends_with("httpx");
             if lname.contains("uri") || lname.contains("header") {
                 return;
             }
-            if !is_query && !BODY_CALLS.iter().any(|w| lname.contains(w)) {
+            if !is_query && !tagged && !BODY_CALLS.iter().any(|w| lname.contains(w)) {
                 return;
             }
             // c.ShouldBindJSON(&req), а иначе — v.Bind(c), где v — объект-валидатор.
@@ -344,16 +433,32 @@ impl<'a> Describer<'a> {
                 return;
             };
             let src = &self.files[file].src;
-            if is_query {
-                if let Some(fields) = self.fields(file, ty, scope, &["form", "query", "json"], 0) {
-                    for f in fields.0 {
-                        if !info.query.iter().any(|q| q.name == f.name) {
-                            info.query.push(f);
-                        }
+            let mut add_query = |fields: Vec<Field>| {
+                for f in fields {
+                    if !info.query.iter().any(|q| q.name == f.name) {
+                        info.query.push(f);
                     }
                 }
-            } else if info.body.is_none()
-                && let Some((fields, example)) = self.fields(file, ty, scope, &["json"], 0)
+            };
+            if tagged {
+                if let Some((fields, _)) = self.fields(file, ty, scope, &["form"], true, 0) {
+                    add_query(fields);
+                }
+                if let Some((fields, _)) = self.fields(file, ty, scope, &["header"], true, 0) {
+                    for f in fields {
+                        push_unique(&mut info.headers, f.name);
+                    }
+                }
+            } else if is_query {
+                let tags = &["form", "query", "json"];
+                if let Some((fields, _)) = self.fields(file, ty, scope, tags, false, 0) {
+                    add_query(fields);
+                }
+                return;
+            }
+            if info.body.is_none()
+                && let Some((fields, example)) = self.fields(file, ty, scope, &["json"], tagged, 0)
+                && (!tagged || !fields.is_empty())
             {
                 info.body = Some(Body {
                     type_name: compact(text(ty, src))
@@ -368,44 +473,28 @@ impl<'a> Describer<'a> {
     }
 
     /// Тип ответа: первый успешный `json.NewEncoder(w).Encode(x)`, `c.JSON(200, x)`,
-    /// `render.JSON(w, r, x)`, свой `writeJSON(w, http.StatusOK, x)`. Ответы с кодом ошибки
-    /// и `gin.H`/map пропускаются.
+    /// `render.JSON(w, r, x)`, свой `writeJSON(w, http.StatusOK, x)`, `resp.WriteEntity(x)`
+    /// (go-restful), `c.Data["json"] = x` (beego). Ответы с кодом ошибки (в том числе у
+    /// внешнего вызова: `c.Render(404, r.JSON(x))`) и `gin.H`/map пропускаются.
     fn response(&self, file: usize, body: Node<'a>, info: &mut RouteInfo) {
         let src = &self.files[file].src;
         walk(body, &mut |n| {
-            if info.response.is_some() || n.kind() != "call_expression" {
+            if info.response.is_some() {
                 return;
             }
-            let (Some(func), Some(args)) = (
-                n.child_by_field_name("function"),
-                n.child_by_field_name("arguments"),
-            ) else {
+            let value = match n.kind() {
+                "call_expression" => self.response_arg(file, n),
+                "assignment_statement" => n
+                    .child_by_field_name("left")
+                    .filter(|l| compact(text(*l, src)).ends_with(r#"Data["json"]"#))
+                    .and(n.child_by_field_name("right"))
+                    .and_then(|r| r.named_child(0)),
+                _ => None,
+            };
+            let Some(value) = value else {
                 return;
             };
-            let (name, operand) = match func.kind() {
-                "selector_expression" => (
-                    func.child_by_field_name("field")
-                        .map_or("", |f| text(f, src)),
-                    func.child_by_field_name("operand")
-                        .map_or("", |o| text(o, src)),
-                ),
-                "identifier" => (text(func, src), ""),
-                _ => return,
-            };
-            let lname = name.to_ascii_lowercase();
-            let encode = name == "Encode" && operand.contains("NewEncoder");
-            let json = lname.contains("json") && !BODY_CALLS.iter().any(|w| lname.contains(w));
-            if !encode && !json {
-                return;
-            }
-            let args: Vec<Node> = children(args).collect();
-            if args.iter().any(|a| error_status(text(*a, src))) {
-                return;
-            }
-            let Some(&last) = args.last() else {
-                return;
-            };
-            let Some((f, ty, scope)) = self.value_type(file, body, last) else {
+            let Some((f, ty, scope)) = self.value_type(file, body, value) else {
                 return;
             };
             let shape = self.shape_of(f, ty, scope, 0);
@@ -419,6 +508,48 @@ impl<'a> Describer<'a> {
                 shape,
             });
         });
+    }
+
+    /// Значение, которое вызов `n` отдаёт ответом, если это вызов-ответ с успешным кодом.
+    fn response_arg(&self, file: usize, n: Node<'a>) -> Option<Node<'a>> {
+        let src = &self.files[file].src;
+        let func = n.child_by_field_name("function")?;
+        let args = n.child_by_field_name("arguments")?;
+        let (name, operand) = match func.kind() {
+            "selector_expression" => (
+                text(func.child_by_field_name("field")?, src),
+                func.child_by_field_name("operand")
+                    .map_or("", |o| text(o, src)),
+            ),
+            "identifier" => (text(func, src), ""),
+            _ => return None,
+        };
+        let lname = name.to_ascii_lowercase();
+        let encode = name == "Encode" && operand.contains("NewEncoder");
+        let json = lname.contains("json") && !BODY_CALLS.iter().any(|w| lname.contains(w));
+        let entity = matches!(name, "WriteEntity" | "WriteHeaderAndEntity");
+        if !encode && !json && !entity {
+            return None;
+        }
+        let args: Vec<Node> = children(args).collect();
+        let failed = |args: &[Node]| args.iter().any(|a| error_status(text(*a, src)));
+        if failed(&args) {
+            return None;
+        }
+        // c.Render(http.StatusNotFound, r.JSON(err))
+        if let Some(outer) = n
+            .parent()
+            .filter(|p| p.kind() == "argument_list")
+            .map(|p| children(p).collect::<Vec<_>>())
+            && failed(&outer)
+        {
+            return None;
+        }
+        // WriteHeaderAndJson(status, value, contentType)
+        if name == "WriteHeaderAndJson" {
+            return args.get(1).copied();
+        }
+        args.last().copied()
     }
 
     /// Тип выражения-значения в теле обработчика: переменная, `&T{…}`, `T{…}`, вызов функции.
@@ -617,12 +748,14 @@ impl<'a> Describer<'a> {
     }
 
     /// Поля структуры `ty` (тег — первый найденный из `tags`) и пример значения.
+    /// `strict` — только поля с одним из `tags` (go-zero: `path`, `form`, `json` в одной структуре).
     fn fields(
         &self,
         file: usize,
         ty: Node,
         scope: Node,
         tags: &[&str],
+        strict: bool,
         depth: usize,
     ) -> Option<(Vec<Field>, Json)> {
         let (file, ty) = self.resolve(file, ty, scope, depth)?;
@@ -645,9 +778,13 @@ impl<'a> Describer<'a> {
                     .collect()
             };
             let tagged = tags.iter().find_map(|t| tag_value(&tag, t));
+            if strict && tagged.is_none() && !names.is_empty() {
+                continue;
+            }
             // Встроенная структура без имени в теге — её поля на этом же уровне.
             if names.is_empty() && tagged.is_none() {
-                if let Some((inner, Json::Obj(kv))) = self.fields(file, fty, scope, tags, depth + 1)
+                if let Some((inner, Json::Obj(kv))) =
+                    self.fields(file, fty, scope, tags, strict, depth + 1)
                 {
                     fields.extend(inner);
                     obj.extend(kv);
@@ -724,7 +861,7 @@ impl<'a> Describer<'a> {
         if resolved.kind() != "struct_type" {
             return None;
         }
-        let (subs, _) = self.fields(f, resolved, scope, tags, depth)?;
+        let (subs, _) = self.fields(f, resolved, scope, tags, false, depth)?;
         (!subs.is_empty()).then_some((suffix, subs))
     }
 
@@ -820,7 +957,7 @@ impl<'a> Describer<'a> {
             }
             "map_type" => Json::Obj(vec![]),
             "struct_type" => self
-                .fields(file, ty, scope, &["json"], depth)
+                .fields(file, ty, scope, &["json"], false, depth)
                 .map_or(Json::Null, |(_, v)| v),
             "type_identifier" => match text(ty, src) {
                 "string" => Json::Str(String::new()),
@@ -845,7 +982,7 @@ impl<'a> Describer<'a> {
     fn sample_named(&self, file: usize, ty: Node, scope: Node, depth: usize) -> Json {
         match self.resolve(file, ty, scope, depth) {
             Some((f, t)) if t.kind() == "struct_type" => self
-                .fields(f, t, scope, &["json"], depth)
+                .fields(f, t, scope, &["json"], false, depth)
                 .map_or(Json::Null, |(_, v)| v),
             Some((f, t)) if t.kind() != ty.kind() || t.id() != ty.id() => {
                 self.sample(f, t, scope, depth + 1)
@@ -853,6 +990,22 @@ impl<'a> Describer<'a> {
             _ => Json::Null,
         }
     }
+}
+
+/// Тело функции, в которой узел (область для переменных и локальных типов), иначе — корень.
+fn scope_of(node: Node) -> Node {
+    let mut n = node;
+    while let Some(p) = n.parent() {
+        if matches!(
+            p.kind(),
+            "function_declaration" | "method_declaration" | "func_literal"
+        ) && let Some(body) = p.child_by_field_name("body")
+        {
+            return body;
+        }
+        n = p;
+    }
+    n
 }
 
 fn walk<'t>(node: Node<'t>, f: &mut impl FnMut(Node<'t>)) {

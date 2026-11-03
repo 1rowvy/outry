@@ -74,8 +74,9 @@ Prefer a GUI? Open the same folder in the [desktop app](/outry/guides/desktop-ap
 files, and edits made in your editor show up immediately.
 </Aside>
 
-Have a Go service? `outry import go .` writes a request for every chi, gin or `net/http` route, and
-`outry check` then tells you when the code and the requests drift apart — see
+Have a Go service? `outry import go .` writes a request for every chi, gin, `net/http`, go-zero,
+go-restful, beego or buffalo route, and `outry check` then tells you when the code and the requests
+drift apart — see
 [Import routes from Go](/outry/guides/import-go/).
 
 Already have `.http` files? `outry convert api/` rewrites them into `.outry` — see

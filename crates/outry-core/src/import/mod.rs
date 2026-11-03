@@ -406,15 +406,29 @@ pub fn plan_with(
     // Пути роутов: запрос с конкретным значением (`/users/1`) сопоставляется с `/users/{id}`,
     // только если в коде нет такого же статического пути.
     let route_keys: HashSet<String> = scan.routes.iter().map(|r| key(&r.path)).collect();
+    // Обработчик нескольких роутов (`"get,put:Update"` в beego) — сопоставляем ещё и по методу.
+    let mut per_handler: HashMap<&str, usize> = HashMap::new();
+    for h in scan.routes.iter().filter_map(|r| r.handler.as_deref()) {
+        *per_handler.entry(h).or_default() += 1;
+    }
+    let shared: HashSet<String> = per_handler
+        .into_iter()
+        .filter(|&(_, n)| n > 1)
+        .map(|(h, _)| h.to_string())
+        .collect();
     for route in scan.routes {
         let k = key(&route.path);
         let auth = auth_headers(&route, &rules);
+        let by_method = route.handler.as_ref().is_some_and(|h| shared.contains(h));
         // По `handler:`, а запросы без него (негативные тесты рядом с основным) — по методу и пути.
         let mut hit: Vec<usize> = known
             .iter()
             .enumerate()
             .filter(|(_, r)| match &r.handler {
-                Some(_) => r.handler == route.handler,
+                Some(_) => {
+                    r.handler == route.handler
+                        && (!by_method || route.method == ANY || r.method == route.method)
+                }
                 None => {
                     (r.key == k || !route_keys.contains(&r.key) && fills_params(&k, &r.key))
                         && (route.method == ANY || r.method == route.method)
@@ -787,15 +801,20 @@ fn slash(p: &Path) -> String {
     p.to_string_lossy().replace('\\', "/")
 }
 
-/// Путь роутера → путь с переменными: `{id}`, `{id:[0-9]+}`, `{path...}`, `:id`, `*path` → `{{id}}`.
-/// Без завершающего `/` (кроме корня).
+/// Путь роутера → путь с переменными: `{id}`, `{id:[0-9]+}`, `{path...}`, `:id`, `*path` → `{{id}}`;
+/// у beego `:id:int`, `:id([0-9]+)`, `*.*`. Без завершающего `/` (кроме корня).
 pub fn normalize_route(path: &str) -> String {
+    let ident = |s: &str| -> String {
+        s.chars()
+            .take_while(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-'))
+            .collect()
+    };
     let mut out = String::new();
     for seg in segments(path) {
-        let seg = if let Some(name) = seg.strip_prefix(':') {
+        let seg = if let Some(name) = seg.strip_prefix(':').map(ident).filter(|n| !n.is_empty()) {
             format!("{{{{{name}}}}}")
-        } else if let Some(name) = seg.strip_prefix('*') {
-            let name = if name.is_empty() { "path" } else { name };
+        } else if let Some(name) = seg.strip_prefix('*').map(ident) {
+            let name = if name.is_empty() { "path" } else { &name };
             format!("{{{{{name}}}}}")
         } else {
             braces_to_vars(seg)

@@ -254,6 +254,10 @@ fn normalizes_paths() {
     );
     assert_eq!(normalize_route("/re/{p:a/b}"), "/re/{{p}}");
     assert_eq!(normalize_route("/static/*"), "/static/{{path}}");
+    assert_eq!(normalize_route("/u/:id:int"), "/u/{{id}}");
+    assert_eq!(normalize_route("/u/:id([0-9]+)"), "/u/{{id}}");
+    assert_eq!(normalize_route("/u/:id?"), "/u/{{id}}");
+    assert_eq!(normalize_route("/files/*.*"), "/files/{{path}}");
 }
 
 fn route(method: &str, path: &str) -> Route {
@@ -1481,4 +1485,562 @@ func me(c *gin.Context)      {}
     assert!(plan.stale.is_empty(), "{:?}", plan.stale);
     assert!(plan.new.is_empty());
     assert!(plan.existing.iter().all(|e| e.changes.is_empty()));
+}
+
+fn find<'a>(scan: &'a Scan, method: &str, path: &str) -> &'a Route {
+    scan.routes
+        .iter()
+        .find(|r| r.method == method && r.path == path)
+        .unwrap_or_else(|| panic!("no {method} {path} in {:?}", routes(scan)))
+}
+
+fn query_names(r: &Route) -> Vec<&str> {
+    r.info.query.iter().map(|f| f.name.as_str()).collect()
+}
+
+#[test]
+fn go_zero_route_literals() {
+    let dir = TempDir::new("gozero");
+    dir.write(
+        "internal/handler/routes.go",
+        r#"package handler
+
+import (
+	"net/http"
+
+	user "example.com/svc/internal/handler/user"
+	"example.com/svc/internal/svc"
+	"github.com/zeromicro/go-zero/rest"
+)
+
+func RegisterHandlers(server *rest.Server, serverCtx *svc.ServiceContext) {
+	server.AddRoutes(
+		[]rest.Route{
+			{
+				Method:  http.MethodPost,
+				Path:    "/login",
+				Handler: user.LoginHandler(serverCtx),
+			},
+			{
+				Path:    "/users/:id",
+				Method:  http.MethodGet,
+				Handler: user.GetUserHandler(serverCtx),
+			},
+		},
+		rest.WithPrefix("/api/v1"),
+	)
+
+	server.AddRoutes(
+		rest.WithMiddlewares(
+			[]rest.Middleware{serverCtx.Audit},
+			[]rest.Route{
+				{
+					Method:  http.MethodDelete,
+					Path:    "/users/:id",
+					Handler: user.DeleteUserHandler(serverCtx),
+				},
+			}...,
+		),
+		rest.WithJwt(serverCtx.Config.Auth.AccessSecret),
+		rest.WithPrefix("/api/v1"),
+	)
+
+	server.AddRoute(rest.Route{Method: http.MethodGet, Path: "/ping", Handler: ping})
+	_ = http.Cookie{Path: "/not-a-route"}
+}
+"#,
+    );
+    dir.write(
+        "internal/handler/user/getuserhandler.go",
+        r#"package user
+
+import (
+	"net/http"
+
+	"example.com/svc/internal/logic/user"
+	"example.com/svc/internal/svc"
+	"example.com/svc/internal/types"
+	"github.com/zeromicro/go-zero/rest/httpx"
+)
+
+// Get a user by id
+func GetUserHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var req types.GetUserReq
+		if err := httpx.Parse(r, &req); err != nil {
+			httpx.ErrorCtx(r.Context(), w, err)
+			return
+		}
+		l := user.NewGetUserLogic(r.Context(), svcCtx)
+		resp, err := l.GetUser(&req)
+		if err != nil {
+			httpx.ErrorCtx(r.Context(), w, err)
+		} else {
+			httpx.OkJsonCtx(r.Context(), w, resp)
+		}
+	}
+}
+
+func LoginHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var req types.LoginReq
+		if err := httpx.Parse(r, &req); err != nil {
+			return
+		}
+	}
+}
+"#,
+    );
+    dir.write(
+        "internal/logic/user/getuserlogic.go",
+        r#"package user
+
+import "example.com/svc/internal/types"
+
+type GetUserLogic struct{}
+
+func (l *GetUserLogic) GetUser(req *types.GetUserReq) (resp *types.User, err error) {
+	return
+}
+"#,
+    );
+    dir.write(
+        "internal/types/types.go",
+        r#"package types
+
+type GetUserReq struct {
+	ID     int64  `path:"id"`
+	Fields string `form:"fields,optional"`
+	Token  string `header:"X-Token"`
+}
+
+type LoginReq struct {
+	Email    string `json:"email"`
+	Password string `json:"password"`
+}
+
+type User struct {
+	ID   int64  `json:"id"`
+	Name string `json:"name"`
+}
+"#,
+    );
+    let s = scan(&dir);
+    assert_eq!(
+        routes(&s),
+        [
+            "POST /api/v1/login",
+            "DELETE /api/v1/users/{{id}}",
+            "GET /api/v1/users/{{id}}",
+            "GET /ping",
+        ]
+    );
+    assert!(s.routes.iter().all(|r| r.router == "go-zero"));
+    assert_eq!(
+        middleware(&s, "DELETE", "/api/v1/users/{{id}}"),
+        [
+            "rest.WithJwt(serverCtx.Config.Auth.AccessSecret)",
+            "serverCtx.Audit"
+        ]
+    );
+    assert!(middleware(&s, "GET", "/api/v1/users/{{id}}").is_empty());
+
+    let get = find(&s, "GET", "/api/v1/users/{{id}}");
+    assert_eq!(
+        get.handler.as_deref(),
+        Some("user.GetUserHandler(serverCtx)")
+    );
+    assert_eq!(get.info.summary.as_deref(), Some("Get a user by id"));
+    assert_eq!(query_names(get), ["fields"], "only `form` tags are query");
+    assert_eq!(get.info.headers, ["X-Token"]);
+    assert!(get.info.body.is_none(), "no `json` tags — no body");
+    assert_eq!(get.info.response.as_ref().unwrap().shape, "User");
+
+    let login = find(&s, "POST", "/api/v1/login");
+    let body = login.info.body.as_ref().unwrap();
+    let names: Vec<&str> = body.fields.iter().map(|f| f.name.as_str()).collect();
+    assert_eq!(names, ["email", "password"]);
+}
+
+#[test]
+fn go_restful_builder_chains() {
+    let dir = TempDir::new("restful");
+    dir.write(
+        "users/resource.go",
+        r#"package users
+
+import (
+	"net/http"
+
+	restful "github.com/emicklei/go-restful/v3"
+)
+
+type UserResource struct{}
+
+type User struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+type CreateUser struct {
+	Name string `json:"name" validate:"required"`
+}
+
+func (u UserResource) WebService() *restful.WebService {
+	ws := new(restful.WebService)
+	ws.Path("/users").
+		Consumes(restful.MIME_JSON).
+		Produces(restful.MIME_JSON)
+	ws.Filter(logging)
+
+	ws.Route(ws.GET("/{user-id}").To(u.findUser).
+		Doc("get a user").
+		Param(ws.PathParameter("user-id", "identifier of the user").DataType("string")).
+		Param(ws.QueryParameter("fields", "fields to return").DataType("string")).
+		Param(ws.HeaderParameter("X-Tenant", "tenant")).
+		Writes(User{}).
+		Returns(404, "Not Found", nil))
+
+	ws.Route(ws.POST("").To(u.createUser).
+		Filter(auth).
+		Reads(CreateUser{}).
+		Returns(http.StatusCreated, "Created", User{}))
+
+	ws.Route(ws.Method("PUT").Path("/{user-id}").To(u.updateUser))
+	return ws
+}
+
+func (u UserResource) findUser(req *restful.Request, resp *restful.Response) {
+	_ = req.QueryParameter("verbose")
+	resp.WriteEntity(User{ID: req.PathParameter("user-id")})
+}
+
+func (u UserResource) createUser(req *restful.Request, resp *restful.Response) {}
+
+// Update a user
+func (u UserResource) updateUser(req *restful.Request, resp *restful.Response) {
+	usr := User{}
+	if err := req.ReadEntity(&usr); err != nil {
+		resp.WriteError(http.StatusBadRequest, err)
+		return
+	}
+	resp.WriteHeaderAndEntity(http.StatusOK, usr)
+}
+"#,
+    );
+    let s = scan(&dir);
+    assert_eq!(
+        routes(&s),
+        [
+            "POST /users",
+            "GET /users/{{user-id}}",
+            "PUT /users/{{user-id}}"
+        ]
+    );
+    let get = find(&s, "GET", "/users/{{user-id}}");
+    assert_eq!(get.handler.as_deref(), Some("u.findUser"));
+    assert_eq!(query_names(get), ["verbose", "fields"]);
+    assert_eq!(get.info.headers, ["X-Tenant"]);
+    assert_eq!(get.info.response.as_ref().unwrap().shape, "User");
+    assert_eq!(middleware(&s, "GET", "/users/{{user-id}}"), ["logging"]);
+
+    let post = find(&s, "POST", "/users");
+    assert_eq!(middleware(&s, "POST", "/users"), ["logging", "auth"]);
+    let body = post.info.body.as_ref().unwrap();
+    assert_eq!(body.type_name, "CreateUser");
+    assert!(body.fields[0].required);
+    assert_eq!(post.info.response.as_ref().unwrap().shape, "User");
+
+    let put = find(&s, "PUT", "/users/{{user-id}}");
+    assert_eq!(put.info.summary.as_deref(), Some("Update a user"));
+    assert_eq!(put.info.body.as_ref().unwrap().type_name, "User");
+    assert_eq!(put.info.response.as_ref().unwrap().shape, "User");
+}
+
+#[test]
+fn beego_controllers_namespaces_and_annotations() {
+    let dir = TempDir::new("beego");
+    dir.write(
+        "routers/router.go",
+        r#"package routers
+
+import (
+	"example.com/app/controllers"
+	"github.com/beego/beego/v2/server/web"
+	"github.com/beego/beego/v2/server/web/context"
+)
+
+func init() {
+	web.Router("/", &controllers.MainController{})
+	web.Router("/user/:id:int", &controllers.UserController{}, "get:GetOne;put,patch:Update")
+	web.CtrlGet("/about", (*controllers.MainController).About)
+	ns := web.NewNamespace("/v1",
+		web.NSBefore(auth),
+		web.NSNamespace("/object",
+			web.NSInclude(&controllers.ObjectController{}),
+		),
+		web.NSRouter("/health", &controllers.HealthController{}, "*:Check"),
+		web.NSGet("/ping", func(ctx *context.Context) {}),
+	)
+	web.AddNamespace(ns)
+}
+"#,
+    );
+    dir.write(
+        "controllers/default.go",
+        r#"package controllers
+
+import (
+	"encoding/json"
+
+	beego "github.com/beego/beego/v2/server/web"
+)
+
+type MainController struct{ beego.Controller }
+
+func (c *MainController) Get()  {}
+func (c *MainController) Post() {}
+
+// About page
+func (c *MainController) About() {}
+
+type UserController struct{ beego.Controller }
+
+// GetOne returns a user
+func (c *UserController) GetOne() {
+	_ = c.GetString("fields")
+	c.Data["json"] = User{}
+	c.ServeJSON()
+}
+
+// Update a user
+func (c *UserController) Update() {
+	var u User
+	json.Unmarshal(c.Ctx.Input.RequestBody, &u)
+}
+
+// Get is not a route: the mapping lists the methods
+func (c *UserController) Get() {}
+
+type ObjectController struct{ beego.Controller }
+
+// @Title Get
+// @router /:objectId [get]
+func (o *ObjectController) Get() {}
+
+// @router / [post]
+func (o *ObjectController) Post() {}
+
+func (o *ObjectController) helper() {}
+
+type HealthController struct{ beego.Controller }
+
+func (h *HealthController) Check() {}
+
+type User struct {
+	ID   int    `json:"id"`
+	Name string `json:"name"`
+}
+"#,
+    );
+    let s = scan(&dir);
+    assert_eq!(
+        routes(&s),
+        [
+            "GET /",
+            "POST /",
+            "GET /about",
+            "GET /user/{{id}}",
+            "PATCH /user/{{id}}",
+            "PUT /user/{{id}}",
+            "ANY /v1/health",
+            "POST /v1/object",
+            "GET /v1/object/{{objectId}}",
+            "GET /v1/ping",
+        ]
+    );
+    assert_eq!(middleware(&s, "GET", "/v1/ping"), ["auth"]);
+    assert_eq!(middleware(&s, "GET", "/v1/object/{{objectId}}"), ["auth"]);
+    assert!(middleware(&s, "GET", "/").is_empty());
+
+    let get = find(&s, "GET", "/user/{{id}}");
+    assert_eq!(
+        get.handler.as_deref(),
+        Some("controllers.UserController.GetOne")
+    );
+    assert_eq!(get.info.summary.as_deref(), Some("GetOne returns a user"));
+    assert_eq!(query_names(get), ["fields"]);
+    assert_eq!(get.info.response.as_ref().unwrap().shape, "User");
+    let put = find(&s, "PUT", "/user/{{id}}");
+    assert_eq!(put.info.body.as_ref().unwrap().type_name, "User");
+
+    let about = find(&s, "GET", "/about");
+    assert_eq!(about.info.summary.as_deref(), Some("About page"));
+
+    // Роут из аннотации показывается там, где аннотация.
+    let object = find(&s, "GET", "/v1/object/{{objectId}}");
+    assert_eq!(object.source, PathBuf::from("controllers/default.go"));
+    assert_eq!(object.line, 38);
+    assert_eq!(
+        find(&s, "ANY", "/v1/health").handler.as_deref(),
+        Some("controllers.HealthController.Check")
+    );
+}
+
+#[test]
+fn buffalo_resources_and_skip() {
+    let dir = TempDir::new("buffalo");
+    dir.write(
+        "actions/app.go",
+        r#"package actions
+
+import "github.com/gobuffalo/buffalo"
+
+var app *buffalo.App
+
+func App() *buffalo.App {
+	if app == nil {
+		app = buffalo.New(buffalo.Options{})
+		app.Use(Authorize)
+		app.Middleware.Skip(Authorize, HomeHandler, UsersResource{}.List)
+		app.GET("/", HomeHandler)
+		app.Resource("/users", UsersResource{})
+		api := app.Group("/api/v1")
+		api.Use(apiKey)
+		wr := WidgetsResource{}
+		api.Resource("/categories", wr)
+	}
+	return app
+}
+
+func HomeHandler(c buffalo.Context) error { return nil }
+"#,
+    );
+    dir.write(
+        "actions/users.go",
+        r#"package actions
+
+import (
+	"net/http"
+
+	"github.com/gobuffalo/buffalo"
+)
+
+type User struct {
+	ID   int    `json:"id"`
+	Name string `json:"name"`
+}
+
+type Problem struct {
+	Error string `json:"error"`
+}
+
+type UsersResource struct{ buffalo.Resource }
+
+func (v UsersResource) List(c buffalo.Context) error {
+	return c.Render(http.StatusOK, r.JSON([]User{}))
+}
+
+// Show a user
+func (v UsersResource) Show(c buffalo.Context) error {
+	if c.Param("user_id") == "" {
+		return c.Render(http.StatusNotFound, r.JSON(Problem{}))
+	}
+	return c.Render(http.StatusOK, r.JSON(User{}))
+}
+
+func (v UsersResource) Create(c buffalo.Context) error {
+	u := User{}
+	if err := c.Bind(&u); err != nil {
+		return err
+	}
+	return c.Render(http.StatusCreated, r.JSON(u))
+}
+
+type WidgetsResource struct{ buffalo.Resource }
+
+func (v WidgetsResource) List(c buffalo.Context) error    { return nil }
+func (v WidgetsResource) Destroy(c buffalo.Context) error { return nil }
+"#,
+    );
+    let s = scan(&dir);
+    assert_eq!(
+        routes(&s),
+        [
+            "GET /",
+            "GET /api/v1/categories",
+            "DELETE /api/v1/categories/{{category_id}}",
+            "GET /users",
+            "POST /users",
+            "GET /users/{{user_id}}",
+        ]
+    );
+    assert!(middleware(&s, "GET", "/").is_empty(), "skipped");
+    assert!(middleware(&s, "GET", "/users").is_empty(), "skipped");
+    assert_eq!(middleware(&s, "GET", "/users/{{user_id}}"), ["Authorize"]);
+    assert_eq!(
+        middleware(&s, "DELETE", "/api/v1/categories/{{category_id}}"),
+        ["Authorize", "apiKey"]
+    );
+    let show = find(&s, "GET", "/users/{{user_id}}");
+    assert_eq!(show.handler.as_deref(), Some("UsersResource.Show"));
+    assert_eq!(show.info.summary.as_deref(), Some("Show a user"));
+    assert_eq!(show.info.response.as_ref().unwrap().shape, "User");
+    assert_eq!(
+        find(&s, "GET", "/users")
+            .info
+            .response
+            .as_ref()
+            .unwrap()
+            .shape,
+        "[User]"
+    );
+    assert_eq!(
+        find(&s, "POST", "/users")
+            .info
+            .body
+            .as_ref()
+            .unwrap()
+            .type_name,
+        "User"
+    );
+    assert_eq!(
+        find(&s, "GET", "/api/v1/categories").handler.as_deref(),
+        Some("wr.List")
+    );
+}
+
+#[test]
+fn shared_handler_matches_by_method() {
+    let dir = TempDir::new("shared-handler");
+    dir.write(
+        "svc/routers/router.go",
+        r#"package routers
+
+import "github.com/beego/beego/v2/server/web"
+
+func init() {
+	web.Router("/user/:id", &UserController{}, "put,patch:Update")
+}
+
+type UserController struct{ web.Controller }
+
+func (c *UserController) Update() {}
+"#,
+    );
+    dir.write("api/env.toml", "[env.dev]\nbase = \"http://x\"\n");
+    dir.write(
+        "api/user.outry",
+        "Update: PUT /user/{id} { handler: UserController.Update }\n",
+    );
+    let plan = plan_go(&dir.0.join("svc"), &dir.0.join("api"), &[], DEFAULT_BASE).unwrap();
+    assert_eq!(plan.existing.len(), 1);
+    assert_eq!(plan.existing[0].route.method, "PUT");
+    assert!(
+        plan.existing[0].changes.is_empty(),
+        "{:?}",
+        plan.existing[0].changes
+    );
+    let new: Vec<&str> = plan.new.iter().map(|n| n.route.method.as_str()).collect();
+    assert_eq!(new, ["PATCH"]);
 }

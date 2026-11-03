@@ -1,6 +1,6 @@
 ---
 title: Import routes from Go
-description: Generate .outry requests for every chi, gin and net/http route of a Go service.
+description: Generate .outry requests for every route of a Go service — chi, gin, net/http, go-zero, go-restful, beego, buffalo.
 ---
 
 Outry can read your Go service's source code, find the registered routes and create a `.outry` request
@@ -43,6 +43,10 @@ button next to **Requests**, or the **Routes** tab.
 | [chi](https://github.com/go-chi/chi) | `r.Get/Post/…`, `r.Method("GET", …)`, `r.Handle`, `r.Route("/prefix", func(r chi.Router) {…})`, `r.Mount("/prefix", sub())`, `r.Mount("/prefix", subRouter)`, `r.With(mw).Get(…)`, `r.Use(mw)`, `r.Group(func(r chi.Router) {…})` |
 | [gin](https://github.com/gin-gonic/gin) | `r.GET/POST/…`, `r.Any`, `r.Handle("GET", …)`, `v1 := r.Group("/v1")` with nested groups, `r.Group("/v1").GET(…)`, middleware in `r.Group("/v1", mw)`, `r.GET("/x", mw, h)` and `r.Use(mw)` |
 | `net/http` | `mux.HandleFunc("GET /items/{id}", h)` (Go 1.22 patterns), `http.HandleFunc("/path", h)` |
+| [go-zero](https://github.com/zeromicro/go-zero) | `[]rest.Route{{Method: …, Path: …, Handler: …}}` in `server.AddRoutes` (the goctl-generated `routes.go`), fields in any order, `server.AddRoute(rest.Route{…})`; `rest.WithPrefix`, `rest.WithJwt` / `rest.WithSignature` and `rest.WithMiddlewares([]rest.Middleware{…}, …)` as middleware |
+| [go-restful](https://github.com/emicklei/go-restful) | `ws.Route(ws.GET("/{id}").To(h)…)`, `ws.Method("PUT").Path("/x")`, `ws.Path("/users")` as the prefix, `ws.Filter(mw)` and `.Filter(mw)` in the chain; body, response, query and headers come from `.Reads(T{})`, `.Writes(T{})`, `.Returns(200, "OK", T{})`, `.Param(ws.QueryParameter(…))` / `HeaderParameter` |
+| [beego](https://github.com/beego/beego) | `web.Router("/x", &C{})` (controller methods `Get`, `Post`, …), `web.Router("/x", &C{}, "get,post:Create;put:Update")`, `web.Get/Post/…`, `web.CtrlGet("/x", (*C).Get)`, `web.NewNamespace("/v1", web.NSNamespace(…), web.NSRouter(…), web.NSGet(…))`, `web.NSBefore(mw)`, `web.NSInclude(&C{})` with `// @router /:id [get]` annotations; the old `github.com/astaxie/beego` too |
+| [buffalo](https://github.com/gobuffalo/buffalo) | `app.GET/POST/…`, `app.ANY`, `app.Resource("/users", UsersResource{})` (the `List`, `Show`, `New`, `Create`, `Edit`, `Update`, `Destroy` methods the type declares, parameter `{user_id}`), `api := app.Group("/api")`, `app.Use(mw)`, `app.Middleware.Skip(mw, handlers…)` |
 
 A router is only looked for in files that import it. Routes registered in other functions and packages
 get their prefixes too: `r.Mount("/admin", admin.Routes())`, `users.Register(v1)`,
@@ -57,8 +61,8 @@ preview the file before creating it.
 
 ## Generated files
 
-Path parameters keep the router notation: `{id}`, `{id:[0-9]+}`, `{path...}`, `:id` and `*path` all turn
-into `{id}` / `{path}` — [parameters](/outry/reference/outry-format/#parameters) of the request.
+Path parameters keep the router notation: `{id}`, `{id:[0-9]+}`, `{path...}`, `:id`, `:id:int`,
+`:id([0-9]+)` and `*path` all turn into `{id}` / `{path}` — [parameters](/outry/reference/outry-format/#parameters) of the request.
 
 Outry also reads the handler to show what the request expects:
 
@@ -67,14 +71,18 @@ Outry also reads the handler to show what the request expects:
   `c.ShouldBindJSON(&req)`, `render.DecodeJSON`, your own `decodeJSON(r, &req)`, or a validator object
   with a `Bind` method. Fields come from `json` tags, `binding:"required"` / `validate:"required"` marks
   required ones, nested structs are listed with dots (`user.email`), and a comment after a field is kept;
-- **query** — `r.URL.Query().Get("page")`, `c.Query`, `c.DefaultQuery`, `c.QueryParam`, `r.FormValue`
-  and `c.ShouldBindQuery(&q)` (fields from `form` tags);
+- **query** — `r.URL.Query().Get("page")`, `c.Query`, `c.DefaultQuery`, `c.QueryParam`, `r.FormValue`,
+  `req.QueryParameter`, `c.GetString` / `c.GetInt` in beego controllers and `c.ShouldBindQuery(&q)`
+  (fields from `form` tags);
 - **form** — `c.PostForm`, `c.DefaultPostForm`, `r.PostFormValue` give a `form { … }` body; with a file
   (`c.FormFile("file")`, `r.FormFile`) it becomes `multipart { file: file("") }`;
-- **headers** — `r.Header.Get("X-Tenant-ID")`, `c.GetHeader`;
+- **headers** — `r.Header.Get("X-Tenant-ID")`, `c.GetHeader`, `req.HeaderParameter`;
+- go-zero's `httpx.Parse(r, &req)` splits one struct by tags: `form` → query, `header` → headers,
+  `json` → body (`path` fields are path parameters);
 - **response** — the value of the first successful `json.NewEncoder(w).Encode(v)`, `c.JSON(200, v)`,
-  `render.JSON(w, r, v)` or your own `writeJSON(w, http.StatusOK, v)`; responses with an error status
-  and `gin.H` / maps are skipped. The request gets `expect { body matches Order }`, and the struct
+  `render.JSON(w, r, v)`, your own `writeJSON(w, http.StatusOK, v)`, `httpx.OkJsonCtx(ctx, w, v)`,
+  `resp.WriteEntity(v)`, `c.Render(200, r.JSON(v))` or beego's `c.Data["json"] = v`; responses with an
+  error status and `gin.H` / maps are skipped. The request gets `expect { body matches Order }`, and the struct
   becomes a [shape](#response-shapes).
 
 ```outry title="api/users/post.outry"
@@ -319,6 +327,17 @@ outry import go . --query echo.scm
 | `@mount` + `@mount.func` | Routes of the function with this name get the prefix of `@receiver` plus `@mount.path`; `@mount.pkg` narrows it to a package |
 | `@middleware` | Middleware of a `@route` or `@group`, any number: `(argument_list . (_) @path (_)* @middleware (_) @handler .)` |
 | `@use` + `@middleware` | Middleware for the routes of `@receiver`: as a statement (`r.Use(mw)`) for routes below it in the same function and block, inside a call chain (`r.With(mw).Get`) for that call only |
+| `@body`, `@response` | A value of the body / response type in the route's call chain (`.Reads(User{})`); overrides what the handler gives |
+| `@query`, `@header` | A parameter name, any number: a string, or a call chain — then the first argument of its innermost call (`ws.QueryParameter("page", "…").DataType("int")`) |
+| `@controller` | A controller value instead of a handler (`&UserController{}`, `new(T)`, a variable): with `@mapping` (`"get,post:Create;put:Update"`, `*` — any method) routes come from the string, without it from the type's `Get`, `Post`, … methods |
+| `@include` | Controllers, any number: routes from their methods' `// @router /path [get,post]` comments |
+| `@resource` | A REST resource: the `List`, `Show`, `New`, `Create`, `Edit`, `Update`, `Destroy` methods of its type |
+| `@skip` + `@middleware` + `@skip.handler` | The middleware doesn't apply to routes with these handlers |
+
+Matches with the same `@route` (the same start in the file) merge into one route, so parts of a route can
+come from separate patterns: the links of `ws.GET("/x").Doc("…").To(h)` all start where `ws.GET` does,
+and the fields of a `{Method: …, Path: …}` literal can be in any order. A route needs `@path` (or
+`@include`) from at least one of them.
 
 Captures starting with `_` are free for predicates. A `; outry: import <path>` line limits the query to
-files importing a package with that prefix.
+files importing a package with that prefix; there can be several.
