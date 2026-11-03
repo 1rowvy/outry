@@ -364,7 +364,6 @@ cd app && npm install && npm run tauri dev
 ```
 
 The desktop app on Linux needs `webkit2gtk-4.1` (see [`.github/workflows/ci.yml`](.github/workflows/ci.yml)).
-The roadmap and the release process are in [PLAN.md](PLAN.md).
 
 ## License
 
