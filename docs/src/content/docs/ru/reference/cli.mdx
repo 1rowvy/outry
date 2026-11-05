@@ -42,7 +42,7 @@ outry run <ПУТИ|ИМЕНА>...
 
 ```sh
 outry check [ПУТИ]... [--env <ENV>] [--var <NAME=VALUE>]... [--no-keyring]
-            [--no-fmt] [--go <DIR> | --no-go] [--format text|github]
+            [--no-fmt] [--src <DIR> | --no-src] [--format text|github]
 ```
 
 Без путей (или с путём к самому проекту, `outry check api`) проверяется всё:
@@ -53,11 +53,13 @@ outry check [ПУТИ]... [--env <ENV>] [--var <NAME=VALUE>]... [--no-keyring]
   Хранилище паролей не читается — секрет считается заданным, если он перечислен в `secrets`. Одна и та же
   ошибка в нескольких окружениях печатается один раз;
 - формат, как `outry fmt --check` (`--no-fmt` выключает);
-- Go-код, как [`outry import go --check`](/outry/ru/guides/import-go/), если `go.mod` нашёлся в каталоге
-  проекта или выше, до корня репозитория. `--go <DIR>` указывает сервис, `--no-go` пропускает. Печатается
+- код сервиса, как [`outry import go --check`](/outry/ru/guides/import-go/) или
+  [`outry import rust --check`](/outry/ru/guides/import-rust/), если `go.mod` или `Cargo.toml` нашёлся в
+  каталоге проекта или выше, до корня репозитория; найденный так каталог без роутов пропускается.
+  `--src <DIR>` указывает сервис, `--no-src` пропускает (`--go` / `--no-go` — старые имена). Печатается
   и строка итога [покрытия роутов](/outry/ru/guides/coverage/); ошибкой она не бывает.
 
-С путями проверяются только эти файлы, без Go. `--env` проверяет одно окружение с настоящими переменными —
+С путями проверяются только эти файлы, без кода сервиса. `--env` проверяет одно окружение с настоящими переменными —
 `--var`, `OUTRY_*`, `env.toml` и хранилище паролей (`--no-keyring` выключает). `--format github` печатает
 аннотации GitHub Actions.
 
@@ -66,7 +68,7 @@ api/orders/create.outry:1:1: error: not formatted (`outry fmt`)
 api/orders/create.outry:7:22: error: variable `api_key` is not defined in staging, prod
 api/orders/create.outry:9:13: error: `Seed` is limited to dev and cannot be called in prod
 main.go:42:1: error: route DELETE /orders/{id} has no request (`outry import go` creates api/orders/delete.outry)
-12 files, 3 environments, 18 Go routes: 4 errors, 0 warnings
+12 files, 3 environments, 18 routes: 4 errors, 0 warnings
 ```
 
 ## `outry fmt`
@@ -180,9 +182,21 @@ outry import go [DIR]
 | `--project <DIR>` | Папка проекта с `env.toml` |
 | `--json` | То же, что `--format json` |
 
+## `outry import rust`
+
+Создать запрос `.outry` для каждого роута сервиса на axum, у которого его ещё нет, и сравнить
+существующие с кодом. Подробнее — [Импорт роутов из Rust](/outry/ru/guides/import-rust/).
+
+```sh
+outry import rust [DIR]
+```
+
+`DIR` — крейт или workspace, сканируется рекурсивно без `target/`, `tests/`, `benches/` и `examples/`
+(по умолчанию — текущая папка). Флаги — как у `outry import go`, без `--query`.
+
 ## `outry coverage`
 
-Показать, какие роуты Go-сервиса ничем не проверены: роуты без запроса, запросы без `expect`, коды ответа
+Показать, какие роуты сервиса на Go или Rust ничем не проверены: роуты без запроса, запросы без `expect`, коды ответа
 обработчика, с которыми не сравнивает ни один `expect`. Ничего не отправляется. Подробнее —
 [Покрытие роутов](/outry/ru/guides/coverage/).
 
@@ -190,7 +204,8 @@ outry import go [DIR]
 outry coverage [DIR]
 ```
 
-`DIR` — Go-сервис (по умолчанию — папка с `go.mod`, от проекта вверх до корня репозитория).
+`DIR` — сервис (по умолчанию — папка с `go.mod` или `Cargo.toml`, от проекта вверх до корня
+репозитория).
 
 | Флаг | Описание |
 |------|----------|
@@ -198,14 +213,14 @@ outry coverage [DIR]
 | `--uncovered` | Показать только роуты без запроса, без `expect` или с непроверенными кодами ответа |
 | `--format <F>` | `text` (по умолчанию), `github` (аннотации GitHub Actions), `json` |
 | `--base <NAME>` | Переменная с адресом сервиса в URL `.http` (для сопоставления), по умолчанию `base` |
-| `--query <FILE.scm>` | Дополнительный запрос tree-sitter для другого роутера; можно несколько раз |
+| `--query <FILE.scm>` | Дополнительный запрос tree-sitter для другого Go-роутера; можно несколько раз |
 | `--project <DIR>` | Папка проекта с `env.toml` |
 | `--json` | То же, что `--format json` |
 
 ## `outry lsp`
 
 Языковой сервер для файлов `.outry` через stdin/stdout: ошибки `outry check`, предупреждения окружения,
-расхождения с Go-кодом с Quick Fix, автодополнение, подсказки, переход к определению, форматирование и
+расхождения с кодом сервиса (Go, Rust) с Quick Fix, автодополнение, подсказки, переход к определению, форматирование и
 code lens «▶ Send». Запускается редактором — см. [Редакторы](/outry/ru/guides/editors/).
 
 ```sh

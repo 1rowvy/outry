@@ -1,0 +1,210 @@
+---
+title: Import routes from Rust
+description: Generate .outry requests for every route of an axum service, with bodies, query, headers and response shapes from the handler signatures and serde.
+---
+
+Outry can read an [axum](https://github.com/tokio-rs/axum) service's source code, find the routes and
+create a `.outry` request for every route that doesn't have one yet. It works like
+[the Go import](/outry/guides/import-go/): existing requests are compared with the code,
+`outry import rust --check` fails CI when they drift, and `--fix` updates them.
+
+```sh
+cd my-service
+outry init                # once: api/env.toml with `base`
+outry import rust .       # scan the whole crate or workspace
+```
+
+```txt
++ api/api/users/get.outry          GET /api/users  src/routes.rs:14  List users
++ api/api/users/post.outry         POST /api/users  src/routes.rs:14
++ api/api/users/get-by-id.outry    GET /api/users/{id}  src/routes.rs:15
+= api/health/get.outry             GET /health  src/main.rs:22
+
++ api/shapes.outry  shape User  models::User src/models.rs:8
+
+9 Rust files, 4 routes: 3 new, 1 existing (0 changed), 0 not in code
+created 4 files
+```
+
+The marks, `--dry-run`, `--check`, `--fix`, `--prune` and the output formats are the same as for Go —
+see [Differences from the code](/outry/guides/import-go/#differences-from-the-code) and
+[Checking in CI and fixing](/outry/guides/import-go/#checking-in-ci-and-fixing).
+
+## What is recognized
+
+A router is an expression, and Outry evaluates it the way axum builds it:
+
+| Code | Result |
+|------|--------|
+| `Router::new().route("/users", get(list).post(create))` | `GET /users` → `list`, `POST /users` → `create` |
+| `axum::routing::get(h)`, `any(h)`, `on(MethodFilter::GET.or(MethodFilter::POST), h)` | one route per method; `any` matches any method |
+| `.nest("/api", api_router())`, `.nest(API, users)` | the prefix for every route of the nested router |
+| `.merge(admin::routes())` | the routes of another router as they are |
+| `.layer(l)`, `.route_layer(l)`, `get(h).layer(l)` | [middleware](#middleware) of the routes added before it |
+| `let app = …; let app = app.route(…);`, `app = app.merge(…)` | a variable is its last assignment before it is used |
+| `fn routes(r: Router) -> Router { r.route(…) }` called as `routes(app)` | a function call is its result, parameters are the arguments |
+
+Routers built in other functions, modules and crates of the workspace get their prefixes:
+`users::router()` in `.nest("/users", users::router())` is not a router of its own. Names are resolved
+by modules (`src/http/users.rs` is `http::users`, `mod x { … }`) and `use`; what can't be resolved is
+looked up by name in the whole folder.
+
+Paths are string literals and constants (`const API: &str = "/api/v1"`), also when passed through a
+helper function's parameter. `{id}` and `{*rest}` (axum 0.8) and `:id`, `*rest` (0.7) become
+[parameters](/outry/reference/outry-format/#parameters) `{id}` / `{rest}`. A path computed at runtime
+is reported as a warning.
+
+`target/`, `tests/`, `benches/`, `examples/`, `build.rs`, `#[cfg(test)]` modules and `#[test]`
+functions are skipped.
+
+## Generated files
+
+The handler's signature tells what the request needs:
+
+- **description** — the `///` doc comment; a short first line (`/// List users.`) becomes the request
+  name;
+- **body** — `Json<T>` (also `axum::Json`, `ValidatedJson<T>`, `WithRejection<Json<T>, E>`,
+  `Option<Json<T>>`): the fields of `T`;
+- **query** — `Query<T>` (`axum_extra`'s too): the fields of `T` go to `params` and `query`;
+- **form** — `Form<T>`: a `form { … }` body;
+- **headers** — `TypedHeader<Authorization<Bearer>>` gives `Authorization`, `TypedHeader<UserAgent>`
+  gives `User-Agent`; with a `HeaderMap` parameter — the headers the handler reads:
+  `headers.get("x-tenant-id")`, `headers.get(header::AUTHORIZATION)`;
+- **response** — `Json<T>` in the return type, also inside `Result<…>`, `Option<…>` and tuples
+  (`(StatusCode, Json<T>)`); for `impl IntoResponse` — the first `Json(value)` in the body whose type
+  is known (a struct literal or `let v: T`), skipping those next to an error status. The request gets
+  `expect { body matches User }`, and the struct becomes a [shape](#response-shapes).
+
+Fields follow serde: `rename`, `rename_all` (`camelCase`, `kebab-case`, …), `skip`,
+`skip_serializing` / `skip_deserializing`, `flatten`, `transparent`. A field is required unless it is
+an `Option` or has `#[serde(default)]` (or the struct has); nested structs are listed with dots
+(`address.city`). The `///` comment of a field or a `//` comment after it is kept.
+
+```rust title="src/http/users.rs"
+#[derive(Deserialize)]
+pub struct ListParams {
+    /// Page number
+    pub page: Option<u32>,
+    pub per_page: u32, // items per page
+}
+
+/// List users.
+pub async fn list(
+    Query(params): Query<ListParams>,
+    headers: HeaderMap,
+) -> Result<Json<Vec<User>>, AppError> {
+    let tenant = headers.get("x-tenant-id");
+    // …
+}
+```
+
+```outry title="api/api/users/get.outry"
+// axum src/routes.rs:14 → users.list
+//
+// Query:
+//   page      Option<u32>  Page number
+//   per_page  u32          required  items per page
+// Headers: x-tenant-id
+// Response: Vec<User>
+ListUsers: GET /api/users {
+  handler: users.list
+
+  params {
+    page: null
+    per_page: null
+  }
+
+  query {
+    page
+    per_page
+  }
+
+  headers { x-tenant-id: "" }
+  expect { body matches [User] }
+}
+```
+
+`handler:` is the function with its module: `users.list` for `crate::http::users::list`,
+`UserHandler.list` for a method. Handlers that are only a verb (`create`, `get`, `delete`) get the
+resource in the name: `CreateUsers`, `GetUsersById`.
+
+## Status codes
+
+The handler's status codes feed [route coverage](/outry/guides/coverage/):
+
+- `StatusCode::CREATED`, `StatusCode::NOT_FOUND`, `StatusCode::from_u16(404)` anywhere in the body;
+- `Redirect::to` (303), `Redirect::temporary` (307), `Redirect::permanent` (308);
+- variants of your error type: when an `impl` of the type maps them to codes in a `match` (in
+  `into_response` or a helper like `fn status_code(&self)`), `AppError::NotFound` in the handler counts as
+  404 — `.ok_or(AppError::NotFound)?`, `Err(AppError::Validation(…))`, and constructors that return a
+  variant (`AppError::unprocessable_entity(…)`).
+
+```rust title="src/error.rs"
+impl IntoResponse for AppError {
+    fn into_response(self) -> Response {
+        let status = match self {
+            Self::NotFound => StatusCode::NOT_FOUND,
+            Self::Validation(_) => StatusCode::UNPROCESSABLE_ENTITY,
+            Self::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
+        };
+        status.into_response()
+    }
+}
+```
+
+A handler without a successful code answers 200.
+
+## Middleware
+
+`.layer(…)` applies to the routes added before it, as in axum; the list in the generated file goes from
+the outermost layer in:
+
+| Layer | Name |
+|-------|------|
+| `middleware::from_fn(auth::require_user)`, `from_fn_with_state(state, require_user)` | `auth.require_user`, `require_user` |
+| `from_extractor::<RequireAuth>()` | `RequireAuth` |
+| `CorsLayer::permissive()`, `TraceLayer::new_for_http()` | `CorsLayer`, `TraceLayer` |
+| `ServiceBuilder::new().layer(a).layer(b)` | `a`, `b` |
+| `auth_layer()`, a variable | the function / the variable's value |
+
+Headers for a middleware come from `[import.middleware]` in `env.toml`, as for Go — see
+[Middleware](/outry/guides/import-go/#middleware):
+
+```toml title="api/env.toml"
+[import.middleware]
+require_user = { headers = { Authorization = "Bearer ${Login().body.token}" } }
+```
+
+## Response shapes
+
+Response structs become [shapes](/outry/reference/outry-format/#shapes) in `shapes.outry`, one per Rust
+type, with its path and location:
+
+```outry title="api/shapes.outry"
+// models::User — src/models.rs:8
+shape User {
+  id: integer,
+  fullName: string,
+  avatarUrl?: string | null,
+  manager: User | null,
+  role: string,
+  createdAt: string,
+}
+```
+
+`Option<T>` may be `null`, `skip_serializing_if` makes a field optional, `Vec<T>` and sets are arrays,
+maps are `{}`, `serde_json::Value` is `any`. `String`, `Uuid`, `chrono` / `time` dates, `Decimal` and
+enums of unit variants are strings; a newtype (`struct UserId(Uuid)`) is its inner type. Generic structs
+are written inline: `Json<Page<User>>` gives `{ items: [User], total: integer }`; a default type
+parameter (`struct ArticleBody<T = Article>`) is used when none is given. The shapes are compared with
+the code [like Go structs](/outry/guides/import-go/#response-shapes).
+
+## Check and coverage
+
+`outry check` without paths compares the project with the code when a `go.mod` or `Cargo.toml` is found
+in the project folder or above it, up to the repository root (`--src <DIR>` points to the service,
+`--no-src` skips it). A crate without axum routes is not compared. [`outry coverage`](/outry/guides/coverage/),
+the [desktop app](/outry/guides/desktop-app/)'s **Routes** tab and the
+[language server](/outry/guides/editors/) work with Rust services the same way.
+
+Not supported yet: routers other than axum (actix-web, rocket, poem) and routes declared by macros.

@@ -101,7 +101,7 @@ const RESOURCE_ACTIONS: &[(&str, &str, &str)] = &[
     ("Destroy", "DELETE", "/{}"),
 ];
 
-const SKIP_DIRS: &[&str] = &["vendor", "testdata", "node_modules"];
+const SKIP_DIRS: &[&str] = &["vendor", "testdata", "node_modules", "target"];
 
 /// Методы, которые можно указать в `@method`. Остальное (`Any`, `Handle`) — любой метод.
 const METHODS: &[&str] = &[

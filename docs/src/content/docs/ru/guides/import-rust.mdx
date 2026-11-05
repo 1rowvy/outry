@@ -1,0 +1,210 @@
+---
+title: Импорт роутов из Rust
+description: Запросы .outry для каждого роута сервиса на axum — тело, query, заголовки и shape ответов из сигнатур обработчиков и serde.
+---
+
+Outry читает исходники сервиса на [axum](https://github.com/tokio-rs/axum), находит роуты и создаёт
+`.outry`-запрос для каждого роута, у которого его ещё нет. Всё работает как
+[импорт из Go](/outry/ru/guides/import-go/): существующие запросы сравниваются с кодом,
+`outry import rust --check` роняет CI при расхождениях, `--fix` их исправляет.
+
+```sh
+cd my-service
+outry init                # один раз: api/env.toml с `base`
+outry import rust .       # сканировать весь крейт или workspace
+```
+
+```txt
++ api/api/users/get.outry          GET /api/users  src/routes.rs:14  List users
++ api/api/users/post.outry         POST /api/users  src/routes.rs:14
++ api/api/users/get-by-id.outry    GET /api/users/{id}  src/routes.rs:15
+= api/health/get.outry             GET /health  src/main.rs:22
+
++ api/shapes.outry  shape User  models::User src/models.rs:8
+
+9 Rust files, 4 routes: 3 new, 1 existing (0 changed), 0 not in code
+created 4 files
+```
+
+Значки, `--dry-run`, `--check`, `--fix`, `--prune` и форматы вывода — те же, что для Go: см.
+[Расхождения с кодом](/outry/ru/guides/import-go/#расхождения-с-кодом) и
+[Проверка в CI и исправление](/outry/ru/guides/import-go/#проверка-в-ci-и-исправление).
+
+## Что распознаётся
+
+Роутер — это выражение, и Outry вычисляет его так же, как его строит axum:
+
+| Код | Результат |
+|-----|-----------|
+| `Router::new().route("/users", get(list).post(create))` | `GET /users` → `list`, `POST /users` → `create` |
+| `axum::routing::get(h)`, `any(h)`, `on(MethodFilter::GET.or(MethodFilter::POST), h)` | по роуту на метод; `any` — любой метод |
+| `.nest("/api", api_router())`, `.nest(API, users)` | префикс для всех роутов вложенного роутера |
+| `.merge(admin::routes())` | роуты другого роутера как есть |
+| `.layer(l)`, `.route_layer(l)`, `get(h).layer(l)` | [middleware](#middleware) роутов, добавленных до него |
+| `let app = …; let app = app.route(…);`, `app = app.merge(…)` | переменная — её последнее присваивание до использования |
+| `fn routes(r: Router) -> Router { r.route(…) }`, вызванная как `routes(app)` | вызов функции — её результат, параметры — аргументы |
+
+Роутеры из других функций, модулей и крейтов workspace получают свои префиксы: `users::router()` в
+`.nest("/users", users::router())` отдельным роутером не считается. Имена разрешаются по модулям
+(`src/http/users.rs` — это `http::users`, `mod x { … }`) и `use`; что не разрешилось — ищется по имени
+во всём каталоге.
+
+Пути — строковые литералы и константы (`const API: &str = "/api/v1"`), в том числе переданные через
+параметр функции-помощника. `{id}` и `{*rest}` (axum 0.8), `:id` и `*rest` (0.7) становятся
+[параметрами](/outry/ru/reference/outry-format/#параметры) `{id}` / `{rest}`. Путь, вычисляемый во
+время работы, — предупреждение.
+
+`target/`, `tests/`, `benches/`, `examples/`, `build.rs`, модули `#[cfg(test)]` и функции `#[test]`
+пропускаются.
+
+## Что создаётся
+
+Что передавать в запрос, видно из сигнатуры обработчика:
+
+- **описание** — doc-комментарий `///`; короткая первая строка (`/// List users.`) становится именем
+  запроса;
+- **тело** — `Json<T>` (и `axum::Json`, `ValidatedJson<T>`, `WithRejection<Json<T>, E>`,
+  `Option<Json<T>>`): поля `T`;
+- **query** — `Query<T>` (и из `axum_extra`): поля `T` попадают в `params` и `query`;
+- **форма** — `Form<T>`: тело `form { … }`;
+- **заголовки** — `TypedHeader<Authorization<Bearer>>` даёт `Authorization`, `TypedHeader<UserAgent>` —
+  `User-Agent`; с параметром `HeaderMap` — заголовки, которые читает обработчик:
+  `headers.get("x-tenant-id")`, `headers.get(header::AUTHORIZATION)`;
+- **ответ** — `Json<T>` в типе результата, в том числе внутри `Result<…>`, `Option<…>` и кортежей
+  (`(StatusCode, Json<T>)`); для `impl IntoResponse` — первый `Json(значение)` в теле с известным типом
+  (литерал структуры или `let v: T`), кроме стоящих рядом с кодом ошибки. Запрос получает
+  `expect { body matches User }`, а структура — [shape](#shape-ответов).
+
+Поля — по serde: `rename`, `rename_all` (`camelCase`, `kebab-case`, …), `skip`,
+`skip_serializing` / `skip_deserializing`, `flatten`, `transparent`. Поле обязательное, если это не
+`Option` и у него (или у структуры) нет `#[serde(default)]`; вложенные структуры — через точку
+(`address.city`). Комментарий `///` над полем или `//` после него сохраняется.
+
+```rust title="src/http/users.rs"
+#[derive(Deserialize)]
+pub struct ListParams {
+    /// Page number
+    pub page: Option<u32>,
+    pub per_page: u32, // items per page
+}
+
+/// List users.
+pub async fn list(
+    Query(params): Query<ListParams>,
+    headers: HeaderMap,
+) -> Result<Json<Vec<User>>, AppError> {
+    let tenant = headers.get("x-tenant-id");
+    // …
+}
+```
+
+```outry title="api/api/users/get.outry"
+// axum src/routes.rs:14 → users.list
+//
+// Query:
+//   page      Option<u32>  Page number
+//   per_page  u32          required  items per page
+// Headers: x-tenant-id
+// Response: Vec<User>
+ListUsers: GET /api/users {
+  handler: users.list
+
+  params {
+    page: null
+    per_page: null
+  }
+
+  query {
+    page
+    per_page
+  }
+
+  headers { x-tenant-id: "" }
+  expect { body matches [User] }
+}
+```
+
+`handler:` — функция с модулем: `users.list` для `crate::http::users::list`, `UserHandler.list` для
+метода. Обработчики-глаголы (`create`, `get`, `delete`) получают в имени ресурс: `CreateUsers`,
+`GetUsersById`.
+
+## Коды ответа
+
+Коды ответа обработчика нужны для [покрытия роутов](/outry/ru/guides/coverage/):
+
+- `StatusCode::CREATED`, `StatusCode::NOT_FOUND`, `StatusCode::from_u16(404)` в любом месте тела;
+- `Redirect::to` (303), `Redirect::temporary` (307), `Redirect::permanent` (308);
+- варианты вашего типа ошибки: если `impl` этого типа сопоставляет им коды в `match` (в `into_response`
+  или в помощнике вроде `fn status_code(&self)`), `AppError::NotFound` в обработчике считается за 404 —
+  `.ok_or(AppError::NotFound)?`, `Err(AppError::Validation(…))` и конструкторы, возвращающие вариант
+  (`AppError::unprocessable_entity(…)`).
+
+```rust title="src/error.rs"
+impl IntoResponse for AppError {
+    fn into_response(self) -> Response {
+        let status = match self {
+            Self::NotFound => StatusCode::NOT_FOUND,
+            Self::Validation(_) => StatusCode::UNPROCESSABLE_ENTITY,
+            Self::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
+        };
+        status.into_response()
+    }
+}
+```
+
+Обработчик без успешного кода отвечает 200.
+
+## Middleware
+
+`.layer(…)` действует на роуты, добавленные до него, как в axum; список в созданном файле идёт от
+внешнего слоя внутрь:
+
+| Слой | Имя |
+|------|-----|
+| `middleware::from_fn(auth::require_user)`, `from_fn_with_state(state, require_user)` | `auth.require_user`, `require_user` |
+| `from_extractor::<RequireAuth>()` | `RequireAuth` |
+| `CorsLayer::permissive()`, `TraceLayer::new_for_http()` | `CorsLayer`, `TraceLayer` |
+| `ServiceBuilder::new().layer(a).layer(b)` | `a`, `b` |
+| `auth_layer()`, переменная | функция / значение переменной |
+
+Заголовки для middleware задаются в `[import.middleware]` в `env.toml`, как для Go — см.
+[Middleware](/outry/ru/guides/import-go/#middleware):
+
+```toml title="api/env.toml"
+[import.middleware]
+require_user = { headers = { Authorization = "Bearer ${Login().body.token}" } }
+```
+
+## Shape ответов
+
+Структуры из ответов становятся [shape](/outry/ru/reference/outry-format/#формы) в `shapes.outry`, по
+одному на тип Rust, с путём и местом в комментарии:
+
+```outry title="api/shapes.outry"
+// models::User — src/models.rs:8
+shape User {
+  id: integer,
+  fullName: string,
+  avatarUrl?: string | null,
+  manager: User | null,
+  role: string,
+  createdAt: string,
+}
+```
+
+`Option<T>` может быть `null`, `skip_serializing_if` делает поле необязательным, `Vec<T>` и множества —
+массивы, словари — `{}`, `serde_json::Value` — `any`. `String`, `Uuid`, даты `chrono` / `time`, `Decimal`
+и перечисления из вариантов без данных — строки; newtype (`struct UserId(Uuid)`) — его внутренний тип.
+Обобщённые структуры пишутся на месте: `Json<Page<User>>` даёт `{ items: [User], total: integer }`;
+параметр по умолчанию (`struct ArticleBody<T = Article>`) подставляется, если тип не указан. Shape
+сравниваются с кодом [так же, как структуры Go](/outry/ru/guides/import-go/#shape-ответов).
+
+## Проверка и покрытие
+
+`outry check` без путей сверяет проект с кодом, если в каталоге проекта или выше, до корня
+репозитория, есть `go.mod` или `Cargo.toml` (`--src <DIR>` указывает сервис, `--no-src` отключает
+сверку). Крейт без роутов axum не сверяется. [`outry coverage`](/outry/ru/guides/coverage/), вкладка
+**Routes** [приложения](/outry/ru/guides/desktop-app/) и [языковой сервер](/outry/ru/guides/editors/)
+работают с сервисами на Rust так же.
+
+Пока не поддерживаются: роутеры кроме axum (actix-web, rocket, poem) и роуты, объявленные макросами.

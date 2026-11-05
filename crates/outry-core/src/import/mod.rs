@@ -1,4 +1,4 @@
-//! Импорт роутов из кода сервиса: находим роуты, сравниваем с запросами проекта (`*.outry` и
+//! Импорт роутов из кода сервиса (Go — `go.rs`, Rust/axum — `rust.rs`): находим роуты, сравниваем с запросами проекта (`*.outry` и
 //! `*.http`) и создаём `*.outry` для отсутствующих. Существующие файлы меняются только правками
 //! (`fixes` + `write_fixes`, `--fix`) и удаляются только `prune` (`--prune`).
 //!
@@ -11,6 +11,8 @@
 mod coverage;
 mod diff;
 pub mod go;
+pub mod rust;
+mod sample;
 mod shapes;
 mod udiff;
 
@@ -376,6 +378,47 @@ pub fn scan_go(src_dir: &Path, extra: &[(String, String)]) -> Result<Scan> {
         queries.push(go::RouterQuery::new(name, src)?);
     }
     go::scan(src_dir, &queries)
+}
+
+/// Роуты Rust-кода (axum) в `src_dir`.
+pub fn scan_rust(src_dir: &Path) -> Result<Scan> {
+    rust::scan(src_dir)
+}
+
+/// Роуты сервиса в `src_dir`: Go, если там `go.mod`, Rust — если `Cargo.toml`, без обоих — оба
+/// языка. `extra` — свои шаблоны `.scm` для Go.
+pub fn scan_source(src_dir: &Path, extra: &[(String, String)]) -> Result<Scan> {
+    let go = src_dir.join("go.mod").is_file();
+    let rust = src_dir.join("Cargo.toml").is_file();
+    let mut scan = Scan::default();
+    let mut add = |s: Scan| {
+        scan.files += s.files;
+        scan.routes.extend(s.routes);
+        scan.shapes.extend(s.shapes);
+        scan.warnings.extend(s.warnings);
+    };
+    if go || !rust {
+        add(scan_go(src_dir, extra)?);
+    }
+    if rust || !go {
+        add(rust::scan(src_dir)?);
+    }
+    Ok(scan)
+}
+
+/// Каталог сервиса для проекта в `project_root`: где `go.mod` или `Cargo.toml`, от проекта
+/// вверх до корня репозитория (`.git`).
+pub fn service_dir(project_root: &Path) -> Option<PathBuf> {
+    let root = std::fs::canonicalize(project_root).ok()?;
+    for dir in root.ancestors() {
+        if dir.join("go.mod").is_file() || dir.join("Cargo.toml").is_file() {
+            return Some(dir.to_path_buf());
+        }
+        if dir.join(".git").exists() {
+            break;
+        }
+    }
+    None
 }
 
 /// Раскладывает найденные роуты на новые и уже существующие, сравнивает существующие с кодом,
@@ -1146,7 +1189,10 @@ fn title(route: &Route, func: Option<&str>) -> (String, Vec<String>) {
         (Some(s), _) => s.to_string(),
         (None, Some(f)) => {
             doc.extend(summary.map(String::from));
-            words(f)
+            match verb_title(route, f) {
+                Some(t) => t,
+                None => words(f),
+            }
         }
         (None, None) => {
             doc.extend(summary.map(String::from));
@@ -1173,6 +1219,27 @@ fn title(route: &Route, func: Option<&str>) -> (String, Vec<String>) {
     };
     doc.extend(info.description.iter().cloned());
     (title, doc)
+}
+
+/// Обработчик-глагол (`users::create`, `get`) — мало о чём говорит: добавляем ресурс из пути.
+/// `create` + `POST /users` → `Create users`, `get` + `/users/{{id}}` → `Get users by id`.
+fn verb_title(route: &Route, func: &str) -> Option<String> {
+    const VERBS: &[&str] = &[
+        "get", "list", "create", "update", "delete", "remove", "show", "index", "store", "destroy",
+        "edit", "patch", "put", "post", "replace", "upsert", "search", "find", "fetch", "read",
+    ];
+    if !VERBS.contains(&func) {
+        return None;
+    }
+    let resource = route
+        .path
+        .split('/')
+        .rfind(|s| !s.is_empty() && !s.contains("{{"))?;
+    let mut t = format!("{func} {}", words(resource).to_lowercase());
+    if route.path.ends_with("}}") {
+        t.push_str(" by id");
+    }
+    Some(capitalize(&t))
 }
 
 /// `CreateUser` → `Create user`, `getHTTPStatus` → `Get http status`.

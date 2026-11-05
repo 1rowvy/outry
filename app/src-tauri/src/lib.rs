@@ -869,13 +869,13 @@ struct ImportReport {
     created: Vec<String>,
 }
 
-/// План импорта и покрытие по одному сканированию Go-кода.
+/// План импорта и покрытие по одному сканированию кода сервиса (Go или Rust).
 fn scan_go(
     dir: &Path,
     root: &Path,
 ) -> outry_core::Result<(outry_core::import::Plan, outry_core::import::Coverage)> {
     use outry_core::import;
-    let scan = import::scan_go(dir, &[])?;
+    let scan = import::scan_source(dir, &[])?;
     let coverage = import::coverage(root, scan.clone(), import::DEFAULT_BASE)?;
     Ok((import::plan(root, scan, import::DEFAULT_BASE)?, coverage))
 }
@@ -888,7 +888,8 @@ fn default_source_dir(root: &Path) -> PathBuf {
     }
 }
 
-/// Роуты из Go-кода в `dir` против файлов проекта (`outry import go`); `apply` — создать недостающие.
+/// Роуты из кода сервиса в `dir` (Go или Rust) против файлов проекта (`outry import go|rust`);
+/// `apply` — создать недостающие.
 #[tauri::command]
 async fn import_go(
     state: State<'_, AppState>,

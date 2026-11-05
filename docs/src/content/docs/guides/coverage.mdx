@@ -1,10 +1,11 @@
 ---
 title: Route coverage
-description: Find the routes of a Go service that no request checks, and fail CI below a threshold.
+description: Find the routes of a Go or Rust service that no request checks, and fail CI below a threshold.
 ---
 
 `outry coverage` answers "which endpoints of the service are not tested at all". It reads the routes from
-the Go code (as [`outry import go`](/outry/guides/import-go/)), matches them with the requests in the
+the Go or Rust code (as [`outry import go`](/outry/guides/import-go/) and
+[`outry import rust`](/outry/guides/import-rust/)), matches them with the requests in the
 project and looks at their `expect` blocks. Nothing is sent.
 
 ```sh
@@ -27,7 +28,7 @@ Every route gets one of three levels:
 
 | Level | Meaning |
 |-------|---------|
-| `no request` | The route is in the Go code, but no `.outry` or `.http` request points at it. `outry import go` creates one. |
+| `no request` | The route is in the code, but no `.outry` or `.http` request points at it. `outry import go` creates one. |
 | `no expect` | There is a request, but nothing checks its response. |
 | `checked` | A request to the route has `expect` — its own, or a check of its result somewhere else. |
 
@@ -74,8 +75,8 @@ but do not mark a specific code. Codes set inside helper functions the handler c
 outry coverage [DIR] [--min <N>] [--uncovered] [--format text|github|json]
 ```
 
-`DIR` is the Go service. By default it is the folder with `go.mod`, searched from the project up to the
-repository root.
+`DIR` is the Go or Rust service. By default it is the folder with `go.mod` or `Cargo.toml`, searched from
+the project up to the repository root.
 
 | Flag | Description |
 |------|-------------|
@@ -87,7 +88,7 @@ repository root.
 | `--query <FILE.scm>` | An extra tree-sitter query for another router; can be repeated |
 | `--project <DIR>` | Project folder with `env.toml` |
 
-`outry check` prints a one-line summary of coverage when it finds a `go.mod`. Low coverage is not an
+`outry check` prints a one-line summary of coverage when it finds a `go.mod` or `Cargo.toml`. Low coverage is not an
 error there; use `outry coverage --min` to enforce a threshold.
 
 ## In CI
@@ -98,7 +99,7 @@ error there; use `outry coverage --min` to enforce a threshold.
 ```
 
 With `--format github` every gap becomes a warning annotation on the pull request: a route without a request
-is marked on its registration in Go, a request without `expect` on the request, and an unchecked status code
+is marked on its registration in the code, a request without `expect` on the request, and an unchecked status code
 on the line of the handler that returns it. Below the threshold the job fails with an error annotation.
 
 `--format json` prints the totals (`percent`, `checked`, `requested`, `total`, `statuses_checked`,

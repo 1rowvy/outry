@@ -1,7 +1,7 @@
 {
   "name": "outry-vscode",
   "displayName": "Outry API Client",
-  "description": "Executable API specs in your repo: send .outry requests, check responses, keep them in sync with your Go routes.",
+  "description": "Executable API specs in your repo: send .outry requests, check responses, keep them in sync with your Go or Rust routes.",
   "version": "0.12.0",
   "publisher": "outry",
   "license": "MIT",
@@ -260,12 +260,12 @@
         "outry.import": {
           "type": "boolean",
           "default": true,
-          "description": "Compare requests with the Go code and offer quick fixes."
+          "description": "Compare requests with the service code (Go, Rust) and offer quick fixes."
         },
         "outry.goDir": {
           "type": "string",
           "default": "",
-          "markdownDescription": "Folder with the Go code, relative to the workspace folder. Empty: the parent of `api/`, else the project folder."
+          "markdownDescription": "Folder with the service code (Go or Rust), relative to the workspace folder. Empty: the parent of `api/`, else the project folder."
         }
       }
     }

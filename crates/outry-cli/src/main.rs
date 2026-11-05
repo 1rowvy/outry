@@ -67,9 +67,9 @@ enum Cmd {
     },
     /// Проверить проект без отправки запросов. Без путей — весь проект: синтаксис, имена вызовов,
     /// аргументы, формы, циклы; каждое окружение (вызовы, закрытые `only`, недостающие переменные);
-    /// формат (`outry fmt`); расхождения с Go-кодом (`outry import go --check`) и итог покрытия
-    /// (`outry coverage`), если выше есть go.mod.
-    /// С путями — только эти файлы, без Go.
+    /// формат (`outry fmt`); расхождения с кодом сервиса (`outry import go|rust --check`) и итог
+    /// покрытия (`outry coverage`), если выше есть go.mod или Cargo.toml.
+    /// С путями — только эти файлы, без кода сервиса.
     Check(CheckArgs),
     /// Привести *.outry к одному виду (как gofmt): отступы, порядок полей, кавычки, переносы.
     /// Комментарии сохраняются
@@ -143,11 +143,12 @@ enum Cmd {
         #[command(subcommand)]
         cmd: ImportCmd,
     },
-    /// Покрытие роутов Go-сервиса запросами: на какие нет запроса, какие ничего не проверяют
-    /// (`expect`), какие коды ответа обработчика (`c.JSON(404, …)`) не проверены. Без HTTP
+    /// Покрытие роутов сервиса (Go, Rust) запросами: на какие нет запроса, какие ничего не
+    /// проверяют (`expect`), какие коды ответа обработчика (`c.JSON(404, …)`,
+    /// `StatusCode::NOT_FOUND`) не проверены. Без HTTP
     Coverage(coverage::Args),
     /// Языковой сервер (LSP) для *.outry через stdin/stdout: ошибки `outry check` и расхождения
-    /// с Go-кодом, автодополнение, подсказки, переход к определению, «Send» над запросом.
+    /// с кодом сервиса, автодополнение, подсказки, переход к определению, «Send» над запросом.
     /// Запускается редактором, см. https://1rowvy.github.io/outry/guides/editors/
     Lsp {
         /// Окружение для переменных и запусков (по умолчанию — `default` из env.toml)
@@ -192,35 +193,52 @@ enum ImportCmd {
         /// Каталог с исходниками (рекурсивно, без vendor/ и *_test.go)
         #[arg(default_value = ".")]
         dir: PathBuf,
-        /// Только показать, что будет создано, исправлено и удалено
-        #[arg(long)]
-        dry_run: bool,
-        /// Проверка для CI: ничего не пишет, отчёт по файлам; код выхода 1, если запросы
-        /// разошлись с кодом (новые и пропавшие роуты, ошибки в запросах и shape)
-        #[arg(long, conflicts_with_all = ["fix", "prune", "dry_run"])]
-        check: bool,
-        /// Исправить расхождения, которые правятся без потери смысла (с --dry-run — показать diff)
-        #[arg(long)]
-        fix: bool,
-        /// Удалить файлы, в которых все запросы — к роутам, которых в коде больше нет
-        #[arg(long)]
-        prune: bool,
-        /// Переменная с адресом сервиса в старых *.http: {{base}}/users (для сопоставления)
-        #[arg(long, default_value = outry_core::import::DEFAULT_BASE)]
-        base: String,
+        #[command(flatten)]
+        args: ImportArgs,
         /// Свой шаблон-запрос tree-sitter для роутера (можно несколько раз)
         #[arg(long = "query", value_name = "FILE.scm")]
         queries: Vec<PathBuf>,
-        /// Каталог проекта с env.toml (по умолчанию ищется вверх от текущего)
-        #[arg(long)]
-        project: Option<PathBuf>,
-        /// Формат вывода: text, github (аннотации GitHub Actions), json
-        #[arg(long, value_enum, default_value_t = ImportFormat::Text)]
-        format: ImportFormat,
-        /// То же, что --format json
-        #[arg(long)]
-        json: bool,
     },
+    /// Роуты из Rust: axum. Сканируется весь каталог — роутеры из других модулей
+    /// (`.nest("/users", users::router())`, `.merge(…)`) получают свои префиксы, `.layer(…)` —
+    /// middleware. Тело, query и заголовки — из экстракторов (`Json<T>`, `Query<T>`, `HeaderMap`),
+    /// поля — по serde; ответ — из `Json<T>` в типе результата.
+    Rust {
+        /// Каталог с исходниками (рекурсивно, без target/, tests/, benches/, examples/)
+        #[arg(default_value = ".")]
+        dir: PathBuf,
+        #[command(flatten)]
+        args: ImportArgs,
+    },
+}
+
+#[derive(clap::Args)]
+struct ImportArgs {
+    /// Только показать, что будет создано, исправлено и удалено
+    #[arg(long)]
+    dry_run: bool,
+    /// Проверка для CI: ничего не пишет, отчёт по файлам; код выхода 1, если запросы
+    /// разошлись с кодом (новые и пропавшие роуты, ошибки в запросах и shape)
+    #[arg(long, conflicts_with_all = ["fix", "prune", "dry_run"])]
+    check: bool,
+    /// Исправить расхождения, которые правятся без потери смысла (с --dry-run — показать diff)
+    #[arg(long)]
+    fix: bool,
+    /// Удалить файлы, в которых все запросы — к роутам, которых в коде больше нет
+    #[arg(long)]
+    prune: bool,
+    /// Переменная с адресом сервиса в старых *.http: {{base}}/users (для сопоставления)
+    #[arg(long, default_value = outry_core::import::DEFAULT_BASE)]
+    base: String,
+    /// Каталог проекта с env.toml (по умолчанию ищется вверх от текущего)
+    #[arg(long)]
+    project: Option<PathBuf>,
+    /// Формат вывода: text, github (аннотации GitHub Actions), json
+    #[arg(long, value_enum, default_value_t = ImportFormat::Text)]
+    format: ImportFormat,
+    /// То же, что --format json
+    #[arg(long)]
+    json: bool,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
@@ -245,11 +263,17 @@ struct CheckArgs {
     /// Не проверять формат
     #[arg(long)]
     no_fmt: bool,
-    /// Каталог Go-сервиса (по умолчанию — где go.mod, вверх от проекта до .git)
-    #[arg(long, value_name = "DIR", conflicts_with = "no_go")]
+    /// Каталог сервиса на Go или Rust (по умолчанию — где go.mod или Cargo.toml, вверх от
+    /// проекта до .git)
+    #[arg(
+        long,
+        visible_alias = "src",
+        value_name = "DIR",
+        conflicts_with = "no_go"
+    )]
     go: Option<PathBuf>,
-    /// Не сверять с Go-кодом
-    #[arg(long)]
+    /// Не сверять с кодом сервиса
+    #[arg(long, visible_alias = "no-src")]
     no_go: bool,
     /// Формат вывода: text, github (аннотации GitHub Actions)
     #[arg(long, value_enum, default_value_t = CheckFormat::Text)]
@@ -562,33 +586,39 @@ fn check(args: CheckArgs) -> anyhow::Result<ExitCode> {
         }
     }
 
+    let explicit = go.is_some();
     let go_dir = match go {
         Some(dir) => Some(dir),
-        None if whole && !no_go && project.has_config() => go_module(&project.root),
+        None if whole && !no_go && project.has_config() => {
+            outry_core::import::service_dir(&project.root)
+        }
         None => None,
     };
     let mut loose = Vec::new();
     let mut go_summary = String::new();
     let mut fixable = 0;
     let mut coverage = None;
+    let mut import_cmd = "outry import go";
     if let Some(dir) = &go_dir {
         use outry_core::import;
-        let scan = import::scan_go(dir, &[])?;
-        coverage = Some(import::coverage(
-            &project.root,
-            scan.clone(),
-            import::DEFAULT_BASE,
-        )?);
-        let plan = import::plan(&project.root, scan, import::DEFAULT_BASE)?;
-        let shown = |p: &Path| rel(&project.root.join(p));
-        let go = |p: &Path| rel(&dir.join(p));
-        found.extend(import_diagnostics(&plan, &shown, &go));
-        loose = plan.warnings.clone();
-        fixable = plan.changes().filter(|c| c.fixable).count();
-        go_summary = format!(
-            ", {}",
-            count(plan.new.len() + plan.existing.len(), "Go route")
-        );
+        let scan = import::scan_source(dir, &[])?;
+        // Найденный сам каталог без роутов (не веб-сервис, роутер не поддерживается) — сверять
+        // не с чем, иначе все запросы оказались бы «не в коде».
+        if explicit || !scan.routes.is_empty() {
+            import_cmd = import_command(dir);
+            coverage = Some(import::coverage(
+                &project.root,
+                scan.clone(),
+                import::DEFAULT_BASE,
+            )?);
+            let plan = import::plan(&project.root, scan, import::DEFAULT_BASE)?;
+            let shown = |p: &Path| rel(&project.root.join(p));
+            let go = |p: &Path| rel(&dir.join(p));
+            found.extend(import_diagnostics(&plan, &shown, &go, import_cmd));
+            loose = plan.warnings.clone();
+            fixable = plan.changes().filter(|c| c.fixable).count();
+            go_summary = format!(", {}", count(plan.new.len() + plan.existing.len(), "route"));
+        }
     }
 
     found.sort_by(|a, b| (&a.file, a.line, a.col).cmp(&(&b.file, b.line, b.col)));
@@ -636,7 +666,7 @@ fn check(args: CheckArgs) -> anyhow::Result<ExitCode> {
                 count(warnings, "warning")
             );
             if fixable > 0 {
-                summary.push_str(&format!("; {fixable} fixable with `outry import go --fix`"));
+                summary.push_str(&format!("; {fixable} fixable with `{import_cmd} --fix`"));
             }
             eprintln!(
                 "{}",
@@ -707,18 +737,14 @@ fn relative(path: &Path, base: &Path) -> PathBuf {
     out
 }
 
-/// Каталог с go.mod: проект и выше, до корня репозитория.
-fn go_module(project_root: &Path) -> Option<PathBuf> {
-    let root = std::fs::canonicalize(project_root).ok()?;
-    for dir in root.ancestors() {
-        if dir.join("go.mod").is_file() {
-            return Some(dir.to_path_buf());
-        }
-        if dir.join(".git").exists() {
-            break;
-        }
+/// Команда импорта для каталога сервиса: `outry import rust`, если там `Cargo.toml` без
+/// `go.mod`, иначе `outry import go`.
+fn import_command(dir: &Path) -> &'static str {
+    if dir.join("Cargo.toml").is_file() && !dir.join("go.mod").is_file() {
+        "outry import rust"
+    } else {
+        "outry import go"
     }
-    None
 }
 
 /// Текст совпадает с точностью до концов строк: CRLF от git на Windows — не повод для `outry fmt`.
@@ -1349,18 +1375,20 @@ fn secret(cmd: SecretCmd) -> anyhow::Result<ExitCode> {
 }
 
 fn import(cmd: ImportCmd) -> anyhow::Result<ExitCode> {
-    let ImportCmd::Go {
-        dir,
+    let (dir, args, queries, title, lang) = match cmd {
+        ImportCmd::Go { dir, args, queries } => (dir, args, queries, "outry import go", "Go"),
+        ImportCmd::Rust { dir, args } => (dir, args, Vec::new(), "outry import rust", "Rust"),
+    };
+    let ImportArgs {
         dry_run,
         check,
         fix,
         prune,
         base,
-        queries,
         project,
         format,
         json,
-    } = cmd;
+    } = args;
     let format = if json { ImportFormat::Json } else { format };
     let project = find_project(project.as_deref(), Path::new("."))?;
     if !project.has_config() {
@@ -1377,7 +1405,11 @@ fn import(cmd: ImportCmd) -> anyhow::Result<ExitCode> {
         })
         .collect::<anyhow::Result<Vec<_>>>()?;
     use outry_core::import;
-    let plan = import::plan_go(&dir, &project.root, &extra, &base)?;
+    let scan = match lang {
+        "Rust" => import::scan_rust(&dir)?,
+        _ => import::scan_go(&dir, &extra)?,
+    };
+    let plan = import::plan(&project.root, scan, &base)?;
     let cwd = std::env::current_dir().unwrap_or_default();
     let rel = |full: PathBuf| {
         full.strip_prefix(&cwd)
@@ -1392,20 +1424,17 @@ fn import(cmd: ImportCmd) -> anyhow::Result<ExitCode> {
     let go = |p: &Path| rel(dir.join(p));
 
     if check {
-        let diags = import_diagnostics(&plan, &shown, &go);
+        let diags = import_diagnostics(&plan, &shown, &go, title);
         match format {
             ImportFormat::Json => println!("{}", serde_json::to_string_pretty(&plan)?),
             ImportFormat::Github => {
-                print_github(&diags, "outry import go");
+                print_github(&diags, title);
                 for w in &plan.warnings {
-                    println!(
-                        "::warning title=outry import go::{}",
-                        w.replace('\n', "%0A")
-                    );
+                    println!("::warning title={title}::{}", w.replace('\n', "%0A"));
                 }
             }
             ImportFormat::Text => {
-                print_check(&plan, &diags);
+                print_check(&plan, &diags, title);
                 for w in &plan.warnings {
                     eprintln!("{} {w}", Style::stderr().yellow("warning:"));
                 }
@@ -1437,7 +1466,7 @@ fn import(cmd: ImportCmd) -> anyhow::Result<ExitCode> {
         return Ok(ExitCode::SUCCESS);
     }
     if format == ImportFormat::Github {
-        print_github(&import_diagnostics(&plan, &shown, &go), "outry import go");
+        print_github(&import_diagnostics(&plan, &shown, &go, title), title);
         return Ok(ExitCode::SUCCESS);
     }
 
@@ -1536,7 +1565,7 @@ fn import(cmd: ImportCmd) -> anyhow::Result<ExitCode> {
         .filter(|e| !e.changes.is_empty())
         .count();
     println!(
-        "\n{} Go files, {routes} routes: {} new, {} existing ({changed} changed), {} not in code",
+        "\n{} {lang} files, {routes} routes: {} new, {} existing ({changed} changed), {} not in code",
         plan.files,
         plan.new.len(),
         plan.existing.len(),
@@ -1574,7 +1603,7 @@ fn import(cmd: ImportCmd) -> anyhow::Result<ExitCode> {
     Ok(ExitCode::SUCCESS)
 }
 
-/// Одна строка отчёта `--check`: место, важность, текст и где это в Go.
+/// Одна строка отчёта `--check`: место, важность, текст и где это в коде сервиса.
 struct ImportDiag {
     file: String,
     line: usize,
@@ -1588,6 +1617,7 @@ fn import_diagnostics(
     plan: &outry_core::import::Plan,
     shown: &dyn Fn(&Path) -> String,
     go: &dyn Fn(&Path) -> String,
+    cmd: &str,
 ) -> Vec<ImportDiag> {
     use outry_core::import::Severity;
     let mut out: Vec<ImportDiag> = plan
@@ -1601,14 +1631,14 @@ fn import_diagnostics(
             go: Some(format!("{}:{}", go(&c.go.file), c.go.line)),
         })
         .collect();
-    // Нового роута в проекте ещё нет — отмечаем строку в Go.
+    // Нового роута в проекте ещё нет — отмечаем строку в коде сервиса.
     out.extend(plan.new.iter().map(|f| ImportDiag {
         file: go(&f.route.source),
         line: f.route.line,
         col: 1,
         error: true,
         message: format!(
-            "route {} {} has no request (`outry import go` creates {})",
+            "route {} {} has no request (`{cmd}` creates {})",
             f.route.method,
             f.route.path.replace("{{", "{").replace("}}", "}"),
             shown(&f.file)
@@ -1621,7 +1651,7 @@ fn import_diagnostics(
         col: 1,
         error: true,
         message: format!(
-            "response type {} has no shape (`outry import go` adds `shape {}` to {})",
+            "response type {} has no shape (`{cmd}` adds `shape {}` to {})",
             d.go_type,
             d.name,
             shown(&plan.shapes_file)
@@ -1641,7 +1671,7 @@ fn import_diagnostics(
 }
 
 /// Отчёт `--check` по файлам.
-fn print_check(plan: &outry_core::import::Plan, diags: &[ImportDiag]) {
+fn print_check(plan: &outry_core::import::Plan, diags: &[ImportDiag], cmd: &str) {
     let st = Style::stdout();
     let mut file = None;
     for d in diags {
@@ -1675,7 +1705,7 @@ fn print_check(plan: &outry_core::import::Plan, diags: &[ImportDiag]) {
         plan.new.len() + plan.existing.len()
     );
     if fixable > 0 {
-        summary.push_str(&format!("; {fixable} fixable with `outry import go --fix`"));
+        summary.push_str(&format!("; {fixable} fixable with `{cmd} --fix`"));
     }
     println!("{summary}");
 }

@@ -65,7 +65,8 @@ $ outry run api
 
 ### 3. Stay in sync with the code
 
-Outry reads your Go service — chi, gin, `net/http`, go-zero, go-restful, beego or buffalo — and knows which
+Outry reads your Go service — chi, gin, `net/http`, go-zero, go-restful, beego or buffalo — or your Rust
+service on axum, and knows which
 handler each request belongs to: the struct the body is bound into, query parameters, headers, middleware and
 the type it responds with. Rename a field in Go, and the pull request says which requests are now wrong:
 
@@ -73,10 +74,12 @@ the type it responds with. Rename a field in Go, and the pull request says which
 $ outry check
 api/v1/users/post.outry:17:8: error: required field `full_name` (string) is missing from body  ← internal/api/users.go:13
 api/v1/users/post.outry:17:10: error: body field `name` is not in model.CreateUser  ← internal/api/users.go:13
-14 files, 2 environments, 12 Go routes: 2 errors, 0 warnings; 2 fixable with `outry import go --fix`
+14 files, 2 environments, 12 routes: 2 errors, 0 warnings; 2 fixable with `outry import go --fix`
 ```
 
-`outry import go .` writes a request for every new route; `--fix` updates the existing ones. `outry coverage`
+`outry import go .` writes a request for every new route; `--fix` updates the existing ones. An axum
+service works the same way with `outry import rust .` — bodies, query and headers come from the
+extractors, fields from serde, status codes from `StatusCode::…` and your error enum. `outry coverage`
 shows which routes nothing checks — no request, no `expect`, or a handler status code like `c.JSON(404, …)`
 that no `expect` compares with — and `--min 80` fails CI below the threshold.
 
@@ -162,6 +165,7 @@ and installs them in one click (on Linux, only the AppImage self-updates).
 cd my-service
 outry init                 # api/env.toml with environments and api/health.outry
 outry import go .          # Go service? a request for every route and a shape for every response
+outry import rust .        # the same for an axum service
 outry run api              # send every request in api/
 outry run CreateUser       # or one, by name
 outry check                # nothing is sent: syntax, environments, formatting, drift from the code
@@ -308,6 +312,7 @@ outry convert [PATHS]... [--rm]        # *.http → *.outry
 outry vars [-e ENV] [--reveal]         # final variable values and their sources
 outry envs                             # list environments (* = default)
 outry import go [DIR] [--check|--fix]  # create requests for Go routes, compare and fix existing ones
+outry import rust [DIR] [--check|--fix]  # the same for axum (Rust) routes
 outry coverage [DIR] [--min N]         # routes without a request, without expect, unchecked status codes
 outry lsp [--env ENV]                  # language server for editors (stdio)
 outry secret set|rm <NAME> [-e ENV]    # manage keychain secrets

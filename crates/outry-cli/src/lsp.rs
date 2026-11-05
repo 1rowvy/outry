@@ -263,13 +263,19 @@ impl Server {
     /// После `initialized`: слежение за файлами, разбор Go, первая диагностика.
     fn start(&mut self) {
         if self.client.watch {
-            let watchers = ["**/*.outry", "**/*.http", "**/env.toml", "**/*.go"]
-                .iter()
-                .map(|g| FileSystemWatcher {
-                    glob_pattern: GlobPattern::String(g.to_string()),
-                    kind: None,
-                })
-                .collect();
+            let watchers = [
+                "**/*.outry",
+                "**/*.http",
+                "**/env.toml",
+                "**/*.go",
+                "**/*.rs",
+            ]
+            .iter()
+            .map(|g| FileSystemWatcher {
+                glob_pattern: GlobPattern::String(g.to_string()),
+                kind: None,
+            })
+            .collect();
             let params = RegistrationParams {
                 registrations: vec![Registration {
                     id: "outry-watch".into(),
@@ -498,13 +504,12 @@ impl Server {
         let dir = self.go.dir.clone();
         let tx = self.internal.0.clone();
         std::thread::spawn(move || {
-            let scan = import::go::scan(&dir, &import::go::RouterQuery::builtin())
-                .map_err(|e| e.to_string());
+            let scan = import::scan_source(&dir, &[]).map_err(|e| e.to_string());
             let _ = tx.send(Internal::Scanned(generation, scan));
         });
     }
 
-    /// Сравнение с Go по текущим текстам (открытые файлы — из редактора).
+    /// Сравнение с кодом сервиса по текущим текстам (открытые файлы — из редактора).
     fn replan(&mut self) {
         self.go.plan = None;
         let Some(scan) = &self.go.scan else {
@@ -734,7 +739,12 @@ impl Server {
                     }
                     self.load_runner();
                 }
-                if paths.iter().any(|p| ext(p, "go")) {
+                // `target/` меняется при каждой сборке — это не код сервиса.
+                let source = |p: &PathBuf| {
+                    ext(p, "go")
+                        || ext(p, "rs") && !p.components().any(|c| c.as_os_str() == "target")
+                };
+                if paths.iter().any(source) {
                     self.rescan_go();
                 }
                 self.reload_workspace();

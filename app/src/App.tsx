@@ -30,7 +30,7 @@ import { VarsPanel } from "./VarsPanel";
 const LAST_PROJECT_KEY = "outry.lastProject";
 const AUTO_UPDATE_KEY = "outry.autoUpdate";
 const PERSIST_HISTORY_KEY = "outry.persistHistory";
-/** + корень проекта: каталог с Go-кодом для синхронизации роутов */
+/** + корень проекта: каталог с кодом сервиса (Go, Rust) для синхронизации роутов */
 const IMPORT_DIR_KEY = "outry.importDir:";
 const CONFIG = "env.toml";
 const CONFIG_EXAMPLE = `default = "dev"
@@ -413,7 +413,7 @@ export default function App() {
 
   const refresh = async () => setProject(await api.refreshProject());
 
-  /** Роуты из Go-кода; apply — создать недостающие файлы и пересканировать. */
+  /** Роуты из кода сервиса; apply — создать недостающие файлы и пересканировать. */
   const syncRoutes = async (apply = false, dir?: string) => {
     if (!project) return;
     const key = IMPORT_DIR_KEY + project.root;
@@ -463,7 +463,7 @@ export default function App() {
   };
 
   const pickRoutesDir = async () => {
-    const dir = await open({ directory: true, title: "Folder with the service's Go code", defaultPath: routes?.dir });
+    const dir = await open({ directory: true, title: "Folder with the service's Go or Rust code", defaultPath: routes?.dir });
     if (typeof dir === "string") syncRoutes(false, dir);
   };
 
@@ -635,7 +635,7 @@ export default function App() {
             <div className="tree-head">
               <span>Requests</span>
               {project.has_config && (
-                <button className="icon" onClick={() => syncRoutes()} title="Sync routes from Go code">
+                <button className="icon" onClick={() => syncRoutes()} title="Sync routes from the service code">
                   <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                     <path d="M13.5 6.5A5.5 5.5 0 0 0 3.2 4.8M2.5 9.5a5.5 5.5 0 0 0 10.3 1.7" />
                     <path d="M3 2v3h3M13 14v-3h-3" />

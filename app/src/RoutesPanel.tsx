@@ -1,4 +1,4 @@
-// Синхронизация с кодом: роуты из Go (как `outry import go`) против файлов проекта.
+// Синхронизация с кодом: роуты из Go или Rust (как `outry import go|rust`) против файлов проекта.
 import { useState } from "react";
 import type { Field, ImportReport, Route, RouteChange, RouteCoverage } from "./api";
 
@@ -30,7 +30,7 @@ function needs(route: Route): string[] {
   return out;
 }
 
-/** Строка роута: метод и путь, описание, что передавать, файл запроса и место в Go-коде. */
+/** Строка роута: метод и путь, описание, что передавать, файл запроса и место в коде сервиса. */
 function RouteLine({ method, path, file, route }: { method: string; path: string; file: string; route?: Route }) {
   const summary = route?.info.summary;
   const params = route ? needs(route) : [];
@@ -93,7 +93,7 @@ function CoverageBadge({ cov }: { cov: RouteCoverage | undefined }) {
 
 const percent = (p: number) => `${Math.round(p * 10) / 10}%`;
 
-/** Расхождения с кодом: место, текст, где в Go; у исправимых — diff и «Apply». */
+/** Расхождения с кодом: место, текст, где в коде сервиса; у исправимых — diff и «Apply». */
 function Changes({ changes, busy, onFix }: { changes: RouteChange[]; busy: boolean; onFix: Props["onFix"] }) {
   const [shown, setShown] = useState<Set<string>>(new Set());
   const toggle = (id: string) =>
@@ -113,7 +113,7 @@ function Changes({ changes, busy, onFix }: { changes: RouteChange[]; busy: boole
                 {slash(c.file)}:{c.line}
               </span>{" "}
               {c.message}{" "}
-              <span className="r-at" title="Where it is in the Go code">
+              <span className="r-at" title="Where it is in the service code">
                 ← {slash(c.go.file)}:{c.go.line}
               </span>
             </span>
@@ -175,15 +175,15 @@ export function RoutesPanel({ report, busy, onScan, onPickDir, onCreate, onOpen,
   return (
     <div className="vars routes">
       <div className="history-bar">
-        <button className="ghost r-dir ellipsis" onClick={onPickDir} title="Folder with the service's Go code">
-          {report ? report.dir : "Go source folder…"}
+        <button className="ghost r-dir ellipsis" onClick={onPickDir} title="Folder with the service's Go or Rust code">
+          {report ? report.dir : "Service source folder…"}
         </button>
         <span className="spacer" />
         <button className="ghost" onClick={onScan} disabled={busy}>
           {busy ? "Scanning…" : "Rescan"}
         </button>
         {fixable > 0 && (
-          <button className="ghost" onClick={() => onFix(null)} disabled={busy} title="outry import go --fix">
+          <button className="ghost" onClick={() => onFix(null)} disabled={busy} title="outry import --fix">
             Fix {fixable}
           </button>
         )}
@@ -197,11 +197,11 @@ export function RoutesPanel({ report, busy, onScan, onPickDir, onCreate, onOpen,
         </button>
       </div>
       {!plan ? (
-        <p className="hint">{busy ? "Scanning…" : "Finds chi, gin and net/http routes in Go code"}</p>
+        <p className="hint">{busy ? "Scanning…" : "Finds Go (chi, gin, net/http, …) and Rust (axum) routes"}</p>
       ) : (
         <div className="routes-body">
           <p className="routes-summary muted">
-            {plan.files} Go files · {plan.new.length + plan.existing.length} routes · {plan.new.length} new ·{" "}
+            {plan.files} source files · {plan.new.length + plan.existing.length} routes · {plan.new.length} new ·{" "}
             {plan.existing.length} existing ({changed} changed) · {plan.stale.length} not in code
           </p>
           {covRoutes.length > 0 && (
@@ -305,7 +305,7 @@ export function RoutesPanel({ report, busy, onScan, onPickDir, onCreate, onOpen,
             A request matches a route by its <code>handler:</code>, or by method and path (after{" "}
             <code>{"{{base}}"}</code> in <code>.http</code>); path parameters match any name. Matched requests are
             compared with the handler; <b>Apply</b> changes only that spot of the file. CLI:{" "}
-            <code>outry import go --check</code>, <code>--fix</code>. A route is <b>checked</b> when a request to it has{" "}
+            <code>outry import go|rust --check</code>, <code>--fix</code>. A route is <b>checked</b> when a request to it has{" "}
             <code>expect</code> (its own or a flow's); a handler status code (<code>c.JSON(404, …)</code>) is checked by{" "}
             <code>status == 404</code>. CLI: <code>outry coverage --min 80</code>
           </p>

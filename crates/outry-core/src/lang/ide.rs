@@ -76,7 +76,7 @@ pub struct EnvInfo<'a> {
 }
 
 pub const FIELDS: [(&str, &str); 12] = [
-    ("handler", "server handler, written by `outry import go`"),
+    ("handler", "server handler, written by `outry import`"),
     ("params", "parameters of the request when it is called"),
     ("only", "environments the request may be sent in"),
     ("confirm", "ask before sending"),

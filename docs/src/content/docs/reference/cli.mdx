@@ -42,7 +42,7 @@ Check the project without sending anything. Exit code `1` if there is an error.
 
 ```sh
 outry check [PATHS]... [--env <ENV>] [--var <NAME=VALUE>]... [--no-keyring]
-            [--no-fmt] [--go <DIR> | --no-go] [--format text|github]
+            [--no-fmt] [--src <DIR> | --no-src] [--format text|github]
 ```
 
 Without paths (or with the path of the project itself, `outry check api`) it checks everything:
@@ -53,11 +53,13 @@ Without paths (or with the path of the project itself, `outry check api`) it che
   defined). The keychain is not read — a secret counts as defined when it is listed in `secrets`. The same
   error in several environments is printed once;
 - formatting, as `outry fmt --check` (`--no-fmt` turns it off);
-- the Go code, as [`outry import go --check`](/outry/guides/import-go/), when a `go.mod` is found in the
-  project directory or above it, up to the repository root. `--go <DIR>` points to the service, `--no-go`
-  skips it. A summary line of [route coverage](/outry/guides/coverage/) is printed too; it is never an error.
+- the service code, as [`outry import go --check`](/outry/guides/import-go/) or
+  [`outry import rust --check`](/outry/guides/import-rust/), when a `go.mod` or `Cargo.toml` is found in
+  the project directory or above it, up to the repository root; a folder found this way without any routes
+  is skipped. `--src <DIR>` points to the service, `--no-src` skips it (`--go` / `--no-go` are the old
+  names). A summary line of [route coverage](/outry/guides/coverage/) is printed too; it is never an error.
 
-With paths only those files are checked, without Go. `--env` checks a single environment with its real
+With paths only those files are checked, without the service code. `--env` checks a single environment with its real
 variables — `--var`, `OUTRY_*`, `env.toml` and the keychain (`--no-keyring` turns it off).
 `--format github` prints GitHub Actions annotations.
 
@@ -66,7 +68,7 @@ api/orders/create.outry:1:1: error: not formatted (`outry fmt`)
 api/orders/create.outry:7:22: error: variable `api_key` is not defined in staging, prod
 api/orders/create.outry:9:13: error: `Seed` is limited to dev and cannot be called in prod
 main.go:42:1: error: route DELETE /orders/{id} has no request (`outry import go` creates api/orders/delete.outry)
-12 files, 3 environments, 18 Go routes: 4 errors, 0 warnings
+12 files, 3 environments, 18 routes: 4 errors, 0 warnings
 ```
 
 ## `outry fmt`
@@ -180,9 +182,21 @@ project found from the current folder; it must have an `env.toml`.
 | `--project <DIR>` | Project folder with `env.toml` |
 | `--json` | Same as `--format json` |
 
+## `outry import rust`
+
+Create a `.outry` request for every route of an axum service that doesn't have one yet and compare the
+existing ones with the code. See [Import routes from Rust](/outry/guides/import-rust/).
+
+```sh
+outry import rust [DIR]
+```
+
+`DIR` is the crate or workspace, scanned recursively without `target/`, `tests/`, `benches/` and
+`examples/` (default: current). The flags are those of `outry import go`, without `--query`.
+
 ## `outry coverage`
 
-Show which routes of a Go service no request checks: routes without a request, requests without `expect`,
+Show which routes of a Go or Rust service no request checks: routes without a request, requests without `expect`,
 handler status codes that no `expect` compares with. Nothing is sent. See
 [Route coverage](/outry/guides/coverage/).
 
@@ -190,7 +204,8 @@ handler status codes that no `expect` compares with. Nothing is sent. See
 outry coverage [DIR]
 ```
 
-`DIR` is the Go service (default: the folder with `go.mod`, from the project up to the repository root).
+`DIR` is the service (default: the folder with `go.mod` or `Cargo.toml`, from the project up to the
+repository root).
 
 | Flag | Description |
 |------|-------------|
@@ -198,14 +213,14 @@ outry coverage [DIR]
 | `--uncovered` | Show only routes without a request, without `expect` or with unchecked status codes |
 | `--format <F>` | `text` (default), `github` (GitHub Actions annotations), `json` |
 | `--base <NAME>` | Variable with the service address in `.http` URLs (for matching), default `base` |
-| `--query <FILE.scm>` | An extra tree-sitter query for another router; can be repeated |
+| `--query <FILE.scm>` | An extra tree-sitter query for another Go router; can be repeated |
 | `--project <DIR>` | Project folder with `env.toml` |
 | `--json` | Same as `--format json` |
 
 ## `outry lsp`
 
 The language server for `.outry` files over stdin/stdout: `outry check` errors, environment warnings,
-differences from the Go code with quick fixes, completion, hover, go to definition, formatting and
+differences from the service code (Go, Rust) with quick fixes, completion, hover, go to definition, formatting and
 “▶ Send” code lenses. Editors start it themselves — see [Editors](/outry/guides/editors/).
 
 ```sh

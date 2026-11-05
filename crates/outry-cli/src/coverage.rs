@@ -7,11 +7,12 @@ use anyhow::{Context, bail};
 use outry_core::import::{self, Coverage, Level, RouteCoverage};
 use serde::Serialize;
 
-use super::{ImportDiag, Style, count, find_project, go_module, print_github, relative};
+use super::{ImportDiag, Style, count, find_project, import_command, print_github, relative};
 
 #[derive(clap::Args)]
 pub struct Args {
-    /// Каталог Go-сервиса (по умолчанию — где go.mod, вверх от проекта до .git)
+    /// Каталог сервиса на Go или Rust (по умолчанию — где go.mod или Cargo.toml, вверх от
+    /// проекта до .git)
     dir: Option<PathBuf>,
     /// Код выхода 1, если проверенных роутов меньше N процентов (для CI)
     #[arg(long, value_name = "N")]
@@ -25,7 +26,7 @@ pub struct Args {
     /// Переменная с адресом сервиса в старых *.http: {{base}}/users (для сопоставления)
     #[arg(long, default_value = import::DEFAULT_BASE)]
     base: String,
-    /// Свой шаблон-запрос tree-sitter для роутера (можно несколько раз)
+    /// Свой шаблон-запрос tree-sitter для Go-роутера (можно несколько раз)
     #[arg(long = "query", value_name = "FILE.scm")]
     queries: Vec<PathBuf>,
     /// Формат вывода: text, github (аннотации GitHub Actions), json
@@ -69,10 +70,10 @@ pub fn run(args: Args) -> anyhow::Result<ExitCode> {
     }
     let dir = match dir {
         Some(d) => d,
-        None => go_module(&project.root).with_context(|| {
+        None => import::service_dir(&project.root).with_context(|| {
             format!(
-                "no go.mod found from {} up to the repository root; pass the Go directory: \
-                 `outry coverage path/to/service`",
+                "no go.mod or Cargo.toml found from {} up to the repository root; pass the \
+                 service directory: `outry coverage path/to/service`",
                 project.root.display()
             )
         })?,
@@ -84,7 +85,7 @@ pub fn run(args: Args) -> anyhow::Result<ExitCode> {
             Ok((q.display().to_string(), src))
         })
         .collect::<anyhow::Result<Vec<_>>>()?;
-    let scan = import::scan_go(&dir, &extra)?;
+    let scan = import::scan_source(&dir, &extra)?;
     let cov = import::coverage(&project.root, scan, &base)?;
     let below = min.filter(|&m| cov.percent() < m);
 
@@ -142,7 +143,7 @@ pub fn run(args: Args) -> anyhow::Result<ExitCode> {
                 );
             }
         }
-        Format::Text => print_table(&cov, &rows, &shown, &go, below),
+        Format::Text => print_table(&cov, &rows, &shown, &go, below, import_command(&dir)),
     }
     Ok(if below.is_some() {
         ExitCode::FAILURE
@@ -189,6 +190,7 @@ fn print_table(
     shown: &dyn Fn(&Path) -> String,
     go: &dyn Fn(&Path) -> String,
     below: Option<f64>,
+    import_cmd: &str,
 ) {
     let st = Style::stdout();
     let place = |r: &RouteCoverage| match r.requests.first() {
@@ -259,13 +261,13 @@ fn print_table(
     }
     if without_request > 0 {
         println!(
-            "{} can be created with `outry import go`",
+            "{} can be created with `{import_cmd}`",
             count(without_request, "missing request")
         );
     }
 }
 
-/// Аннотации GitHub: роут без запроса — на регистрации в Go, без `expect` — на запросе,
+/// Аннотации GitHub: роут без запроса — на регистрации в коде, без `expect` — на запросе,
 /// непроверенный код ответа — на его месте в обработчике.
 fn diagnostics(
     rows: &[&RouteCoverage],

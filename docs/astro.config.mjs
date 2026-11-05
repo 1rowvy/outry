@@ -59,6 +59,7 @@ export default defineConfig({
 						{ slug: 'guides/secrets' },
 						{ slug: 'guides/ci' },
 						{ slug: 'guides/import-go' },
+						{ slug: 'guides/import-rust' },
 						{ slug: 'guides/coverage' },
 						{ slug: 'guides/desktop-app' },
 						{ slug: 'guides/editors' },
