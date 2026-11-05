@@ -8,6 +8,7 @@
 //! Middleware роута из `[import.middleware]` в `env.toml` добавляют запросу заголовки: новым
 //! файлам — сразу, в существующих их отсутствие — предупреждение с правкой.
 
+mod coverage;
 mod diff;
 pub mod go;
 mod shapes;
@@ -22,6 +23,9 @@ use serde::Serialize;
 use crate::discover;
 use crate::error::{Error, Result};
 
+pub use coverage::{
+    Coverage, Covering, Level, RouteCoverage, StatusCoverage, coverage, coverage_with,
+};
 pub use diff::{Change, ChangeKind, Edit, GoRef, Severity};
 pub use udiff::unified as unified_diff;
 
@@ -68,6 +72,20 @@ pub struct RouteInfo {
     pub form: Vec<Field>,
     /// Что обработчик отвечает (`json.Encode`, `c.JSON`)
     pub response: Option<Response>,
+    /// Коды ответа обработчика (`c.JSON(404, …)`, `http.Error(w, …, http.StatusConflict)`),
+    /// по возрастанию
+    pub statuses: Vec<StatusCode>,
+}
+
+/// Код ответа, который отдаёт обработчик.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct StatusCode {
+    pub code: u16,
+    /// Файл Go относительно каталога сканирования
+    pub source: PathBuf,
+    pub line: usize,
+    /// В коде не написан: обработчик без успешного кода отвечает 200
+    pub implicit: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -348,12 +366,16 @@ pub fn plan_go(
     extra: &[(String, String)],
     base: &str,
 ) -> Result<Plan> {
+    plan(project_root, scan_go(src_dir, extra)?, base)
+}
+
+/// Роуты Go-кода в `src_dir`: встроенные шаблоны и `extra` (имя, текст `.scm`).
+pub fn scan_go(src_dir: &Path, extra: &[(String, String)]) -> Result<Scan> {
     let mut queries = go::RouterQuery::builtin();
     for (name, src) in extra {
         queries.push(go::RouterQuery::new(name, src)?);
     }
-    let scan = go::scan(src_dir, &queries)?;
-    plan(project_root, scan, base)
+    go::scan(src_dir, &queries)
 }
 
 /// Раскладывает найденные роуты на новые и уже существующие, сравнивает существующие с кодом,
@@ -403,41 +425,9 @@ pub fn plan_with(
         ..Plan::default()
     };
     let mut matched = HashSet::new();
-    // Пути роутов: запрос с конкретным значением (`/users/1`) сопоставляется с `/users/{id}`,
-    // только если в коде нет такого же статического пути.
-    let route_keys: HashSet<String> = scan.routes.iter().map(|r| key(&r.path)).collect();
-    // Обработчик нескольких роутов (`"get,put:Update"` в beego) — сопоставляем ещё и по методу.
-    let mut per_handler: HashMap<&str, usize> = HashMap::new();
-    for h in scan.routes.iter().filter_map(|r| r.handler.as_deref()) {
-        *per_handler.entry(h).or_default() += 1;
-    }
-    let shared: HashSet<String> = per_handler
-        .into_iter()
-        .filter(|&(_, n)| n > 1)
-        .map(|(h, _)| h.to_string())
-        .collect();
-    for route in scan.routes {
-        let k = key(&route.path);
+    let hits = match_routes(&scan.routes, &known);
+    for (route, hit) in scan.routes.into_iter().zip(hits) {
         let auth = auth_headers(&route, &rules);
-        let by_method = route.handler.as_ref().is_some_and(|h| shared.contains(h));
-        // По `handler:`, а запросы без него (негативные тесты рядом с основным) — по методу и пути.
-        let mut hit: Vec<usize> = known
-            .iter()
-            .enumerate()
-            .filter(|(_, r)| match &r.handler {
-                Some(_) => {
-                    r.handler == route.handler
-                        && (!by_method || route.method == ANY || r.method == route.method)
-                }
-                None => {
-                    (r.key == k || !route_keys.contains(&r.key) && fills_params(&k, &r.key))
-                        && (route.method == ANY || r.method == route.method)
-                }
-            })
-            .map(|(i, _)| i)
-            .collect();
-        // Файл роута — тот, где `handler:`.
-        hit.sort_by_key(|&i| known[i].handler.is_none());
         if let Some(&first) = hit.first() {
             matched.extend(hit.iter().copied());
             let mut changes: Vec<Change> = hit
@@ -530,6 +520,48 @@ pub fn plan_with(
         }
     }
     Ok(out)
+}
+
+/// Запросы каждого роута (индексы в `known`): по `handler:`, а запросы без него (негативные
+/// тесты рядом с основным) — по методу и пути. Первым идёт запрос с `handler:`.
+fn match_routes(routes: &[Route], known: &[Known]) -> Vec<Vec<usize>> {
+    // Пути роутов: запрос с конкретным значением (`/users/1`) сопоставляется с `/users/{id}`,
+    // только если в коде нет такого же статического пути.
+    let route_keys: HashSet<String> = routes.iter().map(|r| key(&r.path)).collect();
+    // Обработчик нескольких роутов (`"get,put:Update"` в beego) — сопоставляем ещё и по методу.
+    let mut per_handler: HashMap<&str, usize> = HashMap::new();
+    for h in routes.iter().filter_map(|r| r.handler.as_deref()) {
+        *per_handler.entry(h).or_default() += 1;
+    }
+    let shared: HashSet<&str> = per_handler
+        .into_iter()
+        .filter(|&(_, n)| n > 1)
+        .map(|(h, _)| h)
+        .collect();
+    routes
+        .iter()
+        .map(|route| {
+            let k = key(&route.path);
+            let by_method = route.handler.as_deref().is_some_and(|h| shared.contains(h));
+            let mut hit: Vec<usize> = known
+                .iter()
+                .enumerate()
+                .filter(|(_, r)| match &r.handler {
+                    Some(_) => {
+                        r.handler == route.handler
+                            && (!by_method || route.method == ANY || r.method == route.method)
+                    }
+                    None => {
+                        (r.key == k || !route_keys.contains(&r.key) && fills_params(&k, &r.key))
+                            && (route.method == ANY || r.method == route.method)
+                    }
+                })
+                .map(|(i, _)| i)
+                .collect();
+            hit.sort_by_key(|&i| known[i].handler.is_none());
+            hit
+        })
+        .collect()
 }
 
 /// Заголовок, который нужен запросу из-за middleware роута.

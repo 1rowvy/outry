@@ -105,6 +105,39 @@ export interface RouteInfo {
   form: Field[];
   /** что обработчик отвечает: тип Go и shape для `body matches` */
   response: { type_name: string; shape: string } | null;
+  /** коды ответа обработчика, по возрастанию */
+  statuses: StatusCode[];
+}
+
+export interface StatusCode {
+  code: number;
+  /** Go-файл относительно сканируемого каталога */
+  source: string;
+  line: number;
+  /** в коде не написан: обработчик без успешного кода отвечает 200 */
+  implicit: boolean;
+}
+
+/** none — нет запроса, request — запрос без `expect`, checked — проверен */
+export type CoverageLevel = "none" | "request" | "checked";
+
+export interface RouteCoverage {
+  method: string;
+  /** как в коде: /users/{id} */
+  path: string;
+  source: string;
+  line: number;
+  handler: string | null;
+  level: CoverageLevel;
+  requests: { file: string; line: number; name: string | null; checked: boolean }[];
+  statuses: (StatusCode & { checked: boolean })[];
+}
+
+/** `outry coverage` */
+export interface Coverage {
+  files: number;
+  routes: RouteCoverage[];
+  warnings: string[];
 }
 
 /** Расхождение запроса или shape с кодом; `kind` и его поля — как `ChangeKind` в ядре */
@@ -149,6 +182,7 @@ export interface ImportPlan {
 export interface ImportReport {
   dir: string;
   plan: ImportPlan;
+  coverage: Coverage;
   created: string[];
 }
 

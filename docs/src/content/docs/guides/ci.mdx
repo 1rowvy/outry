@@ -77,3 +77,14 @@ main.go:42:1: error: route DELETE /orders/{id} has no request (`outry import go`
 ```
 
 Details and flags: [`outry check`](/outry/reference/cli/#outry-check).
+
+## Route coverage
+
+For a Go service, `outry coverage --min` fails the job when too few routes are checked by a request with
+`expect`:
+
+```sh
+outry coverage --min 80 --format github
+```
+
+See [Route coverage](/outry/guides/coverage/).

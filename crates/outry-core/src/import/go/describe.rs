@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use tree_sitter::Node;
 
 use super::{Func, GoFile, children, text};
-use crate::import::{Body, FORM_FILE, Field, JsonType, Response, RouteInfo, ShapeDef};
+use crate::import::{Body, FORM_FILE, Field, JsonType, Response, RouteInfo, ShapeDef, StatusCode};
 
 /// Глубина вложенных структур в примере тела.
 const MAX_DEPTH: usize = 6;
@@ -132,7 +132,73 @@ impl<'a> Describer<'a> {
             self.doc(file, decl, &mut info);
         }
         self.scan_body(file, body, router, &mut info);
+        self.statuses(file, body, &mut info);
         info
+    }
+
+    /// Коды ответа в теле обработчика: константы `http.StatusNotFound` (и `fiber.Status…`)
+    /// где угодно, числа 100–599 — аргументами вызовов-ответов (`c.JSON(404, …)`,
+    /// `w.WriteHeader(201)`). Без успешного кода — неявный 200.
+    fn statuses(&self, file: usize, body: Node<'a>, info: &mut RouteInfo) {
+        let f = &self.files[file];
+        let src = &f.src;
+        let mut found: Vec<StatusCode> = Vec::new();
+        let mut add = |code: u16, n: Node| {
+            if !found.iter().any(|s| s.code == code) {
+                found.push(StatusCode {
+                    code,
+                    source: f.path.clone(),
+                    line: n.start_position().row + 1,
+                    implicit: false,
+                });
+            }
+        };
+        walk(body, &mut |n| match n.kind() {
+            "selector_expression" => {
+                if let Some(code) = n
+                    .child_by_field_name("field")
+                    .and_then(|f| status_const(text(f, src)))
+                {
+                    add(code, n);
+                }
+            }
+            "int_literal" => {
+                let Some(code) = text(n, src)
+                    .parse::<u16>()
+                    .ok()
+                    .filter(|c| (100..600).contains(c))
+                else {
+                    return;
+                };
+                let call = n
+                    .parent()
+                    .filter(|p| p.kind() == "argument_list")
+                    .and_then(|p| p.parent())
+                    .and_then(|c| c.child_by_field_name("function"));
+                let name = match call {
+                    Some(f) if f.kind() == "selector_expression" => {
+                        f.child_by_field_name("field").map_or("", |f| text(f, src))
+                    }
+                    Some(f) if f.kind() == "identifier" => text(f, src),
+                    _ => return,
+                };
+                let name = name.to_ascii_lowercase();
+                if STATUS_CALLS.iter().any(|w| name.contains(w)) {
+                    add(code, n);
+                }
+            }
+            _ => {}
+        });
+        if !found.iter().any(|s| (200..300).contains(&s.code)) {
+            found.push(StatusCode {
+                code: 200,
+                source: f.path.clone(),
+                line: body.start_position().row + 1,
+                implicit: true,
+            });
+        }
+        found.sort_by_key(|s| s.code);
+        info.statuses = found;
     }
 
     /// Тело запроса из значения типа (`User{}` в `.Reads(User{})`) в файле `file`.
@@ -1140,6 +1206,102 @@ fn local_type<'t>(scope: Node<'t>, name: &str, src: &str) -> Option<Node<'t>> {
         }
     });
     found
+}
+
+/// Слова в имени вызова, числовой аргумент которого — код ответа: `c.JSON(404, …)`,
+/// `w.WriteHeader(201)`, `c.AbortWithStatus(401)`, свой `respond(w, 409, …)`.
+const STATUS_CALLS: &[&str] = &[
+    "json",
+    "status",
+    "string",
+    "error",
+    "header",
+    "render",
+    "redirect",
+    "nocontent",
+    "xml",
+    "html",
+    "data",
+    "respond",
+    "reply",
+    "write",
+    "abort",
+    "blob",
+    "send",
+    "entity",
+];
+
+/// Константы `net/http` (у fiber, iris — те же имена).
+const STATUS_CONSTS: &[(&str, u16)] = &[
+    ("StatusContinue", 100),
+    ("StatusSwitchingProtocols", 101),
+    ("StatusProcessing", 102),
+    ("StatusEarlyHints", 103),
+    ("StatusOK", 200),
+    ("StatusCreated", 201),
+    ("StatusAccepted", 202),
+    ("StatusNonAuthoritativeInfo", 203),
+    ("StatusNoContent", 204),
+    ("StatusResetContent", 205),
+    ("StatusPartialContent", 206),
+    ("StatusMultiStatus", 207),
+    ("StatusAlreadyReported", 208),
+    ("StatusIMUsed", 226),
+    ("StatusMultipleChoices", 300),
+    ("StatusMovedPermanently", 301),
+    ("StatusFound", 302),
+    ("StatusSeeOther", 303),
+    ("StatusNotModified", 304),
+    ("StatusUseProxy", 305),
+    ("StatusTemporaryRedirect", 307),
+    ("StatusPermanentRedirect", 308),
+    ("StatusBadRequest", 400),
+    ("StatusUnauthorized", 401),
+    ("StatusPaymentRequired", 402),
+    ("StatusForbidden", 403),
+    ("StatusNotFound", 404),
+    ("StatusMethodNotAllowed", 405),
+    ("StatusNotAcceptable", 406),
+    ("StatusProxyAuthRequired", 407),
+    ("StatusRequestTimeout", 408),
+    ("StatusConflict", 409),
+    ("StatusGone", 410),
+    ("StatusLengthRequired", 411),
+    ("StatusPreconditionFailed", 412),
+    ("StatusRequestEntityTooLarge", 413),
+    ("StatusRequestURITooLong", 414),
+    ("StatusUnsupportedMediaType", 415),
+    ("StatusRequestedRangeNotSatisfiable", 416),
+    ("StatusExpectationFailed", 417),
+    ("StatusTeapot", 418),
+    ("StatusMisdirectedRequest", 421),
+    ("StatusUnprocessableEntity", 422),
+    ("StatusLocked", 423),
+    ("StatusFailedDependency", 424),
+    ("StatusTooEarly", 425),
+    ("StatusUpgradeRequired", 426),
+    ("StatusPreconditionRequired", 428),
+    ("StatusTooManyRequests", 429),
+    ("StatusRequestHeaderFieldsTooLarge", 431),
+    ("StatusUnavailableForLegalReasons", 451),
+    ("StatusInternalServerError", 500),
+    ("StatusNotImplemented", 501),
+    ("StatusBadGateway", 502),
+    ("StatusServiceUnavailable", 503),
+    ("StatusGatewayTimeout", 504),
+    ("StatusHTTPVersionNotSupported", 505),
+    ("StatusVariantAlsoNegotiates", 506),
+    ("StatusInsufficientStorage", 507),
+    ("StatusLoopDetected", 508),
+    ("StatusNotExtended", 510),
+    ("StatusNetworkAuthenticationRequired", 511),
+];
+
+fn status_const(name: &str) -> Option<u16> {
+    STATUS_CONSTS
+        .iter()
+        .find(|(n, _)| *n == name)
+        .map(|&(_, c)| c)
 }
 
 /// Код ответа — ошибка: `http.StatusBadRequest`, `500`.

@@ -2044,3 +2044,180 @@ func (c *UserController) Update() {}
     let new: Vec<&str> = plan.new.iter().map(|n| n.route.method.as_str()).collect();
     assert_eq!(new, ["PATCH"]);
 }
+
+#[test]
+fn handler_status_codes() {
+    let dir = TempDir::new("statuses");
+    dir.write(
+        "main.go",
+        r#"package main
+
+import (
+	"net/http"
+
+	"github.com/gin-gonic/gin"
+)
+
+func main() {
+	r := gin.Default()
+	r.GET("/orders/:id", getOrder)
+	r.POST("/orders", createOrder)
+	r.DELETE("/orders/:id", deleteOrder)
+}
+
+func getOrder(c *gin.Context) {
+	if c.Param("id") == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "id"})
+		return
+	}
+	if missing {
+		c.AbortWithStatus(404)
+		return
+	}
+	c.JSON(http.StatusOK, Order{})
+}
+
+func createOrder(c *gin.Context) {
+	if exists {
+		http.Error(c.Writer, "exists", http.StatusConflict)
+		return
+	}
+	c.JSON(201, Order{})
+}
+
+func deleteOrder(c *gin.Context) {
+	strconv.ParseInt(c.Param("id"), 10, 64)
+	time.Sleep(200)
+}
+
+type Order struct {
+	ID int `json:"id"`
+}
+"#,
+    );
+    let s = scan(&dir);
+    let codes = |method, path| -> Vec<(u16, usize, bool)> {
+        find(&s, method, path)
+            .info
+            .statuses
+            .iter()
+            .map(|c| (c.code, c.line, c.implicit))
+            .collect()
+    };
+    assert_eq!(
+        codes("GET", "/orders/{{id}}"),
+        [(200, 25, false), (400, 18, false), (404, 22, false)]
+    );
+    assert_eq!(
+        codes("POST", "/orders"),
+        [(201, 33, false), (409, 30, false)]
+    );
+    // Ни одного кода в коде: 200 по умолчанию, место — тело обработчика.
+    assert_eq!(codes("DELETE", "/orders/{{id}}"), [(200, 36, true)]);
+}
+
+#[test]
+fn coverage_levels_and_statuses() {
+    let dir = TempDir::new("coverage");
+    dir.write(
+        "svc/main.go",
+        r#"package main
+
+import "net/http"
+
+func main() {
+	http.HandleFunc("GET /orders/{id}", getOrder)
+	http.HandleFunc("POST /orders", createOrder)
+	http.HandleFunc("DELETE /orders/{id}", deleteOrder)
+	http.HandleFunc("GET /health", health)
+	http.HandleFunc("GET /legacy", legacy)
+}
+
+func getOrder(w http.ResponseWriter, r *http.Request) {
+	http.Error(w, "no", http.StatusNotFound)
+	w.WriteHeader(http.StatusOK)
+}
+
+func createOrder(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusCreated)
+}
+
+func deleteOrder(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(204)
+}
+
+func health(w http.ResponseWriter, r *http.Request) {}
+
+func legacy(w http.ResponseWriter, r *http.Request) {
+	http.Error(w, "gone", http.StatusGone)
+}
+"#,
+    );
+    dir.write("api/env.toml", "[env.dev]\nbase = \"http://x\"\n");
+    dir.write(
+        "api/orders.outry",
+        r#"GetOrder: GET /orders/{id} {
+  expect { status == 200 }
+}
+
+CreateOrder: POST /orders {
+  body { sku: "A" }
+}
+
+DeleteOrder: DELETE /orders/{id}
+
+flow Missing {
+  order = CreateOrder()
+  expect {
+    order.status in [201, 409]
+    GetOrder(id: 0).status == 404
+  }
+}
+"#,
+    );
+    dir.write(
+        "api/legacy.http",
+        "GET {{base}}/legacy\n\n> assert status == 410\n",
+    );
+    let scan = scan_go(&dir.0.join("svc"), &[]).unwrap();
+    let cov = coverage(&dir.0.join("api"), scan, DEFAULT_BASE).unwrap();
+    let row = |method: &str, path: &str| {
+        cov.routes
+            .iter()
+            .find(|r| r.method == method && r.path == path)
+            .unwrap_or_else(|| panic!("no {method} {path}"))
+    };
+    let checked = |r: &RouteCoverage| -> Vec<(u16, bool)> {
+        r.statuses
+            .iter()
+            .map(|s| (s.status.code, s.checked))
+            .collect()
+    };
+
+    let get = row("GET", "/orders/{id}");
+    assert_eq!(get.level, Level::Checked);
+    assert_eq!(checked(get), [(200, true), (404, true)]);
+    assert_eq!(get.requests[0].name.as_deref(), Some("GetOrder"));
+
+    // Без своего `expect`, но проверен в сценарии.
+    let create = row("POST", "/orders");
+    assert_eq!(create.level, Level::Checked);
+    assert_eq!(checked(create), [(201, true)]);
+
+    let delete = row("DELETE", "/orders/{id}");
+    assert_eq!(delete.level, Level::Request);
+    assert_eq!(checked(delete), [(204, false)]);
+
+    let health = row("GET", "/health");
+    assert_eq!(health.level, Level::None);
+    assert!(health.requests.is_empty());
+    assert_eq!(checked(health), [(200, false)]);
+
+    let legacy = row("GET", "/legacy");
+    assert_eq!(legacy.level, Level::Checked);
+    assert_eq!(checked(legacy), [(200, false), (410, true)]);
+
+    assert_eq!(cov.at_least(Level::Request), 4);
+    assert_eq!(cov.percent(), 60.0);
+    assert_eq!(cov.statuses(), (4, 7));
+}

@@ -1,6 +1,6 @@
 // Синхронизация с кодом: роуты из Go (как `outry import go`) против файлов проекта.
 import { useState } from "react";
-import type { Field, ImportReport, Route, RouteChange } from "./api";
+import type { Field, ImportReport, Route, RouteChange, RouteCoverage } from "./api";
 
 interface Props {
   report: ImportReport | null;
@@ -62,6 +62,36 @@ function RouteLine({ method, path, file, route }: { method: string; path: string
 const routePath = (p: string) => p.replaceAll("{{", "{").replaceAll("}}", "}");
 
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
+
+/** Роут не проверен целиком: нет запроса, нет `expect` или код ответа никто не проверяет. */
+const isHole = (c: RouteCoverage | undefined) => !c || c.level !== "checked" || c.statuses.some((s) => !s.checked);
+
+/** Бейдж покрытия у роута с запросом: «no expect» или непроверенные коды ответа. */
+function CoverageBadge({ cov }: { cov: RouteCoverage | undefined }) {
+  if (!cov || cov.level === "none") return null;
+  const codes = cov.statuses.map((s) => `${s.code}${s.checked ? " ✓" : ""}${s.implicit ? " (implicit)" : ""}`).join(", ");
+  const unchecked = cov.statuses.filter((s) => !s.checked).map((s) => s.code);
+  const title = codes ? `Handler status codes: ${codes}` : undefined;
+  if (cov.level === "request")
+    return (
+      <span className="badge r-badge cov-none" title={"No request checks the response (expect)." + (title ? "\n" + title : "")}>
+        no expect
+      </span>
+    );
+  if (unchecked.length)
+    return (
+      <span className="badge r-badge cov-partial" title={title}>
+        unchecked {unchecked.join(", ")}
+      </span>
+    );
+  return (
+    <span className="badge r-badge cov-ok" title={title}>
+      checked
+    </span>
+  );
+}
+
+const percent = (p: number) => `${Math.round(p * 10) / 10}%`;
 
 /** Расхождения с кодом: место, текст, где в Go; у исправимых — diff и «Apply». */
 function Changes({ changes, busy, onFix }: { changes: RouteChange[]; busy: boolean; onFix: Props["onFix"] }) {
@@ -134,6 +164,14 @@ export function RoutesPanel({ report, busy, onScan, onPickDir, onCreate, onOpen,
   const fixable = changes.filter((c) => c.fixable).length;
   const toCreate = plan ? plan.new.length + (plan.new_shapes.length > 0 ? 1 : 0) : 0;
   const changed = plan ? plan.existing.filter((e) => e.changes.length > 0).length : 0;
+  // Покрытие роутов: по методу и пути, как в коде.
+  const [holesOnly, setHolesOnly] = useState(false);
+  const coverage = new Map((report?.coverage.routes ?? []).map((c) => [c.method + " " + c.path, c]));
+  const covOf = (r: Route) => coverage.get(r.method + " " + routePath(r.path));
+  const covRoutes = report?.coverage.routes ?? [];
+  const checked = covRoutes.filter((c) => c.level === "checked").length;
+  const holes = covRoutes.filter((c) => isHole(c)).length;
+  const existing = plan ? plan.existing.filter((e) => !holesOnly || e.changes.length > 0 || isHole(covOf(e.route))) : [];
   return (
     <div className="vars routes">
       <div className="history-bar">
@@ -166,6 +204,19 @@ export function RoutesPanel({ report, busy, onScan, onPickDir, onCreate, onOpen,
             {plan.files} Go files · {plan.new.length + plan.existing.length} routes · {plan.new.length} new ·{" "}
             {plan.existing.length} existing ({changed} changed) · {plan.stale.length} not in code
           </p>
+          {covRoutes.length > 0 && (
+            <p className="routes-summary muted" title="outry coverage: a route is checked when a request to it has expect">
+              Coverage {percent((checked * 100) / covRoutes.length)} · {checked}/{covRoutes.length} routes checked ·{" "}
+              {covRoutes.filter((c) => c.level === "request").length} without expect ·{" "}
+              {covRoutes.reduce((n, c) => n + c.statuses.filter((s) => s.checked).length, 0)}/
+              {covRoutes.reduce((n, c) => n + c.statuses.length, 0)} status codes{" "}
+              {(holes > 0 || holesOnly) && (
+                <button className="link" onClick={() => setHolesOnly(!holesOnly)}>
+                  {holesOnly ? "Show all" : `Show ${plural(holes, "gap")} only`}
+                </button>
+              )}
+            </p>
+          )}
           {plan.warnings.map((w) => (
             <p key={w} className="routes-warning">
               {w}
@@ -183,14 +234,15 @@ export function RoutesPanel({ report, busy, onScan, onPickDir, onCreate, onOpen,
               </li>
             ))}
           </ul>
-          {plan.existing.length > 0 && <h3>Already have a file</h3>}
+          {existing.length > 0 && <h3>Already have a file</h3>}
           <ul className="history-list">
-            {plan.existing.map((e) => (
+            {existing.map((e) => (
               <li key={e.route.method + e.route.path}>
                 <button onClick={() => onOpen(slash(e.file))}>
                   <span className={"r-mark" + (e.changes.length ? " changed" : "")}>{e.changes.length ? "~" : "="}</span>
                   <RouteLine method={e.route.method} path={routePath(e.route.path)} file={e.file} route={e.route} />
                 </button>
+                <CoverageBadge cov={covOf(e.route)} />
                 {e.changes.length > 0 && (
                   <>
                     <span className="badge r-badge" title="The request differs from the code">
@@ -253,7 +305,9 @@ export function RoutesPanel({ report, busy, onScan, onPickDir, onCreate, onOpen,
             A request matches a route by its <code>handler:</code>, or by method and path (after{" "}
             <code>{"{{base}}"}</code> in <code>.http</code>); path parameters match any name. Matched requests are
             compared with the handler; <b>Apply</b> changes only that spot of the file. CLI:{" "}
-            <code>outry import go --check</code>, <code>--fix</code>
+            <code>outry import go --check</code>, <code>--fix</code>. A route is <b>checked</b> when a request to it has{" "}
+            <code>expect</code> (its own or a flow's); a handler status code (<code>c.JSON(404, …)</code>) is checked by{" "}
+            <code>status == 404</code>. CLI: <code>outry coverage --min 80</code>
           </p>
         </div>
       )}

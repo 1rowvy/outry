@@ -1,0 +1,111 @@
+---
+title: Покрытие роутов
+description: Какие роуты Go-сервиса ничем не проверены, и падение CI ниже порога.
+---
+
+`outry coverage` отвечает на вопрос «какие ручки сервиса вообще ничем не проверены». Он читает роуты из
+Go-кода (как [`outry import go`](/outry/ru/guides/import-go/)), сопоставляет их с запросами проекта и
+смотрит на их `expect`. Ничего не отправляется.
+
+```sh
+outry coverage
+```
+
+```txt
+GET    /health       no request  codes 0/1  main.go:9
+POST   /orders       no expect   codes 0/1  api/orders.outry:5  unchecked: 201
+DELETE /orders/{id}  no expect   codes 0/1  api/orders.outry:9  unchecked: 204
+GET    /orders/{id}  checked     codes 1/2  api/orders.outry:1  unchecked: 404
+
+1/4 routes checked (25%): 2 without expect, 1 without request; 1/5 status codes checked
+1 missing request can be created with `outry import go`
+```
+
+## Уровни
+
+У каждого роута один из трёх уровней:
+
+| Уровень | Что значит |
+|---------|------------|
+| `no request` | Роут есть в Go-коде, но ни один запрос `.outry` или `.http` в него не ходит. `outry import go` его создаст. |
+| `no expect` | Запрос есть, но его ответ ничто не проверяет. |
+| `checked` | У запроса к роуту есть `expect` — свой или проверка его результата в другом месте. |
+
+Запрос сопоставляется с роутом так же, как в `outry import go`: по `handler:`, а без него — по методу и
+пути. Процент — доля роутов на уровне `checked`.
+
+Запрос считается проверенным, если:
+
+- у него самого есть `expect`;
+- его результат проверяет другой запрос или сценарий: `expect { GetOrder(id: body.id).body.status == "new" }`;
+- сценарий сохраняет его в переменную и проверяет её: `order = CreateOrder()` … `expect { order.status == 201 }`;
+- в `.http` — есть строка `> assert`.
+
+Запрос, который вызывается только ради значения (`Login()` в заголовке), проверкой `Login` не считается.
+
+## Коды ответа
+
+Outry ещё собирает коды, которыми отвечает каждый обработчик:
+
+- константы `net/http` где угодно в обработчике: `http.Error(w, "…", http.StatusConflict)`,
+  `c.JSON(http.StatusNotFound, …)` (те же имена у fiber и iris);
+- числа от 100 до 599 в вызовах-ответах: `c.JSON(404, …)`, `w.WriteHeader(201)`, `c.AbortWithStatus(401)`,
+  свой `respond(w, 409, …)`;
+- обработчик без успешного кода отвечает `200` — такой код помечается как неявный.
+
+Код проверен, если какой-то запрос к роуту сравнивает с ним статус:
+
+```outry
+GetOrder: GET /orders/{id} {
+  expect { status == 200 }
+}
+
+flow MissingOrder {
+  expect { GetOrder(id: 0).status == 404 }
+}
+```
+
+Считаются `status == 404`, `404 == status` и `status in [200, 404]`; диапазоны (`status < 500`) проверяют
+ответ, но конкретный код не отмечают. Коды, которые выставляют вспомогательные функции, вызываемые
+обработчиком, не находятся.
+
+## Параметры
+
+```sh
+outry coverage [DIR] [--min <N>] [--uncovered] [--format text|github|json]
+```
+
+`DIR` — Go-сервис. По умолчанию — папка с `go.mod`, которая ищется от проекта вверх до корня репозитория.
+
+| Флаг | Описание |
+|------|----------|
+| `--min <N>` | Код выхода `1`, если проверено меньше `N` процентов роутов |
+| `--uncovered` | Показать только дыры: роуты без запроса, без `expect` или с непроверенными кодами ответа |
+| `--format <F>` | `text` (по умолчанию), `github` (аннотации GitHub Actions), `json` |
+| `--json` | То же, что `--format json` |
+| `--base <NAME>` | Переменная с адресом сервиса в URL `.http` (для сопоставления), по умолчанию `base` |
+| `--query <FILE.scm>` | Дополнительный запрос tree-sitter для другого роутера; можно несколько раз |
+| `--project <DIR>` | Папка проекта с `env.toml` |
+
+`outry check` печатает строку итога покрытия, если нашёл `go.mod`. Низкое покрытие там не ошибка; порог
+задаёт `outry coverage --min`.
+
+## В CI
+
+```yaml title=".github/workflows/api-tests.yml"
+- name: Route coverage
+  run: outry coverage --min 80 --format github
+```
+
+С `--format github` каждая дыра — предупреждение прямо в пулл-реквесте: роут без запроса отмечается на
+регистрации в Go, запрос без `expect` — на самом запросе, непроверенный код ответа — на строке обработчика,
+которая его отдаёт. Ниже порога джоба падает с аннотацией-ошибкой.
+
+`--format json` печатает итоги (`percent`, `checked`, `requested`, `total`, `statuses_checked`,
+`statuses_total`, `passed`) и каждый роут с уровнем, запросами и кодами ответа.
+
+## В приложении
+
+Вкладка **Routes** показывает то же покрытие: строку итога под планом, бейдж у каждого роута с запросом
+(`no expect`, `unchecked 404`, `checked`) и **Show N gaps only**, чтобы скрыть полностью проверенные роуты.
+Роуты без запроса — в списке **New**, их создаёт **Create files**.

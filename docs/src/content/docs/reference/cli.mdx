@@ -55,7 +55,7 @@ Without paths (or with the path of the project itself, `outry check api`) it che
 - formatting, as `outry fmt --check` (`--no-fmt` turns it off);
 - the Go code, as [`outry import go --check`](/outry/guides/import-go/), when a `go.mod` is found in the
   project directory or above it, up to the repository root. `--go <DIR>` points to the service, `--no-go`
-  skips it.
+  skips it. A summary line of [route coverage](/outry/guides/coverage/) is printed too; it is never an error.
 
 With paths only those files are checked, without Go. `--env` checks a single environment with its real
 variables — `--var`, `OUTRY_*`, `env.toml` and the keychain (`--no-keyring` turns it off).
@@ -176,6 +176,28 @@ project found from the current folder; it must have an `env.toml`.
 | `--prune` | Delete files whose requests all point at removed routes |
 | `--format <F>` | `text` (default), `github` (GitHub Actions annotations), `json` |
 | `--base <NAME>` | Variable with the service address in existing `.http` URLs (for matching), default `base` |
+| `--query <FILE.scm>` | An extra tree-sitter query for another router; can be repeated |
+| `--project <DIR>` | Project folder with `env.toml` |
+| `--json` | Same as `--format json` |
+
+## `outry coverage`
+
+Show which routes of a Go service no request checks: routes without a request, requests without `expect`,
+handler status codes that no `expect` compares with. Nothing is sent. See
+[Route coverage](/outry/guides/coverage/).
+
+```sh
+outry coverage [DIR]
+```
+
+`DIR` is the Go service (default: the folder with `go.mod`, from the project up to the repository root).
+
+| Flag | Description |
+|------|-------------|
+| `--min <N>` | Exit with `1` if fewer than `N` percent of routes are checked |
+| `--uncovered` | Show only routes without a request, without `expect` or with unchecked status codes |
+| `--format <F>` | `text` (default), `github` (GitHub Actions annotations), `json` |
+| `--base <NAME>` | Variable with the service address in `.http` URLs (for matching), default `base` |
 | `--query <FILE.scm>` | An extra tree-sitter query for another router; can be repeated |
 | `--project <DIR>` | Project folder with `env.toml` |
 | `--json` | Same as `--format json` |

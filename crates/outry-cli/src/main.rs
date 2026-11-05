@@ -1,3 +1,4 @@
+mod coverage;
 mod lsp;
 mod notifier;
 mod update;
@@ -66,7 +67,8 @@ enum Cmd {
     },
     /// Проверить проект без отправки запросов. Без путей — весь проект: синтаксис, имена вызовов,
     /// аргументы, формы, циклы; каждое окружение (вызовы, закрытые `only`, недостающие переменные);
-    /// формат (`outry fmt`); расхождения с Go-кодом (`outry import go --check`), если выше есть go.mod.
+    /// формат (`outry fmt`); расхождения с Go-кодом (`outry import go --check`) и итог покрытия
+    /// (`outry coverage`), если выше есть go.mod.
     /// С путями — только эти файлы, без Go.
     Check(CheckArgs),
     /// Привести *.outry к одному виду (как gofmt): отступы, порядок полей, кавычки, переносы.
@@ -141,6 +143,9 @@ enum Cmd {
         #[command(subcommand)]
         cmd: ImportCmd,
     },
+    /// Покрытие роутов Go-сервиса запросами: на какие нет запроса, какие ничего не проверяют
+    /// (`expect`), какие коды ответа обработчика (`c.JSON(404, …)`) не проверены. Без HTTP
+    Coverage(coverage::Args),
     /// Языковой сервер (LSP) для *.outry через stdin/stdout: ошибки `outry check` и расхождения
     /// с Go-кодом, автодополнение, подсказки, переход к определению, «Send» над запросом.
     /// Запускается редактором, см. https://1rowvy.github.io/outry/guides/editors/
@@ -392,6 +397,7 @@ fn real_main(cmd: Cmd) -> anyhow::Result<ExitCode> {
         }
         Cmd::Secret { cmd } => secret(cmd),
         Cmd::Import { cmd } => import(cmd),
+        Cmd::Coverage(args) => coverage::run(args),
         Cmd::Init { dir } => init(&dir),
         Cmd::Lsp {
             env, no_keyring, ..
@@ -564,9 +570,16 @@ fn check(args: CheckArgs) -> anyhow::Result<ExitCode> {
     let mut loose = Vec::new();
     let mut go_summary = String::new();
     let mut fixable = 0;
+    let mut coverage = None;
     if let Some(dir) = &go_dir {
         use outry_core::import;
-        let plan = import::plan_go(dir, &project.root, &[], import::DEFAULT_BASE)?;
+        let scan = import::scan_go(dir, &[])?;
+        coverage = Some(import::coverage(
+            &project.root,
+            scan.clone(),
+            import::DEFAULT_BASE,
+        )?);
+        let plan = import::plan(&project.root, scan, import::DEFAULT_BASE)?;
         let shown = |p: &Path| rel(&project.root.join(p));
         let go = |p: &Path| rel(&dir.join(p));
         found.extend(import_diagnostics(&plan, &shown, &go));
@@ -604,6 +617,16 @@ fn check(args: CheckArgs) -> anyhow::Result<ExitCode> {
             }
             for w in &loose {
                 eprintln!("{} {w}", st.yellow("warning:"));
+            }
+            if let Some(cov) = &coverage {
+                // Не ошибка: только итог, подробности — `outry coverage`.
+                eprintln!(
+                    "{}",
+                    st.dim(&format!(
+                        "coverage: {} — details: `outry coverage`",
+                        coverage::summary(cov)
+                    ))
+                );
             }
             let mut summary = format!(
                 "{}, {}{go_summary}: {}, {}",

@@ -863,8 +863,21 @@ struct ImportReport {
     /// Каталог, который сканировался
     dir: PathBuf,
     plan: outry_core::import::Plan,
+    /// Покрытие роутов запросами (`outry coverage`)
+    coverage: outry_core::import::Coverage,
     /// Созданные (при `apply`), исправленные и удалённые файлы, относительно проекта
     created: Vec<String>,
+}
+
+/// План импорта и покрытие по одному сканированию Go-кода.
+fn scan_go(
+    dir: &Path,
+    root: &Path,
+) -> outry_core::Result<(outry_core::import::Plan, outry_core::import::Coverage)> {
+    use outry_core::import;
+    let scan = import::scan_go(dir, &[])?;
+    let coverage = import::coverage(root, scan.clone(), import::DEFAULT_BASE)?;
+    Ok((import::plan(root, scan, import::DEFAULT_BASE)?, coverage))
 }
 
 /// Каталог с кодом по умолчанию: над `api/` — репозиторий, иначе сам проект.
@@ -893,7 +906,7 @@ async fn import_go(
     let dir = dir.unwrap_or_else(|| default_source_dir(&root));
     tauri::async_runtime::spawn_blocking(move || {
         use outry_core::import;
-        let plan = import::plan_go(&dir, &root, &[], import::DEFAULT_BASE).map_err(err)?;
+        let (plan, coverage) = scan_go(&dir, &root).map_err(err)?;
         let created = if apply {
             import::apply(&root, &plan).map_err(err)?
         } else {
@@ -902,6 +915,7 @@ async fn import_go(
         Ok(ImportReport {
             dir,
             plan,
+            coverage,
             created: created
                 .iter()
                 .map(|p| p.to_string_lossy().replace('\\', "/"))
@@ -930,7 +944,7 @@ async fn import_fix(
     let dir = dir.unwrap_or_else(|| default_source_dir(&root));
     tauri::async_runtime::spawn_blocking(move || {
         use outry_core::import;
-        let plan = import::plan_go(&dir, &root, &[], import::DEFAULT_BASE).map_err(err)?;
+        let (plan, _) = scan_go(&dir, &root).map_err(err)?;
         let fixes = import::fixes(&plan, |c| {
             ids.as_ref().is_none_or(|ids| ids.contains(&c.id))
         })
@@ -948,10 +962,11 @@ async fn import_fix(
                     .map(|p| p.to_string_lossy().replace('\\', "/")),
             );
         }
-        let plan = import::plan_go(&dir, &root, &[], import::DEFAULT_BASE).map_err(err)?;
+        let (plan, coverage) = scan_go(&dir, &root).map_err(err)?;
         Ok(ImportReport {
             dir,
             plan,
+            coverage,
             created: changed,
         })
     })

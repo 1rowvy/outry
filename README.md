@@ -76,7 +76,9 @@ api/v1/users/post.outry:17:10: error: body field `name` is not in model.CreateUs
 14 files, 2 environments, 12 Go routes: 2 errors, 0 warnings; 2 fixable with `outry import go --fix`
 ```
 
-`outry import go .` writes a request for every new route; `--fix` updates the existing ones.
+`outry import go .` writes a request for every new route; `--fix` updates the existing ones. `outry coverage`
+shows which routes nothing checks — no request, no `expect`, or a handler status code like `c.JSON(404, …)`
+that no `expect` compares with — and `--min 80` fails CI below the threshold.
 
 **See it on a real service:** [outry-example-gin](https://github.com/1rowvy/outry-example-gin) — a Gin shop API
 whose `api/` folder uses every feature of Outry. Clone it, `go run .`, `outry run api`, then change the code.
@@ -306,6 +308,7 @@ outry convert [PATHS]... [--rm]        # *.http → *.outry
 outry vars [-e ENV] [--reveal]         # final variable values and their sources
 outry envs                             # list environments (* = default)
 outry import go [DIR] [--check|--fix]  # create requests for Go routes, compare and fix existing ones
+outry coverage [DIR] [--min N]         # routes without a request, without expect, unchecked status codes
 outry lsp [--env ENV]                  # language server for editors (stdio)
 outry secret set|rm <NAME> [-e ENV]    # manage keychain secrets
 outry update [--check]                 # self-update from GitHub releases

@@ -1,0 +1,111 @@
+---
+title: Route coverage
+description: Find the routes of a Go service that no request checks, and fail CI below a threshold.
+---
+
+`outry coverage` answers "which endpoints of the service are not tested at all". It reads the routes from
+the Go code (as [`outry import go`](/outry/guides/import-go/)), matches them with the requests in the
+project and looks at their `expect` blocks. Nothing is sent.
+
+```sh
+outry coverage
+```
+
+```txt
+GET    /health       no request  codes 0/1  main.go:9
+POST   /orders       no expect   codes 0/1  api/orders.outry:5  unchecked: 201
+DELETE /orders/{id}  no expect   codes 0/1  api/orders.outry:9  unchecked: 204
+GET    /orders/{id}  checked     codes 1/2  api/orders.outry:1  unchecked: 404
+
+1/4 routes checked (25%): 2 without expect, 1 without request; 1/5 status codes checked
+1 missing request can be created with `outry import go`
+```
+
+## Levels
+
+Every route gets one of three levels:
+
+| Level | Meaning |
+|-------|---------|
+| `no request` | The route is in the Go code, but no `.outry` or `.http` request points at it. `outry import go` creates one. |
+| `no expect` | There is a request, but nothing checks its response. |
+| `checked` | A request to the route has `expect` — its own, or a check of its result somewhere else. |
+
+A request matches a route the same way as in `outry import go`: by `handler:`, otherwise by method and
+path. The percentage is the share of `checked` routes.
+
+A request counts as checked when:
+
+- it has an `expect` block itself;
+- another request or a flow checks its result: `expect { GetOrder(id: body.id).body.status == "new" }`;
+- a flow binds it and checks the binding: `order = CreateOrder()` … `expect { order.status == 201 }`;
+- in `.http`, it has a `> assert` line.
+
+A request called only for a value — `Login()` in a header — is not a check of `Login`.
+
+## Status codes
+
+Outry also collects the status codes each handler responds with:
+
+- `net/http` constants anywhere in the handler: `http.Error(w, "…", http.StatusConflict)`,
+  `c.JSON(http.StatusNotFound, …)` (the same names in fiber and iris);
+- numbers from 100 to 599 passed to response calls: `c.JSON(404, …)`, `w.WriteHeader(201)`,
+  `c.AbortWithStatus(401)`, your own `respond(w, 409, …)`;
+- a handler without any success code answers `200` — that code is marked as implicit.
+
+A code is checked when some request to the route compares the status with it:
+
+```outry
+GetOrder: GET /orders/{id} {
+  expect { status == 200 }
+}
+
+flow MissingOrder {
+  expect { GetOrder(id: 0).status == 404 }
+}
+```
+
+`status == 404`, `404 == status` and `status in [200, 404]` count; ranges (`status < 500`) check the response
+but do not mark a specific code. Codes set inside helper functions the handler calls are not found.
+
+## Options
+
+```sh
+outry coverage [DIR] [--min <N>] [--uncovered] [--format text|github|json]
+```
+
+`DIR` is the Go service. By default it is the folder with `go.mod`, searched from the project up to the
+repository root.
+
+| Flag | Description |
+|------|-------------|
+| `--min <N>` | Exit with `1` if fewer than `N` percent of routes are checked |
+| `--uncovered` | Show only gaps: routes without a request, without `expect`, or with unchecked status codes |
+| `--format <F>` | `text` (default), `github` (GitHub Actions annotations), `json` |
+| `--json` | Same as `--format json` |
+| `--base <NAME>` | Variable with the service address in `.http` URLs (for matching), default `base` |
+| `--query <FILE.scm>` | An extra tree-sitter query for another router; can be repeated |
+| `--project <DIR>` | Project folder with `env.toml` |
+
+`outry check` prints a one-line summary of coverage when it finds a `go.mod`. Low coverage is not an
+error there; use `outry coverage --min` to enforce a threshold.
+
+## In CI
+
+```yaml title=".github/workflows/api-tests.yml"
+- name: Route coverage
+  run: outry coverage --min 80 --format github
+```
+
+With `--format github` every gap becomes a warning annotation on the pull request: a route without a request
+is marked on its registration in Go, a request without `expect` on the request, and an unchecked status code
+on the line of the handler that returns it. Below the threshold the job fails with an error annotation.
+
+`--format json` prints the totals (`percent`, `checked`, `requested`, `total`, `statuses_checked`,
+`statuses_total`, `passed`) and every route with its level, requests and status codes.
+
+## In the desktop app
+
+The **Routes** tab shows the same coverage: a summary line under the plan, a badge on every route that has
+a request (`no expect`, `unchecked 404`, `checked`) and **Show N gaps only** to hide routes that are fully
+checked. Routes without a request are listed under **New**, and **Create files** writes them.
