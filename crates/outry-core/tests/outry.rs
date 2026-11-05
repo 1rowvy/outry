@@ -219,6 +219,59 @@ async fn calls_are_cached_per_run_and_cookies_flow() {
 }
 
 #[tokio::test]
+async fn run_records_sent_requests_for_coverage() {
+    let (base, _) = server();
+    let mut r = runner(&base);
+    let mut run = Run::new(
+        workspace(&[("auth/login.outry", LOGIN), ("orders.outry", ORDERS)]),
+        Duration::from_secs(5),
+    )
+    .unwrap();
+    run.record = true;
+    exec(&mut run, &mut r, "CreateOrder").await.unwrap();
+    exec(&mut run, &mut r, "Checkout").await.unwrap();
+    let sent: Vec<(&str, usize, &str, u16, String)> = run
+        .executed
+        .iter()
+        .map(|e| {
+            (
+                e.name.as_deref().unwrap(),
+                e.line,
+                e.method.as_str(),
+                e.status,
+                e.via.join(" → "),
+            )
+        })
+        .collect();
+    // Login из кеша прогона второй раз не отправляется — и не записывается.
+    assert_eq!(
+        sent,
+        [
+            ("Login", 2, "POST", 200, "CreateOrder".to_string()),
+            ("CreateOrder", 4, "POST", 201, String::new()),
+            ("CreateOrder", 4, "POST", 201, "Checkout".to_string()),
+            ("GetOrder", 27, "GET", 200, "Checkout".to_string()),
+        ]
+    );
+    assert_eq!(run.executed[0].file, PathBuf::from("auth/login.outry"));
+    assert!(run.executed[3].url.starts_with(&base));
+
+    run.reset().unwrap();
+    assert_eq!(run.executed.len(), 4, "reset keeps the log");
+
+    let mut plain = Run::new(
+        workspace(&[("auth/login.outry", LOGIN)]),
+        Duration::from_secs(5),
+    )
+    .unwrap();
+    exec(&mut plain, &mut r, "Login").await.unwrap();
+    assert!(
+        plain.executed.is_empty(),
+        "nothing is recorded unless asked"
+    );
+}
+
+#[tokio::test]
 async fn failed_call_reports_the_chain() {
     let (base, _) = server();
     let mut r = runner(&base);

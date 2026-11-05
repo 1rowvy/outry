@@ -17,7 +17,15 @@ pub struct Args {
     /// Код выхода 1, если проверенных роутов меньше N процентов (для CI)
     #[arg(long, value_name = "N")]
     min: Option<f64>,
-    /// Показать только дыры: роуты без запроса, без `expect` и с непроверенными кодами ответа
+    /// Журнал `outry run --coverage-out FILE`: отметить роуты, запросы к которым реально
+    /// отправлялись (можно несколько раз — журналы объединяются)
+    #[arg(long = "from", value_name = "FILE")]
+    from: Vec<PathBuf>,
+    /// Код выхода 1, если выполненных роутов меньше N процентов (нужен --from)
+    #[arg(long, value_name = "N")]
+    min_executed: Option<f64>,
+    /// Показать только дыры: роуты без запроса, без `expect`, с непроверенными кодами ответа и
+    /// (с --from) невыполненные
     #[arg(long)]
     uncovered: bool,
     /// Каталог проекта с env.toml (по умолчанию ищется вверх от текущего)
@@ -48,6 +56,8 @@ pub fn run(args: Args) -> anyhow::Result<ExitCode> {
     let Args {
         dir,
         min,
+        from,
+        min_executed,
         uncovered,
         project,
         base,
@@ -56,10 +66,24 @@ pub fn run(args: Args) -> anyhow::Result<ExitCode> {
         json,
     } = args;
     let format = if json { Format::Json } else { format };
-    if let Some(m) = min
-        && !(0.0..=100.0).contains(&m)
-    {
-        bail!("--min is a percentage from 0 to 100, got {m}");
+    for (flag, value) in [("--min", min), ("--min-executed", min_executed)] {
+        if let Some(m) = value
+            && !(0.0..=100.0).contains(&m)
+        {
+            bail!("{flag} is a percentage from 0 to 100, got {m}");
+        }
+    }
+    if min_executed.is_some() && from.is_empty() {
+        bail!(
+            "--min-executed needs a run log: `outry run api --coverage-out run.json`, then `--from run.json`"
+        );
+    }
+    let mut runs = Vec::new();
+    for f in &from {
+        let text = std::fs::read_to_string(f).with_context(|| f.display().to_string())?;
+        let log =
+            import::RunLog::parse(&text).map_err(|e| anyhow::anyhow!("{}: {e}", f.display()))?;
+        runs.extend(log.requests);
     }
     let project = find_project(project.as_deref(), Path::new("."))?;
     if !project.has_config() {
@@ -86,8 +110,13 @@ pub fn run(args: Args) -> anyhow::Result<ExitCode> {
         })
         .collect::<anyhow::Result<Vec<_>>>()?;
     let scan = import::scan_source(&dir, &extra)?;
-    let cov = import::coverage(&project.root, scan, &base)?;
+    let cov = if from.is_empty() {
+        import::coverage(&project.root, scan, &base)?
+    } else {
+        import::coverage_runs(&project.root, scan, &base, &runs)?
+    };
     let below = min.filter(|&m| cov.percent() < m);
+    let below_executed = min_executed.filter(|&m| cov.executed_percent() < m);
 
     let cwd = std::env::current_dir().unwrap_or_default();
     let rel = |p: &Path| relative(p, &cwd).display().to_string().replace('\\', "/");
@@ -110,6 +139,12 @@ pub fn run(args: Args) -> anyhow::Result<ExitCode> {
                 statuses_checked: usize,
                 statuses_total: usize,
                 min: Option<f64>,
+                #[serde(skip_serializing_if = "Option::is_none")]
+                executed: Option<usize>,
+                #[serde(skip_serializing_if = "Option::is_none")]
+                executed_percent: Option<f64>,
+                #[serde(skip_serializing_if = "Option::is_none")]
+                min_executed: Option<f64>,
                 passed: bool,
                 files: usize,
                 routes: Vec<&'a RouteCoverage>,
@@ -124,7 +159,12 @@ pub fn run(args: Args) -> anyhow::Result<ExitCode> {
                 statuses_checked,
                 statuses_total,
                 min,
-                passed: below.is_none(),
+                executed: cov.runs.then(|| cov.executed()),
+                executed_percent: cov
+                    .runs
+                    .then(|| (cov.executed_percent() * 10.0).round() / 10.0),
+                min_executed,
+                passed: below.is_none() && below_executed.is_none(),
                 files: cov.files,
                 routes: rows,
                 warnings: &cov.warnings,
@@ -142,10 +182,23 @@ pub fn run(args: Args) -> anyhow::Result<ExitCode> {
                     summary(&cov)
                 );
             }
+            if let Some(m) = below_executed {
+                println!(
+                    "::error title=outry coverage::{} is below --min-executed {m}%",
+                    executed_summary(&cov)
+                );
+            }
         }
-        Format::Text => print_table(&cov, &rows, &shown, &go, below, import_command(&dir)),
+        Format::Text => print_table(
+            &cov,
+            &rows,
+            &shown,
+            &go,
+            (below, below_executed),
+            import_command(&dir),
+        ),
     }
-    Ok(if below.is_some() {
+    Ok(if below.is_some() || below_executed.is_some() {
         ExitCode::FAILURE
     } else {
         ExitCode::SUCCESS
@@ -154,7 +207,7 @@ pub fn run(args: Args) -> anyhow::Result<ExitCode> {
 
 /// Дыра: роут без проверок или с кодом ответа, который никто не проверяет.
 fn is_hole(r: &RouteCoverage) -> bool {
-    r.level < Level::Checked || r.statuses.iter().any(|s| !s.checked)
+    r.level < Level::Checked || r.statuses.iter().any(|s| !s.checked) || r.executed == Some(false)
 }
 
 /// `3/5 routes checked (60%)`.
@@ -164,6 +217,16 @@ pub fn summary(cov: &Coverage) -> String {
         cov.at_least(Level::Checked),
         cov.routes.len(),
         percent(cov.percent())
+    )
+}
+
+/// `2/5 routes executed (40%)`.
+fn executed_summary(cov: &Coverage) -> String {
+    format!(
+        "{}/{} routes executed ({})",
+        cov.executed(),
+        cov.routes.len(),
+        percent(cov.executed_percent())
     )
 }
 
@@ -189,7 +252,7 @@ fn print_table(
     rows: &[&RouteCoverage],
     shown: &dyn Fn(&Path) -> String,
     go: &dyn Fn(&Path) -> String,
-    below: Option<f64>,
+    (below, below_executed): (Option<f64>, Option<f64>),
     import_cmd: &str,
 ) {
     let st = Style::stdout();
@@ -205,6 +268,7 @@ fn print_table(
     let w_path = rows.iter().map(|r| r.path.len()).max().unwrap_or(0);
     let w_codes = rows.iter().map(|r| codes(r).len()).max().unwrap_or(0);
     let w_level = label(Level::None).len();
+    let w_ran = "not run".len();
     for r in rows {
         let level = format!("{:w_level$}", label(r.level));
         let level = match r.level {
@@ -212,13 +276,24 @@ fn print_table(
             Level::Request => st.yellow(&level),
             Level::Checked => st.green(&level),
         };
+        let ran = match r.executed {
+            Some(true) => format!("{}  ", st.green(&format!("{:w_ran$}", "ran"))),
+            Some(false) => format!("{}  ", st.red(&format!("{:w_ran$}", "not run"))),
+            None => String::new(),
+        };
         let mut line = format!(
-            "{:w_method$} {:w_path$}  {level}  codes {:>w_codes$}  {}",
+            "{:w_method$} {:w_path$}  {level}  {ran}codes {:>w_codes$}  {}",
             r.method,
             r.path,
             codes(r),
             st.dim(&place(r))
         );
+        if !r.via.is_empty() {
+            line.push_str(&format!(
+                "  {}",
+                st.dim(&format!("via {}", r.via.join(" → ")))
+            ));
+        }
         let missing: Vec<String> = r
             .statuses
             .iter()
@@ -246,18 +321,32 @@ fn print_table(
         .filter(|r| r.level == Level::Request)
         .count();
     let without_request = cov.routes.len() - cov.at_least(Level::Request);
-    let text = format!(
+    let mut text = format!(
         "{}: {without_expect} without expect, {without_request} without request; \
          {sc}/{stotal} status codes checked",
         summary(cov)
     );
-    match below {
-        Some(m) => {
-            println!("{text}");
+    if cov.runs {
+        text.push_str(&format!("; {}", executed_summary(cov)));
+    }
+    let complete = without_request == 0
+        && without_expect == 0
+        && (!cov.runs || cov.executed() == cov.routes.len());
+    if below.is_some() || below_executed.is_some() {
+        println!("{text}");
+        if let Some(m) = below {
             println!("{}", st.red(&format!("coverage is below --min {m}%")));
         }
-        None if without_request == 0 && without_expect == 0 => println!("{}", st.green(&text)),
-        None => println!("{text}"),
+        if let Some(m) = below_executed {
+            println!(
+                "{}",
+                st.red(&format!("executed routes are below --min-executed {m}%"))
+            );
+        }
+    } else if complete {
+        println!("{}", st.green(&text));
+    } else {
+        println!("{text}");
     }
     if without_request > 0 {
         println!(
@@ -297,6 +386,13 @@ fn diagnostics(
                 format!("no request to {route} checks the response (`expect`)"),
             )),
             (Level::Checked, Some(_)) => {}
+        }
+        if let (Some(false), Some(q)) = (r.executed, r.requests.first()) {
+            out.push(warn(
+                shown(&q.file),
+                q.line,
+                format!("route {route} was not executed by `outry run`"),
+            ));
         }
         if r.level == Level::None {
             continue;

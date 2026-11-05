@@ -80,7 +80,9 @@ api/v1/users/post.outry:17:10: error: body field `name` is not in model.CreateUs
 service works the same way with `outry import rust .` — bodies, query and headers come from the
 extractors, fields from serde, status codes from `StatusCode::…` and your error enum. `outry coverage`
 shows which routes nothing checks — no request, no `expect`, or a handler status code like `c.JSON(404, …)`
-that no `expect` compares with — and `--min 80` fails CI below the threshold.
+that no `expect` compares with — and `--min 80` fails CI below the threshold. Give it the log of a run
+(`outry run api --coverage-out run.json`, then `--from run.json`) and it also shows which routes really ran,
+including those reached only through calls like `Login()`.
 
 **See it on a real service:** [outry-example-gin](https://github.com/1rowvy/outry-example-gin) — a Gin shop API
 whose `api/` folder uses every feature of Outry. Clone it, `go run .`, `outry run api`, then change the code.
@@ -313,6 +315,7 @@ outry envs                             # list environments (* = default)
 outry import go [DIR] [--check|--fix]  # create requests for Go routes, compare and fix existing ones
 outry import rust [DIR] [--check|--fix]  # the same for axum (Rust) routes
 outry coverage [DIR] [--min N]         # routes without a request, without expect, unchecked status codes
+outry coverage --from run.json         # ...and which routes `outry run --coverage-out run.json` really hit
 outry lsp [--env ENV]                  # language server for editors (stdio)
 outry secret set|rm <NAME> [-e ENV]    # manage keychain secrets
 outry update [--check]                 # self-update from GitHub releases

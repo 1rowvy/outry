@@ -69,10 +69,41 @@ flow MissingOrder {
 `status == 404`, `404 == status` and `status in [200, 404]` count; ranges (`status < 500`) check the response
 but do not mark a specific code. Codes set inside helper functions the handler calls are not found.
 
+## Executed routes
+
+Static coverage says a request exists and checks something, not that it actually ran. Add a run log to see
+which routes were really called — directly or from another request (`Login()` in a header) or a flow:
+
+```sh
+outry run api --coverage-out run.json
+outry coverage --from run.json
+```
+
+```txt
+POST   /login        no expect   ran      codes 0/1  api/orders.outry:1   via CreateOrder  unchecked: 200
+POST   /orders       checked     ran      codes 1/1  api/orders.outry:5
+DELETE /orders/{id}  no expect   not run  codes 0/1  api/orders.outry:15  unchecked: 204
+GET    /orders/{id}  checked     ran      codes 2/2  api/orders.outry:10  via Missing
+
+2/4 routes checked (50%): 2 without expect, 0 without request; 3/5 status codes checked; 3/4 routes executed (75%)
+```
+
+`--coverage-out` writes every request that was actually sent: its file and name, method, URL, the status
+that came back and, for a call, the chain it was called from. Responses taken from the run cache are not
+sent and not written. A logged request is matched with the route through the request in the project
+(by file and name, so later edits don't break it; `.http` by file); if the request is gone, by method and
+URL path. `via` shows that a route was only reached indirectly.
+
+`--from` can be repeated to merge logs, for example from several CI jobs or environments. In JSON, every
+route gets `executed` (and `via`), every status code `seen` — whether that code actually came back.
+`--min-executed <N>` fails below `N` percent of executed routes, and `--uncovered` also lists the routes
+that were not run.
+
 ## Options
 
 ```sh
-outry coverage [DIR] [--min <N>] [--uncovered] [--format text|github|json]
+outry coverage [DIR] [--min <N>] [--from <FILE>]... [--min-executed <N>] [--uncovered]
+               [--format text|github|json]
 ```
 
 `DIR` is the Go or Rust service. By default it is the folder with `go.mod` or `Cargo.toml`, searched from
@@ -81,7 +112,9 @@ the project up to the repository root.
 | Flag | Description |
 |------|-------------|
 | `--min <N>` | Exit with `1` if fewer than `N` percent of routes are checked |
-| `--uncovered` | Show only gaps: routes without a request, without `expect`, or with unchecked status codes |
+| `--from <FILE>` | Run log from `outry run --coverage-out`: mark executed routes; can be repeated |
+| `--min-executed <N>` | Exit with `1` if fewer than `N` percent of routes were executed (needs `--from`) |
+| `--uncovered` | Show only gaps: routes without a request, without `expect`, with unchecked status codes or (with `--from`) not executed |
 | `--format <F>` | `text` (default), `github` (GitHub Actions annotations), `json` |
 | `--json` | Same as `--format json` |
 | `--base <NAME>` | Variable with the service address in `.http` URLs (for matching), default `base` |
@@ -98,12 +131,23 @@ error there; use `outry coverage --min` to enforce a threshold.
   run: outry coverage --min 80 --format github
 ```
 
+To also require that the routes really ran, write a log in the test step and pass it on:
+
+```yaml title=".github/workflows/api-tests.yml"
+- name: API tests
+  run: outry run api --env ci --coverage-out run.json
+- name: Route coverage
+  if: always()
+  run: outry coverage --from run.json --min 80 --min-executed 90 --format github
+```
+
 With `--format github` every gap becomes a warning annotation on the pull request: a route without a request
 is marked on its registration in the code, a request without `expect` on the request, and an unchecked status code
-on the line of the handler that returns it. Below the threshold the job fails with an error annotation.
+on the line of the handler that returns it; with `--from`, a route that was not executed is marked on its
+request. Below the threshold the job fails with an error annotation.
 
 `--format json` prints the totals (`percent`, `checked`, `requested`, `total`, `statuses_checked`,
-`statuses_total`, `passed`) and every route with its level, requests and status codes.
+`statuses_total`, `passed`; with `--from` also `executed`, `executed_percent`) and every route with its level, requests and status codes.
 
 ## In the desktop app
 

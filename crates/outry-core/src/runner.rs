@@ -97,6 +97,25 @@ impl RunOutcome {
     }
 }
 
+/// Отправленный запрос — для покрытия «выполнен» (`outry run --coverage-out`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Executed {
+    /// Файл запроса относительно корня проекта
+    pub file: std::path::PathBuf,
+    /// Строка запроса в файле (у `*.http` — 0)
+    #[serde(default)]
+    pub line: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    pub method: String,
+    pub url: String,
+    pub status: u16,
+    /// Через что отправлен: цепочка от запущенного элемента (`Checkout → Login`), пусто — запущен
+    /// сам
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub via: Vec<String>,
+}
+
 pub struct Runner {
     client: reqwest::Client,
     pub project: Project,

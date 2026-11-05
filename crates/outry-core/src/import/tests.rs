@@ -2233,6 +2233,97 @@ flow Missing {
     assert_eq!(cov.at_least(Level::Request), 4);
     assert_eq!(cov.percent(), 60.0);
     assert_eq!(cov.statuses(), (4, 7));
+    assert!(!cov.runs && cov.routes.iter().all(|r| r.executed.is_none()));
+
+    // С журналом прогона: что реально отправлялось и какие коды пришли.
+    let sent =
+        |file: &str, line, name: Option<&str>, method: &str, url: &str, status, via: &[&str]| {
+            crate::runner::Executed {
+                file: file.into(),
+                line,
+                name: name.map(str::to_string),
+                method: method.into(),
+                url: url.into(),
+                status,
+                via: via.iter().map(|s| s.to_string()).collect(),
+            }
+        };
+    let log = RunLog::new(
+        "dev",
+        vec![
+            // Строка сдвинулась после прогона — находим по имени.
+            sent(
+                "orders.outry",
+                99,
+                Some("GetOrder"),
+                "GET",
+                "http://x/orders/0",
+                404,
+                &["Missing"],
+            ),
+            sent(
+                "orders.outry",
+                5,
+                Some("CreateOrder"),
+                "POST",
+                "http://x/orders",
+                201,
+                &["Missing"],
+            ),
+            sent(
+                "orders.outry",
+                5,
+                Some("CreateOrder"),
+                "POST",
+                "http://x/orders",
+                201,
+                &[],
+            ),
+            sent("legacy.http", 0, None, "GET", "http://x/legacy", 410, &[]),
+            // Файла больше нет — по методу и пути URL.
+            sent(
+                "gone.outry",
+                1,
+                Some("Health"),
+                "GET",
+                "http://x/health?full=1",
+                200,
+                &[],
+            ),
+        ],
+    );
+    assert_eq!(log.requests.len(), 4, "duplicates merged, direct run kept");
+    assert!(log.requests[1].via.is_empty());
+    let text = serde_json::to_string(&log).unwrap();
+    let log = RunLog::parse(&text).unwrap();
+    assert!(RunLog::parse(&text.replace("\"version\":1", "\"version\":9")).is_err());
+
+    let scan = scan_go(&dir.0.join("svc"), &[]).unwrap();
+    let cov = coverage_runs(&dir.0.join("api"), scan, DEFAULT_BASE, &log.requests).unwrap();
+    let row = |method: &str, path: &str| {
+        cov.routes
+            .iter()
+            .find(|r| r.method == method && r.path == path)
+            .unwrap()
+    };
+    let seen = |r: &RouteCoverage| -> Vec<(u16, Option<bool>)> {
+        r.statuses.iter().map(|s| (s.status.code, s.seen)).collect()
+    };
+    assert!(cov.runs);
+    let get = row("GET", "/orders/{id}");
+    assert_eq!(get.executed, Some(true));
+    assert_eq!(get.via, ["Missing"], "only called from the flow");
+    assert_eq!(seen(get), [(200, Some(false)), (404, Some(true))]);
+    let create = row("POST", "/orders");
+    assert_eq!((create.executed, create.via.len()), (Some(true), 0));
+    assert_eq!(row("DELETE", "/orders/{id}").executed, Some(false));
+    assert_eq!(row("GET", "/health").executed, Some(true));
+    assert_eq!(
+        seen(row("GET", "/legacy")),
+        [(200, Some(false)), (410, Some(true))]
+    );
+    assert_eq!(cov.executed(), 4);
+    assert_eq!(cov.executed_percent(), 80.0);
 }
 
 #[test]

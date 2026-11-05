@@ -33,6 +33,7 @@ from `.outry` share one [run cache](/outry/reference/outry-format/#caching) and 
 | `--fresh` | Do not read or store values saved by `save` and responses kept by `cache:` between runs |
 | `--no-keyring` | Do not look up secrets in the system keychain |
 | `--yes` | Send requests marked `confirm: true` without asking |
+| `--coverage-out <FILE>` | Write every sent request (also those called from other requests) to a JSON log for [`outry coverage --from`](/outry/guides/coverage/#executed-routes) |
 
 Exit code: `0` — everything passed, `1` — at least one request failed, `2` — Outry could not start.
 
@@ -210,7 +211,9 @@ repository root).
 | Flag | Description |
 |------|-------------|
 | `--min <N>` | Exit with `1` if fewer than `N` percent of routes are checked |
-| `--uncovered` | Show only routes without a request, without `expect` or with unchecked status codes |
+| `--from <FILE>` | Run log from `outry run --coverage-out`: mark executed routes; can be repeated |
+| `--min-executed <N>` | Exit with `1` if fewer than `N` percent of routes were executed (needs `--from`) |
+| `--uncovered` | Show only routes without a request, without `expect`, with unchecked status codes or (with `--from`) not executed |
 | `--format <F>` | `text` (default), `github` (GitHub Actions annotations), `json` |
 | `--base <NAME>` | Variable with the service address in `.http` URLs (for matching), default `base` |
 | `--query <FILE.scm>` | An extra tree-sitter query for another Go router; can be repeated |

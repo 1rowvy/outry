@@ -15,7 +15,7 @@ use super::{ItemRef, Source, Workspace};
 use crate::error::{Error, Result};
 use crate::expr::{AssertOutcome, value_to_var};
 use crate::parser::Header;
-use crate::runner::{ResolvedRequest, Response, RunOutcome, Runner, read_response};
+use crate::runner::{Executed, ResolvedRequest, Response, RunOutcome, Runner, read_response};
 use crate::state::{CachedCall, unix_now};
 
 /// Запрос, вызванный по ходу выполнения: для trace в CLI и GUI.
@@ -79,6 +79,10 @@ pub struct Run {
     /// `save` этого прогона: в `Vars` значения — строки, а здесь — как были (число, объект).
     typed: HashMap<String, Value>,
     pub confirm: Option<Confirm>,
+    /// Записывать отправленные запросы в `executed` (`outry run --coverage-out`).
+    pub record: bool,
+    /// Отправленные запросы всех прогонов, пока `record`; `reset` их не трогает.
+    pub executed: Vec<Executed>,
 }
 
 impl Run {
@@ -95,6 +99,8 @@ impl Run {
             lets: HashMap::new(),
             typed: HashMap::new(),
             confirm: None,
+            record: false,
+            executed: Vec::new(),
         })
     }
 
@@ -472,6 +478,19 @@ impl Exec<'_> {
         self.enter(r, &name)?;
         let res = self.request_inner(&ws, r, req, &name, args).await;
         self.stack.pop();
+        if self.run.record
+            && let Ok(out) = &res
+        {
+            self.run.executed.push(Executed {
+                file: src.path.clone(),
+                line: src.line(req.span.start),
+                name: req.name.clone(),
+                method: out.request.method.clone(),
+                url: out.request.url.clone(),
+                status: out.response.status,
+                via: self.stack.iter().map(|(_, n)| n.clone()).collect(),
+            });
+        }
         res
     }
 

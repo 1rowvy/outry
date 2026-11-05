@@ -70,10 +70,42 @@ flow MissingOrder {
 ответ, но конкретный код не отмечают. Коды, которые выставляют вспомогательные функции, вызываемые
 обработчиком, не находятся.
 
+## Выполненные роуты
+
+Статическое покрытие говорит, что запрос есть и что-то проверяет, но не что он действительно выполнялся.
+Журнал прогона показывает, какие роуты реально вызывались — сами, из другого запроса (`Login()` в
+заголовке) или из сценария:
+
+```sh
+outry run api --coverage-out run.json
+outry coverage --from run.json
+```
+
+```txt
+POST   /login        no expect   ran      codes 0/1  api/orders.outry:1   via CreateOrder  unchecked: 200
+POST   /orders       checked     ran      codes 1/1  api/orders.outry:5
+DELETE /orders/{id}  no expect   not run  codes 0/1  api/orders.outry:15  unchecked: 204
+GET    /orders/{id}  checked     ran      codes 2/2  api/orders.outry:10  via Missing
+
+2/4 routes checked (50%): 2 without expect, 0 without request; 3/5 status codes checked; 3/4 routes executed (75%)
+```
+
+`--coverage-out` записывает каждый реально отправленный запрос: файл и имя, метод, URL, пришедший код
+ответа, а для вызова — цепочку, из которой он вызван. Ответы из кеша прогона не отправляются и не
+записываются. Запрос из журнала сопоставляется с роутом через запрос проекта (по файлу и имени, так что
+правки после прогона не мешают; `.http` — по файлу), а если такого запроса уже нет — по методу и пути URL.
+`via` показывает, что до роута дошли только косвенно.
+
+`--from` можно указать несколько раз — журналы объединяются, например из разных джоб CI или окружений. В
+JSON у каждого роута появляется `executed` (и `via`), у каждого кода ответа — `seen`: приходил ли он на
+самом деле. `--min-executed <N>` падает, если выполнено меньше `N` процентов роутов, а `--uncovered`
+показывает и невыполненные роуты.
+
 ## Параметры
 
 ```sh
-outry coverage [DIR] [--min <N>] [--uncovered] [--format text|github|json]
+outry coverage [DIR] [--min <N>] [--from <FILE>]... [--min-executed <N>] [--uncovered]
+               [--format text|github|json]
 ```
 
 `DIR` — сервис на Go или Rust. По умолчанию — папка с `go.mod` или `Cargo.toml`, которая ищется от проекта
@@ -82,7 +114,9 @@ outry coverage [DIR] [--min <N>] [--uncovered] [--format text|github|json]
 | Флаг | Описание |
 |------|----------|
 | `--min <N>` | Код выхода `1`, если проверено меньше `N` процентов роутов |
-| `--uncovered` | Показать только дыры: роуты без запроса, без `expect` или с непроверенными кодами ответа |
+| `--from <FILE>` | Журнал `outry run --coverage-out`: отметить выполненные роуты; можно несколько раз |
+| `--min-executed <N>` | Код выхода `1`, если выполнено меньше `N` процентов роутов (нужен `--from`) |
+| `--uncovered` | Показать только дыры: роуты без запроса, без `expect`, с непроверенными кодами ответа или (с `--from`) невыполненные |
 | `--format <F>` | `text` (по умолчанию), `github` (аннотации GitHub Actions), `json` |
 | `--json` | То же, что `--format json` |
 | `--base <NAME>` | Переменная с адресом сервиса в URL `.http` (для сопоставления), по умолчанию `base` |
@@ -99,12 +133,23 @@ outry coverage [DIR] [--min <N>] [--uncovered] [--format text|github|json]
   run: outry coverage --min 80 --format github
 ```
 
+Чтобы требовать ещё и того, что роуты реально выполнялись, запишите журнал в шаге с тестами и передайте
+его дальше:
+
+```yaml title=".github/workflows/api-tests.yml"
+- name: API tests
+  run: outry run api --env ci --coverage-out run.json
+- name: Route coverage
+  if: always()
+  run: outry coverage --from run.json --min 80 --min-executed 90 --format github
+```
+
 С `--format github` каждая дыра — предупреждение прямо в пулл-реквесте: роут без запроса отмечается на
 регистрации в коде, запрос без `expect` — на самом запросе, непроверенный код ответа — на строке обработчика,
-которая его отдаёт. Ниже порога джоба падает с аннотацией-ошибкой.
+которая его отдаёт, а с `--from` невыполненный роут — на его запросе. Ниже порога джоба падает с аннотацией-ошибкой.
 
 `--format json` печатает итоги (`percent`, `checked`, `requested`, `total`, `statuses_checked`,
-`statuses_total`, `passed`) и каждый роут с уровнем, запросами и кодами ответа.
+`statuses_total`, `passed`, а с `--from` ещё `executed`, `executed_percent`) и каждый роут с уровнем, запросами и кодами ответа.
 
 ## В приложении
 

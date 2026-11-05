@@ -15,7 +15,7 @@ use outry_core::expr::AssertOutcome;
 use outry_core::lang::ast::Item;
 use outry_core::lang::exec::{CallTrace, FlowOutcome, Outcome, Run};
 use outry_core::lang::{Diagnostic, ItemRef, Workspace};
-use outry_core::runner::{Options, RunOutcome};
+use outry_core::runner::{Executed, Options, RunOutcome};
 use outry_core::vars::{self, Source};
 use outry_core::{Project, Runner, discover};
 
@@ -64,6 +64,10 @@ enum Cmd {
         /// Отправлять запросы с `confirm: true` без вопроса
         #[arg(long)]
         yes: bool,
+        /// Записать отправленные запросы (и вызванные из других) в JSON — для
+        /// `outry coverage --from FILE`: какие роуты реально выполнялись
+        #[arg(long, value_name = "FILE")]
+        coverage_out: Option<PathBuf>,
     },
     /// Проверить проект без отправки запросов. Без путей — весь проект: синтаксис, имена вызовов,
     /// аргументы, формы, циклы; каждое окружение (вызовы, закрытые `only`, недостающие переменные);
@@ -346,6 +350,7 @@ fn real_main(cmd: Cmd) -> anyhow::Result<ExitCode> {
             fresh,
             no_keyring,
             yes,
+            coverage_out,
         } => {
             let targets = expand(&paths)?;
             let project = find_project(env.project.as_deref(), first_existing(&paths))?;
@@ -365,6 +370,7 @@ fn real_main(cmd: Cmd) -> anyhow::Result<ExitCode> {
             if let Some(ws) = jobs.workspace {
                 let mut run = Run::new(ws, Duration::from_secs(timeout))?;
                 run.confirm = confirm_hook(yes, runner.env.clone());
+                run.record = coverage_out.is_some();
                 lang_run = Some(run);
             }
             let rt = tokio::runtime::Runtime::new()?;
@@ -373,9 +379,23 @@ fn real_main(cmd: Cmd) -> anyhow::Result<ExitCode> {
                 verbose,
                 json,
             };
-            let ok = rt.block_on(run_all(&mut runner, lang_run.as_mut(), &jobs.jobs, opts));
+            let mut http_log = coverage_out.as_ref().map(|_| Vec::new());
+            let ok = rt.block_on(run_all(
+                &mut runner,
+                lang_run.as_mut(),
+                &jobs.jobs,
+                opts,
+                http_log.as_mut(),
+            ));
             if !fresh {
                 runner.persist_saved()?;
+            }
+            if let Some(out) = &coverage_out {
+                let mut sent = http_log.unwrap_or_default();
+                sent.extend(lang_run.map(|r| r.executed).unwrap_or_default());
+                let log = outry_core::import::RunLog::new(&runner.env, sent);
+                std::fs::write(out, serde_json::to_string_pretty(&log)? + "\n")
+                    .with_context(|| out.display().to_string())?;
             }
             Ok(if ok {
                 ExitCode::SUCCESS
@@ -1061,16 +1081,27 @@ async fn run_all(
     mut lang: Option<&mut Run>,
     jobs: &[Job],
     opts: RunOpts,
+    mut http_log: Option<&mut Vec<Executed>>,
 ) -> bool {
     let st = Style::stdout();
     let (mut passed, mut failed) = (0, 0);
     for job in jobs {
         let (file, name, result) = match job {
-            Job::Http(f) => (
-                f.display().to_string(),
-                None,
-                runner.run_path(f).await.map(Outcome::Request),
-            ),
+            Job::Http(f) => {
+                let result = runner.run_path(f).await;
+                if let (Some(log), Ok(o)) = (http_log.as_deref_mut(), &result) {
+                    log.push(Executed {
+                        file: inside_root(&runner.project.root, f),
+                        line: 0,
+                        name: None,
+                        method: o.request.method.clone(),
+                        url: o.request.url.clone(),
+                        status: o.response.status,
+                        via: Vec::new(),
+                    });
+                }
+                (f.display().to_string(), None, result.map(Outcome::Request))
+            }
             Job::Item { file, item } => {
                 let run = lang.as_deref_mut().expect("workspace for .outry jobs");
                 let name = run.workspace().item(*item).name().map(str::to_string);
@@ -1133,6 +1164,15 @@ async fn run_all(
         keyring_hint();
     }
     failed == 0
+}
+
+/// Путь файла относительно корня проекта (как в `Workspace` и `outry coverage`).
+fn inside_root(root: &Path, f: &Path) -> PathBuf {
+    let canon = |p: &Path| p.canonicalize().unwrap_or_else(|_| p.to_path_buf());
+    canon(f)
+        .strip_prefix(canon(root))
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|_| f.to_path_buf())
 }
 
 /// Системного хранилища паролей нет, и секретов нет в запасном файле: без пояснения это

@@ -26,7 +26,8 @@ use crate::discover;
 use crate::error::{Error, Result};
 
 pub use coverage::{
-    Coverage, Covering, Level, RouteCoverage, StatusCoverage, coverage, coverage_with,
+    Coverage, Covering, Level, RouteCoverage, RunLog, StatusCoverage, coverage, coverage_runs,
+    coverage_with,
 };
 pub use diff::{Change, ChangeKind, Edit, GoRef, Severity};
 pub use udiff::unified as unified_diff;
