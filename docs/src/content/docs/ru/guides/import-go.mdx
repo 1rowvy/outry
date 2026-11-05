@@ -1,6 +1,6 @@
 ---
 title: Импорт роутов из Go
-description: Запросы .outry для всех роутов Go-сервиса — chi, gin, net/http, go-zero, go-restful, beego, buffalo.
+description: Запросы .outry для всех роутов Go-сервиса — chi, gin, echo, fiber, net/http, go-zero, go-restful, beego, buffalo.
 ---
 
 Outry читает исходники Go-сервиса, находит зарегистрированные роуты и создаёт запрос `.outry` для
@@ -41,6 +41,8 @@ created 2 files
 |--------|------------------|
 | [chi](https://github.com/go-chi/chi) | `r.Get/Post/…`, `r.Method("GET", …)`, `r.Handle`, `r.Route("/prefix", func(r chi.Router) {…})`, `r.Mount("/prefix", sub())`, `r.Mount("/prefix", subRouter)`, `r.With(mw).Get(…)`, `r.Use(mw)`, `r.Group(func(r chi.Router) {…})` |
 | [gin](https://github.com/gin-gonic/gin) | `r.GET/POST/…`, `r.Any`, `r.Handle("GET", …)`, `v1 := r.Group("/v1")` и вложенные группы, `r.Group("/v1").GET(…)`, middleware в `r.Group("/v1", mw)`, `r.GET("/x", mw, h)` и `r.Use(mw)` |
+| [echo](https://github.com/labstack/echo) | `e.GET/POST/…`, `e.Any`, `e.Add("GET", …)`, `e.Match([]string{"GET", "POST"}, …)` (роут на каждый метод), `g := e.Group("/v1", mw)` и вложенные группы, `e.Group("/v1").GET(…)`, middleware после обработчика в `e.GET("/x", h, mw)` и `e.Use(mw)` |
+| [fiber](https://github.com/gofiber/fiber) | v2 и v3: `app.Get/Post/…`, `app.All`, `app.Add("GET", …)` / `app.Add([]string{…}, …)`, `api := app.Group("/api", mw)`, `app.Route("/x", func(r fiber.Router) {…})`, `app.Mount("/x", sub)` / `app.Use("/x", sub)`, `app.Mount("/x", admin.New())`, `app.Get("/x", mw, h)` и `app.Use(mw)` |
 | `net/http` | `mux.HandleFunc("GET /items/{id}", h)` (шаблоны Go 1.22), `http.HandleFunc("/path", h)` |
 | [go-zero](https://github.com/zeromicro/go-zero) | `[]rest.Route{{Method: …, Path: …, Handler: …}}` в `server.AddRoutes` (сгенерированный goctl `routes.go`), поля в любом порядке, `server.AddRoute(rest.Route{…})`; `rest.WithPrefix`, `rest.WithJwt` / `rest.WithSignature` и `rest.WithMiddlewares([]rest.Middleware{…}, …)` как middleware |
 | [go-restful](https://github.com/emicklei/go-restful) | `ws.Route(ws.GET("/{id}").To(h)…)`, `ws.Method("PUT").Path("/x")`, `ws.Path("/users")` как префикс, `ws.Filter(mw)` и `.Filter(mw)` в цепочке; тело, ответ, query и заголовки — из `.Reads(T{})`, `.Writes(T{})`, `.Returns(200, "OK", T{})`, `.Param(ws.QueryParameter(…))` / `HeaderParameter` |
@@ -61,25 +63,27 @@ created 2 files
 ## Что создаётся
 
 Параметры пути остаются в записи роутера: `{id}`, `{id:[0-9]+}`, `{path...}`, `:id`, `:id:int`,
-`:id([0-9]+)` и `*path` превращаются в `{id}` / `{path}` — [параметры](/outry/ru/reference/outry-format/#параметры) запроса.
+`:id([0-9]+)`, `*path`, а у fiber `:id?`, `:id<int>` и `+` превращаются в `{id}` / `{path}` — [параметры](/outry/ru/reference/outry-format/#параметры) запроса.
 
 Outry также читает обработчик и показывает, что запрос ожидает:
 
 - **описание** — doc-комментарий обработчика или `@Summary` / `@Description` из аннотаций swag;
 - **тело** — структура, в которую декодируется запрос: `json.NewDecoder(r.Body).Decode(&req)`,
-  `c.ShouldBindJSON(&req)`, `render.DecodeJSON`, своя `decodeJSON(r, &req)` или объект-валидатор с методом
+  `c.ShouldBindJSON(&req)`, `c.Bind(&req)` в echo, `c.BodyParser(&req)` / `c.Bind().Body(&req)` в fiber,
+  `render.DecodeJSON`, своя `decodeJSON(r, &req)` или объект-валидатор с методом
   `Bind`. Поля берутся из тегов `json`, `binding:"required"` / `validate:"required"` отмечают обязательные,
   вложенные структуры показываются через точку (`user.email`), комментарий после поля сохраняется;
-- **query** — `r.URL.Query().Get("page")`, `c.Query`, `c.DefaultQuery`, `c.QueryParam`, `r.FormValue`,
+- **query** — `r.URL.Query().Get("page")`, `c.Query`, `c.DefaultQuery`, `c.QueryParam`, `c.QueryInt`, `r.FormValue`,
   `req.QueryParameter`, `c.GetString` / `c.GetInt` в контроллерах beego и `c.ShouldBindQuery(&q)`
   (поля из тегов `form`);
 - **форма** — `c.PostForm`, `c.DefaultPostForm`, `r.PostFormValue` дают тело `form { … }`, а с файлом
   (`c.FormFile("file")`, `r.FormFile`) — `multipart { file: file("") }`;
-- **заголовки** — `r.Header.Get("X-Tenant-ID")`, `c.GetHeader`, `req.HeaderParameter`;
+- **заголовки** — `r.Header.Get("X-Tenant-ID")`, `c.GetHeader`, `c.Request().Header.Get` (echo), `c.Get` (fiber),
+  `req.HeaderParameter`;
 - `httpx.Parse(r, &req)` из go-zero делит одну структуру по тегам: `form` → query, `header` → заголовки,
   `json` → тело (поля `path` — параметры пути);
 - **ответ** — значение первого успешного `json.NewEncoder(w).Encode(v)`, `c.JSON(200, v)`,
-  `render.JSON(w, r, v)`, своего `writeJSON(w, http.StatusOK, v)`, `httpx.OkJsonCtx(ctx, w, v)`,
+  `c.JSON(v)` / `c.Status(201).JSON(v)` в fiber, `render.JSON(w, r, v)`, своего `writeJSON(w, http.StatusOK, v)`, `httpx.OkJsonCtx(ctx, w, v)`,
   `resp.WriteEntity(v)`, `c.Render(200, r.JSON(v))` или `c.Data["json"] = v` в beego; ответы с кодом
   ошибки и `gin.H` / map пропускаются. Запрос получает `expect { body matches Order }`, а структура
   становится [shape](#shape-ответов).
@@ -298,18 +302,18 @@ internal/http/routes.go
 [`crates/outry-core/queries`](https://github.com/1rowvy/outry/tree/master/crates/outry-core/queries).
 Чтобы поддержать другой роутер, напишите свой запрос и передайте его через `--query`:
 
-```scheme title="echo.scm"
-; outry: import github.com/labstack/echo
+```scheme title="hertz.scm"
+; outry: import github.com/cloudwego/hertz
 (call_expression
   function: (selector_expression
     operand: (_) @receiver
     field: (field_identifier) @method)
-  arguments: (argument_list . (_) @path (_) @handler .)
+  arguments: (argument_list . (_) @path (_)* @middleware (_) @handler .)
   (#any-of? @method "GET" "POST" "PUT" "PATCH" "DELETE")) @route
 ```
 
 ```sh
-outry import go . --query echo.scm
+outry import go . --query hertz.scm
 ```
 
 | Захват | Значение |

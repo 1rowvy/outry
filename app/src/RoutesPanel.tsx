@@ -197,7 +197,7 @@ export function RoutesPanel({ report, busy, onScan, onPickDir, onCreate, onOpen,
         </button>
       </div>
       {!plan ? (
-        <p className="hint">{busy ? "Scanning…" : "Finds Go (chi, gin, net/http, …) and Rust (axum) routes"}</p>
+        <p className="hint">{busy ? "Scanning…" : "Finds Go (chi, gin, echo, fiber, …) and Rust (axum) routes"}</p>
       ) : (
         <div className="routes-body">
           <p className="routes-summary muted">

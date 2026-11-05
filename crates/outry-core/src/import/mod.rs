@@ -877,7 +877,8 @@ fn slash(p: &Path) -> String {
 }
 
 /// Путь роутера → путь с переменными: `{id}`, `{id:[0-9]+}`, `{path...}`, `:id`, `*path` → `{{id}}`;
-/// у beego `:id:int`, `:id([0-9]+)`, `*.*`. Без завершающего `/` (кроме корня).
+/// у beego `:id:int`, `:id([0-9]+)`, `*.*`; у fiber `:id?`, `:id<int>`, `+`. Без завершающего `/`
+/// (кроме корня).
 pub fn normalize_route(path: &str) -> String {
     let ident = |s: &str| -> String {
         s.chars()
@@ -888,8 +889,13 @@ pub fn normalize_route(path: &str) -> String {
     for seg in segments(path) {
         let seg = if let Some(name) = seg.strip_prefix(':').map(ident).filter(|n| !n.is_empty()) {
             format!("{{{{{name}}}}}")
-        } else if let Some(name) = seg.strip_prefix('*').map(ident) {
-            let name = if name.is_empty() { "path" } else { &name };
+        } else if let Some(name) = seg.strip_prefix(['*', '+']).map(ident) {
+            // fiber `*1`, `+2` — номер маски, не имя
+            let name = if name.is_empty() || name.starts_with(|c: char| c.is_ascii_digit()) {
+                "path"
+            } else {
+                &name
+            };
             format!("{{{{{name}}}}}")
         } else {
             braces_to_vars(seg)

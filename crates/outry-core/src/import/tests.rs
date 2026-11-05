@@ -258,6 +258,9 @@ fn normalizes_paths() {
     assert_eq!(normalize_route("/u/:id([0-9]+)"), "/u/{{id}}");
     assert_eq!(normalize_route("/u/:id?"), "/u/{{id}}");
     assert_eq!(normalize_route("/files/*.*"), "/files/{{path}}");
+    assert_eq!(normalize_route("/u/:id<int>"), "/u/{{id}}");
+    assert_eq!(normalize_route("/files/+"), "/files/{{path}}");
+    assert_eq!(normalize_route("/files/*1"), "/files/{{path}}");
 }
 
 fn route(method: &str, path: &str) -> Route {
@@ -1494,6 +1497,16 @@ fn find<'a>(scan: &'a Scan, method: &str, path: &str) -> &'a Route {
         .unwrap_or_else(|| panic!("no {method} {path} in {:?}", routes(scan)))
 }
 
+/// `"METHOD /path"` в порядке `scan`: по пути, затем по методу.
+fn sorted(routes: &[&str]) -> Vec<String> {
+    let mut v: Vec<String> = routes.iter().map(|r| r.to_string()).collect();
+    v.sort_by_key(|r| {
+        let (m, p) = r.split_once(' ').unwrap();
+        (p.to_string(), m.to_string())
+    });
+    v
+}
+
 fn query_names(r: &Route) -> Vec<&str> {
     r.info.query.iter().map(|f| f.name.as_str()).collect()
 }
@@ -2220,4 +2233,246 @@ flow Missing {
     assert_eq!(cov.at_least(Level::Request), 4);
     assert_eq!(cov.percent(), 60.0);
     assert_eq!(cov.statuses(), (4, 7));
+}
+
+#[test]
+fn echo_routes_groups_middleware_and_handlers() {
+    let dir = TempDir::new("echo");
+    dir.write(
+        "main.go",
+        r#"package main
+
+import (
+	"net/http"
+
+	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v4/middleware"
+	"example.com/svc/users"
+)
+
+type createReq struct {
+	Name string `json:"name"`
+}
+
+type Order struct {
+	ID int `json:"id"`
+}
+
+func main() {
+	e := echo.New()
+	e.Use(middleware.Logger())
+	e.GET("/health", health)
+	e.Add(http.MethodPut, "/config", putConfig)
+	e.Match([]string{"GET", http.MethodHead}, "/ping", ping)
+	e.Any("/proxy/*", proxy)
+	api := e.Group("/api", auth)
+	api.POST("/orders", createOrder, rateLimit)
+	api.GET("/orders/:id", getOrder)
+	e.Group("/inline").DELETE("/x", h)
+	users.Register(api.Group("/users"))
+	e.Start(":8080")
+}
+
+func createOrder(c echo.Context) error {
+	var req createReq
+	if err := c.Bind(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, err)
+	}
+	_ = c.QueryParam("dry")
+	_ = c.Request().Header.Get("X-Request-Id")
+	return c.JSON(http.StatusCreated, Order{})
+}
+
+func getOrder(c echo.Context) error {
+	if c.Param("id") == "" {
+		return echo.NewHTTPError(http.StatusNotFound, "no order")
+	}
+	return c.JSON(http.StatusOK, Order{})
+}
+"#,
+    );
+    dir.write(
+        "users/users.go",
+        r#"package users
+
+import "github.com/labstack/echo/v4"
+
+func Register(g *echo.Group) {
+	g.GET("/:id", get)
+}
+"#,
+    );
+    let s = scan(&dir);
+    assert_eq!(
+        routes(&s),
+        sorted(&[
+            "PUT /config",
+            "GET /health",
+            "DELETE /inline/x",
+            "POST /api/orders",
+            "GET /api/orders/{{id}}",
+            "GET /api/users/{{id}}",
+            "GET /ping",
+            "HEAD /ping",
+            "ANY /proxy/{{path}}",
+        ])
+    );
+    assert_eq!(
+        middleware(&s, "POST", "/api/orders"),
+        ["middleware.Logger()", "auth", "rateLimit"]
+    );
+    assert_eq!(
+        middleware(&s, "GET", "/api/users/{{id}}"),
+        ["middleware.Logger()", "auth"]
+    );
+
+    let create = &find(&s, "POST", "/api/orders").info;
+    assert_eq!(create.body.as_ref().unwrap().type_name, "createReq");
+    assert_eq!(query_names(find(&s, "POST", "/api/orders")), ["dry"]);
+    assert_eq!(create.headers, ["X-Request-Id"]);
+    assert_eq!(create.response.as_ref().unwrap().type_name, "Order");
+    let codes: Vec<u16> = create.statuses.iter().map(|c| c.code).collect();
+    assert_eq!(codes, [201, 400]);
+    let get = &find(&s, "GET", "/api/orders/{{id}}").info;
+    let codes: Vec<u16> = get.statuses.iter().map(|c| c.code).collect();
+    assert_eq!(codes, [200, 404]);
+}
+
+#[test]
+fn fiber_routes_groups_mounts_and_handlers() {
+    let dir = TempDir::new("fiber");
+    dir.write(
+        "main.go",
+        r#"package main
+
+import (
+	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v2/middleware/logger"
+	"example.com/svc/admin"
+)
+
+type createReq struct {
+	Name string `json:"name"`
+}
+
+type Order struct {
+	ID int `json:"id"`
+}
+
+func main() {
+	app := fiber.New()
+	app.Use(logger.New())
+	app.Get("/health", health)
+	app.Add(fiber.MethodPut, "/config", putConfig)
+	app.All("/files/+", files)
+	api := app.Group("/api", auth)
+	api.Post("/orders", rateLimit, createOrder)
+	api.Get("/orders/:id<int>/:part?", getOrder)
+	api.Route("/users", func(r fiber.Router) {
+		r.Get("/", listUsers)
+	})
+	micro := fiber.New()
+	micro.Get("/doe", doe)
+	app.Mount("/john", micro)
+	app.Mount("/admin", admin.New())
+	app.Listen(":3000")
+}
+
+func createOrder(c *fiber.Ctx) error {
+	var req createReq
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
+	}
+	_ = c.Query("dry")
+	_ = c.QueryInt("page")
+	_ = c.Get("X-Request-Id")
+	_ = cache.Get(c.Context(), "orders")
+	db.Delete(&Order{}, 1)
+	return c.Status(fiber.StatusCreated).JSON(Order{})
+}
+
+func getOrder(c *fiber.Ctx) error {
+	if missing {
+		return c.Status(fiber.StatusNotFound).JSON(Order{})
+	}
+	return c.JSON(Order{})
+}
+"#,
+    );
+    dir.write(
+        "admin/admin.go",
+        r#"package admin
+
+import "github.com/gofiber/fiber/v2"
+
+func New() *fiber.App {
+	app := fiber.New()
+	app.Get("/stats", stats)
+	return app
+}
+"#,
+    );
+    dir.write(
+        "v3/v3.go",
+        r#"package v3
+
+import "github.com/gofiber/fiber/v3"
+
+type loginReq struct {
+	Login string `json:"login"`
+}
+
+func Register(app *fiber.App) {
+	app.Add([]string{fiber.MethodGet, fiber.MethodPost}, "/v3/both", both)
+	app.Post("/v3/login", login)
+}
+
+func login(c fiber.Ctx) error {
+	var req loginReq
+	if err := c.Bind().Body(&req); err != nil {
+		return err
+	}
+	return c.JSON(req)
+}
+"#,
+    );
+    let s = scan(&dir);
+    assert!(s.warnings.is_empty(), "{:?}", s.warnings);
+    let want = sorted(&[
+        "GET /admin/stats",
+        "POST /api/orders",
+        "GET /api/orders/{{id}}/{{part}}",
+        "GET /api/users",
+        "PUT /config",
+        "ANY /files/{{path}}",
+        "GET /health",
+        "GET /john/doe",
+        "GET /v3/both",
+        "POST /v3/both",
+        "POST /v3/login",
+    ]);
+    assert_eq!(routes(&s), want);
+    assert_eq!(
+        middleware(&s, "POST", "/api/orders"),
+        ["logger.New()", "auth", "rateLimit"]
+    );
+
+    let create = &find(&s, "POST", "/api/orders").info;
+    assert_eq!(create.body.as_ref().unwrap().type_name, "createReq");
+    assert_eq!(
+        query_names(find(&s, "POST", "/api/orders")),
+        ["dry", "page"]
+    );
+    assert_eq!(create.headers, ["X-Request-Id"]);
+    assert_eq!(create.response.as_ref().unwrap().type_name, "Order");
+    let codes: Vec<u16> = create.statuses.iter().map(|c| c.code).collect();
+    assert_eq!(codes, [201, 400]);
+    let get = &find(&s, "GET", "/api/orders/{{id}}/{{part}}").info;
+    assert_eq!(get.response.as_ref().unwrap().type_name, "Order");
+    let codes: Vec<u16> = get.statuses.iter().map(|c| c.code).collect();
+    assert_eq!(codes, [200, 404]);
+
+    let login = &find(&s, "POST", "/v3/login").info;
+    assert_eq!(login.body.as_ref().unwrap().type_name, "loginReq");
+    assert_eq!(login.response.as_ref().unwrap().type_name, "loginReq");
 }

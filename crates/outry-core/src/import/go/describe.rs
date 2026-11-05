@@ -46,6 +46,9 @@ const QUERY_CALLS: &[&str] = &[
     "QueryArray",
     "GetQueryArray",
     "QueryParam",
+    "QueryInt",
+    "QueryBool",
+    "QueryFloat",
     "FormValue",
     "QueryParameter",
 ];
@@ -439,7 +442,13 @@ impl<'a> Describer<'a> {
             let first = args.named_child(0).and_then(|a| literal(a, src));
             if let Some(param) = first.filter(|p| is_param_name(p)) {
                 let operand = operand.trim_end();
+                // fiber: `c.Get("X-Id")` — заголовок запроса
+                let fiber_header = router == "fiber"
+                    && name == "Get"
+                    && !operand.contains(['.', '('])
+                    && !query_vars.iter().any(|v| v == operand);
                 if name == "Get" && operand.ends_with("Header")
+                    || fiber_header
                     || name == "GetHeader"
                     || name == "HeaderParameter"
                 {
@@ -483,7 +492,9 @@ impl<'a> Describer<'a> {
             if lname.contains("uri") || lname.contains("header") {
                 return;
             }
-            if !is_query && !tagged && !BODY_CALLS.iter().any(|w| lname.contains(w)) {
+            // fiber v3: `c.Bind().Body(&req)`, `c.Bind().JSON(&req)`
+            let binder = bind_chain(operand);
+            if !is_query && !tagged && !binder && !BODY_CALLS.iter().any(|w| lname.contains(w)) {
                 return;
             }
             // c.ShouldBindJSON(&req), а иначе — v.Bind(c), где v — объект-валидатор.
@@ -593,7 +604,9 @@ impl<'a> Describer<'a> {
         };
         let lname = name.to_ascii_lowercase();
         let encode = name == "Encode" && operand.contains("NewEncoder");
-        let json = lname.contains("json") && !BODY_CALLS.iter().any(|w| lname.contains(w));
+        let json = lname.contains("json")
+            && !BODY_CALLS.iter().any(|w| lname.contains(w))
+            && !bind_chain(operand);
         let entity = matches!(name, "WriteEntity" | "WriteHeaderAndEntity");
         if !encode && !json && !entity {
             return None;
@@ -601,6 +614,15 @@ impl<'a> Describer<'a> {
         let args: Vec<Node> = children(args).collect();
         let failed = |args: &[Node]| args.iter().any(|a| error_status(text(*a, src)));
         if failed(&args) {
+            return None;
+        }
+        // fiber: c.Status(fiber.StatusNotFound).JSON(err)
+        if let Some(status) = func
+            .child_by_field_name("operand")
+            .filter(|o| o.kind() == "call_expression")
+            .and_then(|o| o.child_by_field_name("arguments"))
+            && failed(&children(status).collect::<Vec<_>>())
+        {
             return None;
         }
         // c.Render(http.StatusNotFound, r.JSON(err))
@@ -1305,7 +1327,12 @@ fn status_const(name: &str) -> Option<u16> {
         .map(|&(_, c)| c)
 }
 
-/// Код ответа — ошибка: `http.StatusBadRequest`, `500`.
+/// Операнд — привязка fiber v3 `c.Bind()`: `.Body(&req)` читает тело, а `.JSON(&req)` — не ответ.
+fn bind_chain(operand: &str) -> bool {
+    operand.trim_end().ends_with("Bind()")
+}
+
+/// Код ответа — ошибка: `http.StatusBadRequest`, `fiber.StatusNotFound`, `500`.
 fn error_status(arg: &str) -> bool {
     const OK: &[&str] = &[
         "StatusOK",
@@ -1316,8 +1343,8 @@ fn error_status(arg: &str) -> bool {
         "StatusResetContent",
         "StatusPartialContent",
     ];
-    if let Some(name) = arg.strip_prefix("http.") {
-        return name.starts_with("Status") && !OK.contains(&name);
+    if let Some((_, name)) = arg.rsplit_once('.') {
+        return status_const(name).is_some() && !OK.contains(&name);
     }
     arg.parse::<u16>().is_ok_and(|n| n >= 400)
 }

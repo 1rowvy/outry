@@ -52,6 +52,8 @@ use crate::error::{Error, Result};
 pub const BUILTIN: &[(&str, &str)] = &[
     ("chi", include_str!("../../queries/chi.scm")),
     ("gin", include_str!("../../queries/gin.scm")),
+    ("echo", include_str!("../../queries/echo.scm")),
+    ("fiber", include_str!("../../queries/fiber.scm")),
     ("net/http", include_str!("../../queries/nethttp.scm")),
     ("go-zero", include_str!("../../queries/gozero.scm")),
     ("go-restful", include_str!("../../queries/restful.scm")),
@@ -267,7 +269,7 @@ struct Site {
 
 /// На чём вызван метод: цепочка вызовов `r.With(mw).Group("/x")` (диапазоны, снаружи внутрь)
 /// и переменная в её основании.
-#[derive(Default)]
+#[derive(Default, Clone)]
 struct Receiver {
     calls: Vec<(usize, usize)>,
     var: Option<String>,
@@ -297,7 +299,7 @@ enum Target {
 }
 
 /// Тело, ответ, query и заголовки из цепочки роута (`.Reads(T{}).Writes(T{})`).
-#[derive(Default)]
+#[derive(Default, Clone)]
 struct Declared {
     /// Байтовые диапазоны значений в файле роута
     body: Option<(usize, usize)>,
@@ -339,6 +341,7 @@ struct Mount {
     arg: Option<usize>,
 }
 
+#[derive(Clone)]
 struct RawRoute {
     site: Site,
     recv: Receiver,
@@ -531,6 +534,14 @@ impl Index {
             Some(&path_node) => {
                 let line = path_node.start_position().row + 1;
                 let Some(path) = ctx.eval(path_node) else {
+                    // `db.Get(ctx, key)`, `db.Delete(&T{}, id)` — не роут, а вызов, названный как
+                    // метод HTTP. У таких предупреждаем, только если в выражении есть строка.
+                    let verb = cap
+                        .get("method")
+                        .is_some_and(|n| n.kind() == "field_identifier");
+                    if verb && !text(path_node, src).contains(['"', '`']) {
+                        return;
+                    }
                     self.warnings.push(format!(
                         "{}:{line}: can't evaluate route path `{}`",
                         ctx.file.path.display(),
@@ -544,7 +555,9 @@ impl Index {
             None if !includes.is_empty() => (String::new(), cap["route"].start_position().row + 1),
             None => return,
         };
-        let mut method = cap.get("method").and_then(|&n| ctx.method(n));
+        // echo `e.Match([]string{"GET", "POST"}, …)`, fiber v3 `app.Add([]string{…}, …)`
+        let methods = cap.get("method").map_or(Vec::new(), |&n| ctx.methods(n));
+        let mut method = methods.first().cloned();
         // net/http: "GET /users/{id}"
         if let Some((m, rest)) = path.split_once(' ')
             && METHODS.contains(&m)
@@ -599,6 +612,12 @@ impl Index {
                 .flat_map(|&c| self.annotated_routes(ctx, c))
                 .collect()
         } else {
+            for m in methods.iter().skip(1) {
+                self.routes.push(RawRoute {
+                    method: Some(m.clone()),
+                    ..base.clone()
+                });
+            }
             self.routes.push(base);
             return;
         };
@@ -1472,6 +1491,31 @@ impl Ctx<'_> {
             }
             _ => None,
         }
+    }
+
+    /// Методы из `@method`: один или список `[]string{"GET", http.MethodPost}`.
+    fn methods(&self, node: Node) -> Vec<String> {
+        if node.kind() != "composite_literal" {
+            return self.method(node).into_iter().collect();
+        }
+        let mut out = Vec::new();
+        for el in node
+            .child_by_field_name("body")
+            .into_iter()
+            .flat_map(children)
+        {
+            let el = if el.kind() == "literal_element" {
+                el.named_child(0).unwrap_or(el)
+            } else {
+                el
+            };
+            if let Some(m) = self.method(el)
+                && !out.contains(&m)
+            {
+                out.push(m);
+            }
+        }
+        out
     }
 
     /// `Get` / `GET` / `"GET"` / `http.MethodGet` → `GET`, у beego ещё `NSGet`, `CtrlGet`,

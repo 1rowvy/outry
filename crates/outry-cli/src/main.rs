@@ -186,7 +186,7 @@ enum SecretCmd {
 
 #[derive(Subcommand)]
 enum ImportCmd {
-    /// Роуты из Go: chi, gin, net/http, go-zero, go-restful, beego, buffalo. Сканируется весь
+    /// Роуты из Go: chi, gin, echo, fiber, net/http, go-zero, go-restful, beego, buffalo. Сканируется весь
     /// каталог — роуты из других пакетов (r.Mount, users.Register(v1)) получают свои префиксы. Создаёт запросы для новых роутов,
     /// shape для типов ответов и показывает, чем существующие запросы расходятся с кодом.
     Go {

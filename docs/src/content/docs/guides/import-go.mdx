@@ -1,6 +1,6 @@
 ---
 title: Import routes from Go
-description: Generate .outry requests for every route of a Go service — chi, gin, net/http, go-zero, go-restful, beego, buffalo.
+description: Generate .outry requests for every route of a Go service — chi, gin, echo, fiber, net/http, go-zero, go-restful, beego, buffalo.
 ---
 
 Outry can read your Go service's source code, find the registered routes and create a `.outry` request
@@ -42,6 +42,8 @@ button next to **Requests**, or the **Routes** tab.
 |--------|--------------------|
 | [chi](https://github.com/go-chi/chi) | `r.Get/Post/…`, `r.Method("GET", …)`, `r.Handle`, `r.Route("/prefix", func(r chi.Router) {…})`, `r.Mount("/prefix", sub())`, `r.Mount("/prefix", subRouter)`, `r.With(mw).Get(…)`, `r.Use(mw)`, `r.Group(func(r chi.Router) {…})` |
 | [gin](https://github.com/gin-gonic/gin) | `r.GET/POST/…`, `r.Any`, `r.Handle("GET", …)`, `v1 := r.Group("/v1")` with nested groups, `r.Group("/v1").GET(…)`, middleware in `r.Group("/v1", mw)`, `r.GET("/x", mw, h)` and `r.Use(mw)` |
+| [echo](https://github.com/labstack/echo) | `e.GET/POST/…`, `e.Any`, `e.Add("GET", …)`, `e.Match([]string{"GET", "POST"}, …)` (a route per method), `g := e.Group("/v1", mw)` with nested groups, `e.Group("/v1").GET(…)`, middleware after the handler in `e.GET("/x", h, mw)` and `e.Use(mw)` |
+| [fiber](https://github.com/gofiber/fiber) | v2 and v3: `app.Get/Post/…`, `app.All`, `app.Add("GET", …)` / `app.Add([]string{…}, …)`, `api := app.Group("/api", mw)`, `app.Route("/x", func(r fiber.Router) {…})`, `app.Mount("/x", sub)` / `app.Use("/x", sub)`, `app.Mount("/x", admin.New())`, `app.Get("/x", mw, h)` and `app.Use(mw)` |
 | `net/http` | `mux.HandleFunc("GET /items/{id}", h)` (Go 1.22 patterns), `http.HandleFunc("/path", h)` |
 | [go-zero](https://github.com/zeromicro/go-zero) | `[]rest.Route{{Method: …, Path: …, Handler: …}}` in `server.AddRoutes` (the goctl-generated `routes.go`), fields in any order, `server.AddRoute(rest.Route{…})`; `rest.WithPrefix`, `rest.WithJwt` / `rest.WithSignature` and `rest.WithMiddlewares([]rest.Middleware{…}, …)` as middleware |
 | [go-restful](https://github.com/emicklei/go-restful) | `ws.Route(ws.GET("/{id}").To(h)…)`, `ws.Method("PUT").Path("/x")`, `ws.Path("/users")` as the prefix, `ws.Filter(mw)` and `.Filter(mw)` in the chain; body, response, query and headers come from `.Reads(T{})`, `.Writes(T{})`, `.Returns(200, "OK", T{})`, `.Param(ws.QueryParameter(…))` / `HeaderParameter` |
@@ -62,25 +64,27 @@ preview the file before creating it.
 ## Generated files
 
 Path parameters keep the router notation: `{id}`, `{id:[0-9]+}`, `{path...}`, `:id`, `:id:int`,
-`:id([0-9]+)` and `*path` all turn into `{id}` / `{path}` — [parameters](/outry/reference/outry-format/#parameters) of the request.
+`:id([0-9]+)`, `*path`, fiber's `:id?`, `:id<int>` and `+` all turn into `{id}` / `{path}` — [parameters](/outry/reference/outry-format/#parameters) of the request.
 
 Outry also reads the handler to show what the request expects:
 
 - **description** — the handler's doc comment, or `@Summary` / `@Description` from swag annotations;
 - **body** — the struct the request is decoded into: `json.NewDecoder(r.Body).Decode(&req)`,
-  `c.ShouldBindJSON(&req)`, `render.DecodeJSON`, your own `decodeJSON(r, &req)`, or a validator object
+  `c.ShouldBindJSON(&req)`, echo's `c.Bind(&req)`, fiber's `c.BodyParser(&req)` / `c.Bind().Body(&req)`,
+  `render.DecodeJSON`, your own `decodeJSON(r, &req)`, or a validator object
   with a `Bind` method. Fields come from `json` tags, `binding:"required"` / `validate:"required"` marks
   required ones, nested structs are listed with dots (`user.email`), and a comment after a field is kept;
-- **query** — `r.URL.Query().Get("page")`, `c.Query`, `c.DefaultQuery`, `c.QueryParam`, `r.FormValue`,
+- **query** — `r.URL.Query().Get("page")`, `c.Query`, `c.DefaultQuery`, `c.QueryParam`, `c.QueryInt`, `r.FormValue`,
   `req.QueryParameter`, `c.GetString` / `c.GetInt` in beego controllers and `c.ShouldBindQuery(&q)`
   (fields from `form` tags);
 - **form** — `c.PostForm`, `c.DefaultPostForm`, `r.PostFormValue` give a `form { … }` body; with a file
   (`c.FormFile("file")`, `r.FormFile`) it becomes `multipart { file: file("") }`;
-- **headers** — `r.Header.Get("X-Tenant-ID")`, `c.GetHeader`, `req.HeaderParameter`;
+- **headers** — `r.Header.Get("X-Tenant-ID")`, `c.GetHeader`, `c.Request().Header.Get` (echo), `c.Get` (fiber),
+  `req.HeaderParameter`;
 - go-zero's `httpx.Parse(r, &req)` splits one struct by tags: `form` → query, `header` → headers,
   `json` → body (`path` fields are path parameters);
 - **response** — the value of the first successful `json.NewEncoder(w).Encode(v)`, `c.JSON(200, v)`,
-  `render.JSON(w, r, v)`, your own `writeJSON(w, http.StatusOK, v)`, `httpx.OkJsonCtx(ctx, w, v)`,
+  fiber's `c.JSON(v)` / `c.Status(201).JSON(v)`, `render.JSON(w, r, v)`, your own `writeJSON(w, http.StatusOK, v)`, `httpx.OkJsonCtx(ctx, w, v)`,
   `resp.WriteEntity(v)`, `c.Render(200, r.JSON(v))` or beego's `c.Data["json"] = v`; responses with an
   error status and `gin.H` / maps are skipped. The request gets `expect { body matches Order }`, and the struct
   becomes a [shape](#response-shapes).
@@ -302,18 +306,18 @@ Routes are found by [tree-sitter queries](https://tree-sitter.github.io/tree-sit
 [`crates/outry-core/queries`](https://github.com/1rowvy/outry/tree/master/crates/outry-core/queries).
 To support another router, write your own query and pass it with `--query`:
 
-```scheme title="echo.scm"
-; outry: import github.com/labstack/echo
+```scheme title="hertz.scm"
+; outry: import github.com/cloudwego/hertz
 (call_expression
   function: (selector_expression
     operand: (_) @receiver
     field: (field_identifier) @method)
-  arguments: (argument_list . (_) @path (_) @handler .)
+  arguments: (argument_list . (_) @path (_)* @middleware (_) @handler .)
   (#any-of? @method "GET" "POST" "PUT" "PATCH" "DELETE")) @route
 ```
 
 ```sh
-outry import go . --query echo.scm
+outry import go . --query hertz.scm
 ```
 
 | Capture | Meaning |

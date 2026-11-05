@@ -65,10 +65,9 @@ $ outry run api
 
 ### 3. Stay in sync with the code
 
-Outry reads your Go service — chi, gin, `net/http`, go-zero, go-restful, beego or buffalo — or your Rust
-service on axum, and knows which
-handler each request belongs to: the struct the body is bound into, query parameters, headers, middleware and
-the type it responds with. Rename a field in Go, and the pull request says which requests are now wrong:
+Outry reads your Go service — chi, gin, echo, fiber, `net/http`, go-zero, go-restful, beego or buffalo — or
+your Rust service on axum, and knows which handler each request belongs to: the struct the body is bound
+into, query parameters, headers, middleware and the type it responds with. Rename a field in Go, and the pull request says which requests are now wrong:
 
 ```console
 $ outry check
