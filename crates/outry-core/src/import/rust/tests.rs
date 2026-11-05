@@ -4,8 +4,12 @@ use crate::import::{Plan, RouteInfo, plan};
 struct TempDir(PathBuf);
 
 impl TempDir {
+    /// Тесты идут параллельно и зовут `service()` каждый: у каждого вызова — своя папка.
     fn new(name: &str) -> TempDir {
-        let dir = std::env::temp_dir().join(format!("outry-rust-{name}-{}", std::process::id()));
+        static N: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let n = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let dir =
+            std::env::temp_dir().join(format!("outry-rust-{name}-{}-{n}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         TempDir(dir)
