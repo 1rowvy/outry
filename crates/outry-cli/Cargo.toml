@@ -21,7 +21,7 @@ reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tokio = { workspace = true, features = ["time"] }
-base64 = "0.22"
+base64 = "0.23"
 crossbeam-channel = "0.5"
 flate2 = "1"
 # `outry lsp`: протокол поверх stdio; lsp-types 0.95 — последняя с `url::Url` в типах.
